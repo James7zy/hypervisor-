@@ -1,0 +1,21 @@
+# Build outputs
+build/
+*.o
+*.elf
+*.bin
+*.map
+*.d
+
+# Kconfig
+.config
+.config.old
+
+# Editor
+*.swp
+*.swo
+.vscode/
+.idea/
+*~
+
+# OS
+.DS_Store
