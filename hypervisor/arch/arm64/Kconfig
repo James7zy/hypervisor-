@@ -1,0 +1,17 @@
+choice
+    prompt "Target architecture"
+    default ARCH_ARM64
+config ARCH_ARM64
+    bool "ARM64 (AArch64)"
+endchoice
+
+choice
+    prompt "Target board"
+    default BOARD_QEMU_VIRT
+config BOARD_QEMU_VIRT
+    bool "QEMU virt"
+    depends on ARCH_ARM64
+config BOARD_RK3588
+    bool "Rockchip RK3588 (placeholder, M4)"
+    depends on ARCH_ARM64
+endchoice

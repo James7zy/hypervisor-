@@ -1,0 +1,3 @@
+mainmenu "Hypervisor configuration"
+
+source "hypervisor/Kconfig"

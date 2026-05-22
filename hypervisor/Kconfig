@@ -1,0 +1,5 @@
+source "hypervisor/arch/arm64/Kconfig"
+
+config DEBUG_UART
+    bool "Early UART output"
+    default y
