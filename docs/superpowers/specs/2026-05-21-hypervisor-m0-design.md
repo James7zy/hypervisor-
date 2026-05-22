@@ -54,7 +54,7 @@ complete; code is minimal-and-real.
   5. sets `SP_EL2`,
   6. loads `VBAR_EL2` with a panic-stub vector table,
   7. masks DAIF,
-  8. transfers to C and prints `"[hv] Hello from EL2, CurrentEL=0x8\n"` over PL011,
+  8. transfers to C and prints `"[hv] Hello from EL2 on qemu_virt, CurrentEL=0x8\n"` over PL011,
   9. halts in `wfi` forever.
 - Complete ACRN-style directory skeleton (with `.gitkeep` for empty subtrees).
 - A board subdirectory `arch/arm64/board/qemu_virt/` providing platform
@@ -129,7 +129,7 @@ hypervisor/                          # project root
 │   ├── hwmgmt/                      # platform-independent HW mgmt — .gitkeep
 │   │
 │   ├── lib/                         # kernel libc subset
-│   │   ├── string.c                 # memset, memcpy (used by head.S BSS clear fallback)
+│   │   ├── string.c                 # memset only (BSS clear in head.S; memcpy deferred to M1)
 │   │   └── print.c                  # printk → uart_putc
 │   │
 │   ├── debug/                       # debug facilities
@@ -182,7 +182,7 @@ README/LICENSE/.gitignore):
 | `hypervisor/arch/arm64/board/qemu_virt/linker.lds` | Linker script |
 | `hypervisor/boot/main.c` | `hypervisor_main()` |
 | `hypervisor/debug/uart_pl011.c` | PL011 driver |
-| `hypervisor/lib/string.c` | `memset`, `memcpy` |
+| `hypervisor/lib/string.c` | `memset` (`memcpy` deferred to M1) |
 | `hypervisor/lib/print.c` | Minimal `printk` |
 | `hypervisor/include/types.h` | Primitive typedefs |
 | `hypervisor/include/printk.h` | `printk` prototype |
@@ -268,9 +268,8 @@ SECTIONS {
 ### 4.5 Board info contract (`board/qemu_virt/board.h`)
 
 ```c
-#define BOARD_UART_BASE   0x09000000UL   /* PL011 @ QEMU virt */
-#define BOARD_UART_CLK_HZ 24000000U
-#define BOARD_DRAM_BASE   0x40000000UL
+#define BOARD_UART_BASE  0x09000000UL   /* PL011 @ QEMU virt */
+#define BOARD_DRAM_BASE  0x40000000UL
 ```
 
 For M0 the macros above **are** the entire board contract. `board.c`
@@ -279,19 +278,18 @@ typed `struct board_info` is deferred to M1 when more fields make it
 worthwhile.
 
 To keep `hypervisor/boot/main.c` (arch-independent) free of arch/board
-headers, the chain is:
+headers, the arch sub-Makefile passes include paths in this order:
 
 ```
-main.c  →  #include <board.h>           (arch-independent indirection)
-                ↓
-arch/arm64/include/board.h              (per-arch shim, M0 contains:)
-    #include <asm/../board/qemu_virt/board.h>   /* selected via -I flag */
+-Ihypervisor/arch/arm64/board/$(BOARD)   ← searched first
+-Ihypervisor/arch/arm64/include          ← searched second
 ```
 
-The arch sub-Makefile passes
-`-Ihypervisor/arch/arm64/board/$(BOARD) -Ihypervisor/arch/arm64/include`
-so `main.c` resolves `<board.h>` to the current board's header without
-referencing the board name in its source.
+So `main.c`'s `#include <board.h>` resolves **directly** to
+`arch/arm64/board/qemu_virt/board.h` — the board directory wins because
+it is listed first. `arch/arm64/include/board.h` is an intentionally
+empty placeholder (include guard only); it is never reached by this
+lookup and contains no `#include` forwarding.
 
 **No magic numbers are allowed inside `uart_pl011.c`** — the driver
 receives the base via `uart_init`.
@@ -338,7 +336,7 @@ the compiler must not emit instructions that touch those registers.
 ```make
 ARCH          ?= arm64
 BOARD         ?= qemu_virt
-CROSS_COMPILE ?= aarch64-linux-gnu-
+CROSS_COMPILE ?= aarch64-none-linux-gnu-
 ```
 
 `.config` is parsed by a tiny Makefile rule that converts `CONFIG_FOO=y`
@@ -412,8 +410,8 @@ Notes:
 
 ### 5.6 Toolchain requirements
 
-- `aarch64-linux-gnu-gcc` ≥ 10 (pinned in `README.md`)
-- `aarch64-linux-gnu-binutils`
+- `aarch64-none-linux-gnu-gcc` ≥ 10 (pinned in `README.md`)
+- `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
 
 ---
@@ -424,12 +422,12 @@ M0 verification is **manual**. No CI, no smoke script. Manual
 checklist (also reproduced near the end of `README.md`):
 
 - [ ] `make ARCH=arm64 BOARD=qemu_virt` builds cleanly with zero warnings (`-Werror`).
-- [ ] `aarch64-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
-- [ ] `aarch64-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
 - [ ] `make run` produces the banner within 3 seconds:
 
   ```
-  [hv] Hello from EL2, CurrentEL=0x8
+  [hv] Hello from EL2 on qemu_virt, CurrentEL=0x8
   ```
 
 - [ ] Banner's `CurrentEL` field reads `0x8` (i.e. `CurrentEL` register low 4 bits are `0b1000`).
@@ -441,7 +439,7 @@ checklist (also reproduced near the end of `README.md`):
 
 `scripts/run-qemu.sh` accepts `QEMU_EXTRA_ARGS="-s -S"` to start a
 gdbstub on port 1234. Connect with
-`aarch64-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
+`aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
 Useful but optional.
 
 ---

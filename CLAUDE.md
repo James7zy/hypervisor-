@@ -17,20 +17,20 @@ make run                # invoke scripts/run-qemu.sh (QEMU)
 make clean              # remove build/
 ```
 
-Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-linux-gnu-`
+Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-linux-gnu-`
 
 **Toolchain required:**
-- `aarch64-linux-gnu-gcc` ≥ 10
-- `aarch64-linux-gnu-binutils`
+- `aarch64-none-linux-gnu-gcc` ≥ 10
+- `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
 
-Exit QEMU with `Ctrl-A x`. GDB attach: `QEMU_EXTRA_ARGS="-s -S" make run`, then `aarch64-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
+Exit QEMU with `Ctrl-A x`. GDB attach: `QEMU_EXTRA_ARGS="-s -S" make run`, then `aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
 
 ## Verification (no CI, no test framework)
 
 There is no automated test suite. Verification is:
 1. **Build check**: `make` must succeed with zero warnings (`-Werror` is on).
-2. **Static inspection**: `aarch64-linux-gnu-readelf -h build/hypervisor.elf` — entry point must be `0x40080000`; `.text` section must start at `0x40080000`.
+2. **Static inspection**: `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` — entry point must be `0x40080000`; `.text` section must start at `0x40080000`.
 3. **Run + observe**: `make run` must print `[hv] Hello from EL2, CurrentEL=0x8` within 3 seconds.
 
 ## Architecture
@@ -40,11 +40,11 @@ There is no automated test suite. Verification is:
 ```
 hypervisor/boot/main.c          ← arch-independent C entry (hypervisor_main)
     ↓ #include <board.h>        ← resolved via -I path ordering (no arch name in source)
-hypervisor/arch/arm64/board/qemu_virt/board.h   ← BOARD_UART_BASE, BOARD_UART_CLK_HZ, BOARD_DRAM_BASE
+hypervisor/arch/arm64/board/qemu_virt/board.h   ← BOARD_UART_BASE, BOARD_DRAM_BASE, board_name[]
 hypervisor/arch/arm64/boot/head.S               ← _start, EL2 assert, BSS clear, VBAR, DAIF, → C
 hypervisor/debug/uart_pl011.c   ← PL011 protocol driver (receives base via uart_init(base))
 hypervisor/lib/print.c          ← minimal printk → uart_putc
-hypervisor/lib/string.c         ← freestanding memset/memcpy
+hypervisor/lib/string.c         ← freestanding memset (memcpy added in M1)
 hypervisor/arch/arm64/cpu/cpu.c ← read_currentel(), cpu_wfi(), cpu_relax()
 ```
 
@@ -60,7 +60,7 @@ The arch sub-Makefile passes `-Ihypervisor/arch/arm64/board/$(BOARD) -Ihyperviso
 - **No magic numbers in `uart_pl011.c`**: driver receives base from `uart_init`.
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
-- **`.config` is hand-written** (no Kconfig parser). The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
+- **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
 
 ### Compiler flags (all translation units)
 

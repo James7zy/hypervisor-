@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Produce a bootable `hypervisor.elf` that QEMU virt enters in EL2 and that prints `[hv] Hello from EL2, CurrentEL=0x8` over PL011 UART, with the full ACRN-style directory skeleton in place.
+**Goal:** Produce a bootable `hypervisor.elf` that QEMU virt enters in EL2 and that prints `[hv] Hello from EL2 on qemu_virt, CurrentEL=0x8` over PL011 UART, with the full ACRN-style directory skeleton in place.
 
 **Architecture:** Bottom-up. First lay out the empty ACRN-style directory tree, then add headers, then libs (`memset`/`memcpy`, minimal `printk`), then the PL011 driver, then the C entry, then the AArch64 boot assembly + linker script, then the Makefile/Kconfig that ties everything into `make` and `make run`. Final task is the end-to-end manual acceptance against the spec checklist.
 
-**Tech Stack:** C (freestanding), AArch64 GAS assembly, GNU `make`, hand-written `.config` (no Kconfig parser), `aarch64-linux-gnu-gcc` ≥ 10, `qemu-system-aarch64` ≥ 6.0.
+**Tech Stack:** C (freestanding), AArch64 GAS assembly, GNU `make`, hand-written `.config` (no Kconfig parser), `aarch64-none-linux-gnu-gcc` ≥ 10, `qemu-system-aarch64` ≥ 6.0.
 
 **Spec reference:** `docs/superpowers/specs/2026-05-21-hypervisor-m0-design.md`
 
@@ -59,7 +59,7 @@ You may be entirely new to ARM hypervisors and to this codebase. Here is what yo
 | `hypervisor/arch/arm64/include/board.h` | T2 | Per-arch shim — forwards to active board |
 | `hypervisor/arch/arm64/board/qemu_virt/board.h` | T2 | `BOARD_UART_BASE` etc. |
 | `hypervisor/arch/arm64/board/qemu_virt/board.c` | T2 | TU marker |
-| `hypervisor/lib/string.c` | T3 | `memset`, `memcpy` |
+| `hypervisor/lib/string.c` | T3 | `memset` (`memcpy` deferred to M1) |
 | `hypervisor/lib/print.c` | T4 | Minimal `printk` |
 | `hypervisor/debug/uart_pl011.c` | T5 | PL011 driver |
 | `hypervisor/boot/main.c` | T6 | `hypervisor_main()` |
@@ -158,22 +158,22 @@ make run
 Expected output:
 
 ```
-[hv] Hello from EL2, CurrentEL=0x8
+[hv] Hello from EL2 on qemu_virt, CurrentEL=0x8
 ```
 
 Exit QEMU with `Ctrl-A x`.
 
 ## Requirements
 
-- `aarch64-linux-gnu-gcc` ≥ 10
-- `aarch64-linux-gnu-binutils`
+- `aarch64-none-linux-gnu-gcc` ≥ 10
+- `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
 
 ## Acceptance checklist (M0)
 
 - [ ] `make` builds cleanly with zero warnings.
-- [ ] `aarch64-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
-- [ ] `aarch64-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
 - [ ] `make run` prints the banner within 3 seconds.
 - [ ] Banner's `CurrentEL` reads `0x8`.
 - [ ] Temporarily flipping the EL assertion in `head.S` to demand EL3
@@ -322,9 +322,10 @@ int printk(const char *fmt, ...);
 #define BOARD_QEMU_VIRT_H
 
 /* PL011 base on QEMU virt machine. See qemu/hw/arm/virt.c. */
-#define BOARD_UART_BASE   0x09000000UL
-#define BOARD_UART_CLK_HZ 24000000U
-#define BOARD_DRAM_BASE   0x40000000UL
+#define BOARD_UART_BASE  0x09000000UL   /* PL011 @ QEMU virt */
+#define BOARD_DRAM_BASE  0x40000000UL
+
+extern const char board_name[];
 
 #endif /* BOARD_QEMU_VIRT_H */
 ```
@@ -372,14 +373,12 @@ remains exactly as the spec listed it.)
 
 ```c
 /* SPDX-License-Identifier: TBD */
+#include <board.h>
 
-/*
- * Translation-unit marker. M0 holds nothing here; M1 introduces a
- * typed `struct board_info` constant.
- */
+const char board_name[] = "qemu_virt";
 ```
 
-This file exists to keep `arch/arm64/Makefile`'s object list non-empty for the board directory and to give M1 a place to add `struct board_info` without restructuring.
+`board_name` is printed in the M0 banner. Declaring it here (rather than as a macro) means it has a real address, can be passed to `%s`, and gives `board.c` genuine M0 content.
 
 - [ ] **Step 7: Compile-check the header chain**
 
@@ -388,7 +387,7 @@ when both arch and board directories are on the include path, with the
 board directory listed first.
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib \
   -Ihypervisor/include \
   -Ihypervisor/arch/arm64/board/qemu_virt \
   -Ihypervisor/arch/arm64/include \
@@ -424,9 +423,9 @@ documented placeholder for M1+ board glue."
 
 ---
 
-## Task 3: lib/string.c — `memset` and `memcpy`
+## Task 3: lib/string.c — `memset`
 
-**Goal:** Smallest possible freestanding `memset`/`memcpy`. Used by `head.S`'s BSS clear fallback and by `print.c`.
+**Goal:** Smallest possible freestanding `memset`. Used by `head.S` to zero BSS. `memcpy` is not called anywhere in M0 and is deferred to M1.
 
 **Files:**
 - Create: `hypervisor/lib/string.c`
@@ -445,24 +444,14 @@ void *memset(void *dst, int c, size_t n)
     }
     return dst;
 }
-
-void *memcpy(void *dst, const void *src, size_t n)
-{
-    unsigned char *d = (unsigned char *)dst;
-    const unsigned char *s = (const unsigned char *)src;
-    while (n--) {
-        *d++ = *s++;
-    }
-    return dst;
-}
 ```
 
-Note: byte-at-a-time on purpose. `-mstrict-align` (T11) forbids unaligned word access, and M0 does not have a working `memcpy` benchmark — correctness over speed.
+Note: byte-at-a-time on purpose. `-mstrict-align` forbids unaligned word access; correctness over speed for M0.
 
 - [ ] **Step 2: Compile-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -Wall -Wextra -Werror -O2 -g \
   -Ihypervisor/include \
@@ -474,7 +463,7 @@ Expected: silent success. Discard `/tmp/string.o`.
 - [ ] **Step 3: Verify no FP/SIMD instructions were emitted**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -O2 -Ihypervisor/include \
   -S -o /tmp/string.s hypervisor/lib/string.c
@@ -488,7 +477,7 @@ Expected: `OK` (grep returns 1).
 
 ```bash
 git add hypervisor/lib/string.c
-git commit -m "feat(lib): add minimal memset/memcpy (byte-at-a-time)"
+git commit -m "feat(lib): add minimal memset (byte-at-a-time)"
 ```
 
 ---
@@ -657,7 +646,7 @@ done:
 - [ ] **Step 2: Compile-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -Wall -Wextra -Werror -O2 -g \
   -Ihypervisor/include \
@@ -671,7 +660,7 @@ If GCC complains about `stdarg.h` (it shouldn't — `stdarg.h` is one of the hea
 - [ ] **Step 3: Verify no FP/SIMD emission**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -O2 -Ihypervisor/include \
   -S -o /tmp/print.s hypervisor/lib/print.c
@@ -798,7 +787,7 @@ void uart_putc(char c)
 - [ ] **Step 2: Compile-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -Wall -Wextra -Werror -O2 -g \
   -Ihypervisor/include \
@@ -852,7 +841,7 @@ void hypervisor_main(uintptr_t dtb_phys)
     uart_init(BOARD_UART_BASE);
 
     u64 el = read_currentel();
-    printk("[hv] Hello from EL2, CurrentEL=0x%lx\n", el);
+    printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name, el);
 
     for (;;) {
         cpu_wfi();
@@ -865,7 +854,7 @@ Note: `read_currentel` reads the raw `CurrentEL` system register (returns `0x8` 
 - [ ] **Step 2: Compile-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -Wall -Wextra -Werror -O2 -g \
   -Ihypervisor/include \
@@ -949,7 +938,7 @@ void cpu_relax(void)
 - [ ] **Step 4: Compile-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -fno-pic -fno-stack-protector -mgeneral-regs-only -mstrict-align \
   -Wall -Wextra -Werror -O2 -g \
   -Ihypervisor/include \
@@ -962,7 +951,7 @@ Expected: silent success.
 - [ ] **Step 5: Verify the assembly reads `CurrentEL` (not something else)**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -O2 -Ihypervisor/include -Ihypervisor/arch/arm64/include \
   -S -o /tmp/cpu.s hypervisor/arch/arm64/cpu/cpu.c
 grep -i 'mrs.*currentel' /tmp/cpu.s
@@ -1081,9 +1070,9 @@ panic_vector:
 - [ ] **Step 2: Assemble-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -c -o /tmp/vectors.o hypervisor/arch/arm64/boot/vectors.S
-aarch64-linux-gnu-objdump -d /tmp/vectors.o | head -40
+aarch64-none-linux-gnu-objdump -d /tmp/vectors.o | head -40
 rm /tmp/vectors.o
 ```
 
@@ -1092,10 +1081,10 @@ Expected: a disassembly showing the `hv_vectors` symbol followed by 16 `b` instr
 - [ ] **Step 3: Verify alignment**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -c -o /tmp/vectors.o hypervisor/arch/arm64/boot/vectors.S
-aarch64-linux-gnu-readelf -s /tmp/vectors.o | grep hv_vectors
-aarch64-linux-gnu-objdump -h /tmp/vectors.o | grep '.text.vectors'
+aarch64-none-linux-gnu-readelf -s /tmp/vectors.o | grep hv_vectors
+aarch64-none-linux-gnu-objdump -h /tmp/vectors.o | grep '.text.vectors'
 rm /tmp/vectors.o
 ```
 
@@ -1217,9 +1206,9 @@ secondary_park:
 - [ ] **Step 2: Assemble-check**
 
 ```bash
-aarch64-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
+aarch64-none-linux-gnu-gcc -ffreestanding -nostdlib -nostartfiles \
   -c -o /tmp/head.o hypervisor/arch/arm64/boot/head.S
-aarch64-linux-gnu-objdump -d /tmp/head.o | head -60
+aarch64-none-linux-gnu-objdump -d /tmp/head.o | head -60
 rm /tmp/head.o
 ```
 
@@ -1292,7 +1281,7 @@ SECTIONS
 This step actually requires every object from earlier tasks. Just verify the script parses standalone:
 
 ```bash
-aarch64-linux-gnu-ld --verbose -T hypervisor/arch/arm64/board/qemu_virt/linker.lds \
+aarch64-none-linux-gnu-ld --verbose -T hypervisor/arch/arm64/board/qemu_virt/linker.lds \
     2>&1 | head -5
 ```
 
@@ -1448,7 +1437,7 @@ hv-includes := \
 
 ARCH          ?= arm64
 BOARD         ?= qemu_virt
-CROSS_COMPILE ?= aarch64-linux-gnu-
+CROSS_COMPILE ?= aarch64-none-linux-gnu-
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
@@ -1474,12 +1463,11 @@ include hypervisor/arch/$(ARCH)/Makefile
 INCLUDES := $(hv-includes) $(arch-includes)
 
 # ----- .config -> -DCONFIG_* flags -----
-ifeq ($(wildcard .config),.config)
+ifeq ($(wildcard .config),)
+$(error .config not found. Run 'make defconfig' first.)
+endif
 CONFIG_DEFS := $(shell \
     sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' .config)
-else
-CONFIG_DEFS :=
-endif
 
 CFLAGS  += $(CONFIG_DEFS) $(INCLUDES)
 ASFLAGS += $(CONFIG_DEFS) $(INCLUDES)
@@ -1545,8 +1533,8 @@ If the build fails on missing `__bss_start`/`__bss_end`/`__stack_top`, recheck t
 - [ ] **Step 11: Verify ELF entry and `.text` placement**
 
 ```bash
-aarch64-linux-gnu-readelf -h build/hypervisor.elf | grep -E 'Entry point|Type'
-aarch64-linux-gnu-objdump -h build/hypervisor.elf | grep '\.text'
+aarch64-none-linux-gnu-readelf -h build/hypervisor.elf | grep -E 'Entry point|Type'
+aarch64-none-linux-gnu-objdump -h build/hypervisor.elf | grep '\.text'
 ```
 
 Expected:
@@ -1585,8 +1573,8 @@ Expected: zero warnings, builds cleanly.
 - [ ] **Step 2: Inspect ELF**
 
 ```bash
-aarch64-linux-gnu-objdump -h build/hypervisor.elf | grep '\.text'
-aarch64-linux-gnu-readelf -h build/hypervisor.elf | grep 'Entry point'
+aarch64-none-linux-gnu-objdump -h build/hypervisor.elf | grep '\.text'
+aarch64-none-linux-gnu-readelf -h build/hypervisor.elf | grep 'Entry point'
 ```
 
 Expected:
@@ -1602,7 +1590,7 @@ make run
 Expected (within ~3 seconds):
 
 ```
-[hv] Hello from EL2, CurrentEL=0x8
+[hv] Hello from EL2 on qemu_virt, CurrentEL=0x8
 ```
 
 Then the hypervisor halts in `wfi` — terminal stays attached, no further output.
