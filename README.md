@@ -27,15 +27,15 @@ Exit QEMU with `Ctrl-A x`.
 
 ## Requirements
 
-- `aarch64-linux-gnu-gcc` >= 10
-- `aarch64-linux-gnu-binutils`
+- `aarch64-none-linux-gnu-gcc` >= 10
+- `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` >= 6.0
 
 ## Acceptance checklist (M0)
 
 - [ ] `make` builds cleanly with zero warnings.
-- [ ] `aarch64-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
-- [ ] `aarch64-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
+- [ ] `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
 - [ ] `make run` prints the banner within 3 seconds.
 - [ ] Banner's `CurrentEL` reads `0x8`.
 - [ ] Temporarily flipping the EL assertion in `head.S` to demand EL3
