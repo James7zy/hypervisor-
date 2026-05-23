@@ -33,14 +33,14 @@ Exit QEMU with `Ctrl-A x`.
 
 ## Acceptance checklist (M0)
 
-- [ ] `make` builds cleanly with zero warnings.
-- [ ] `aarch64-none-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
-- [ ] `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
-- [ ] `make run` prints the banner within 3 seconds.
-- [ ] Banner's `CurrentEL` reads `0x8`.
-- [ ] Temporarily flipping the EL assertion in `head.S` to demand EL3
+- [x] `make` builds cleanly with zero warnings.
+- [x] `aarch64-none-linux-gnu-objdump -h build/hypervisor.elf` shows `.text` at `0x40080000`.
+- [x] `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` shows entry == `0x40080000`.
+- [x] `make run` prints the banner within 3 seconds.
+- [x] Banner's `CurrentEL` reads `0x8`.
+- [x] Temporarily flipping the EL assertion in `head.S` to demand EL3
       triggers the `!EL` early-panic path. Revert after verifying.
-- [ ] `Ctrl-A x` exits QEMU cleanly.
+- [x] `Ctrl-A x` exits QEMU cleanly.
 
 ## License
 
