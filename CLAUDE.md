@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, and Xen. The directory layout mirrors ACRN's `hypervisor/` structure.
+A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
+ mirrors ACRN's `hypervisor/` structure.
 
 **Current milestone: M0 — Hello EL2** (entering EL2, printing banner over PL011 UART, halting).
 
