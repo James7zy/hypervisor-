@@ -17,5 +17,11 @@ build/
 .idea/
 *~
 
+# Superpowers brainstorm sessions
+.superpowers/
+
+# Claude Code local settings
+.claude/
+
 # OS
 .DS_Store

@@ -113,7 +113,6 @@ The following production hypervisor source trees are available in the parent dir
 |------|---------|-------|
 | `../acrn-hypervisor` | [ACRN](https://github.com/projectacrn/acrn-hypervisor) | Type-1, x86 + ARM64; primary structural inspiration for this repo's layout |
 | `../xvisor` | [Xvisor](https://github.com/avpatel/xvisor-next) | Type-1, ARM-first; reference for Stage-2 MMU and vCPU design |
-| `../hvisor` | [hvisor](https://github.com/syswonder/hvisor) | Rust-based, ARM64; reference for zone/partition model |
 | `../hypervisor` | local Rust hypervisor | Rust-based hypervisor (NOT a copy of this project); reference for Rust idioms applied to bare-metal hypervisor design |
 
 **When to consult these:** look up an existing implementation before designing any new subsystem (Stage-2 MMU, vGIC, PSCI, virtio, etc.). Prefer reading the smallest relevant file rather than loading entire trees.

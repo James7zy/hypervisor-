@@ -16,6 +16,8 @@ void hypervisor_main(uintptr_t dtb_phys)
     u64 el = read_currentel();
     printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name, el);
 
+    printk("hello hypervisor \n");
+
     for (;;)
         cpu_wfi();
 }
