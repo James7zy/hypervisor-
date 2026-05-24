@@ -47,7 +47,6 @@ void uart_init(uintptr_t base)
 
 void uart_putc(char c)
 {
-    while (mmio_read32(uart_base_addr + UART_FR) & FR_TXFF)
-        ;
+    while (mmio_read32(uart_base_addr + UART_FR) & FR_TXFF);
     mmio_write32(uart_base_addr + UART_DR, (u32)(unsigned char)c);
 }
