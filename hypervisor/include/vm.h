@@ -2,6 +2,7 @@
 #ifndef HV_VM_H
 #define HV_VM_H
 
+#ifndef __ASSEMBLER__
 #include <types.h>
 #include <board.h>
 
@@ -31,6 +32,15 @@ struct hv_ctx {
     u64 sp;   /* offset 0x060 */
 };
 
+extern struct vm g_vm;
+
+extern void vcpu_run(struct vcpu *vcpu);
+extern void hv_restore(void);
+
+void vm_init(void);
+void vm_run(void);
+#endif /* !__ASSEMBLER__ */
+
 #ifdef __ASSEMBLER__
 #define VCPU_X0         0x000
 #define VCPU_SP_EL1     0x0F8
@@ -41,14 +51,6 @@ struct hv_ctx {
 #define HV_LR           0x058
 #define HV_SP           0x060
 #define HV_CTX_SIZE     0x068
-#endif
-
-extern struct vm g_vm;
-
-extern void vcpu_run(struct vcpu *vcpu);
-extern void hv_restore(void);
-
-void vm_init(void);
-void vm_run(void);
+#endif /* __ASSEMBLER__ */
 
 #endif /* HV_VM_H */
