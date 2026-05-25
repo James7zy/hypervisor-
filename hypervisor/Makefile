@@ -3,7 +3,9 @@ hv-objs := \
     boot/main.o \
     debug/uart_pl011.o \
     lib/string.o \
-    lib/print.o
+    lib/print.o \
+    common/vm/vm.o
 
 hv-includes := \
-    -Ihypervisor/include
+    -Ihypervisor/include \
+    -Ihypervisor/common/vm
