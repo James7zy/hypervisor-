@@ -3,6 +3,7 @@
 #include <uart.h>
 #include <printk.h>
 #include <board.h>
+#include <vm.h>
 
 extern u64 read_currentel(void);
 extern void cpu_wfi(void);
@@ -23,6 +24,9 @@ void hypervisor_main(uintptr_t dtb_phys)
 
     u64 el = read_currentel();
     printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name, el);
+
+    vm_init();
+    vm_run();
 
     for (;;)
         cpu_wfi();

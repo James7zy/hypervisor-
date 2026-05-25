@@ -24,7 +24,8 @@ g_hv_ctx:
     .globl vcpu_run
 vcpu_run:
     /* 1. Save hypervisor callee-saved registers */
-    adr_l   x9, g_hv_ctx
+    adrp    x9, g_hv_ctx
+    add     x9, x9, :lo12:g_hv_ctx
     stp     x19, x20, [x9, #0x00]
     stp     x21, x22, [x9, #0x10]
     stp     x23, x24, [x9, #0x20]
@@ -78,7 +79,8 @@ el1_sync_handler:
     str     x0, [sp, #-16]!
 
     /* Load &g_vm.vcpu.regs (first field of first field = same address as g_vm) */
-    adr_l   x0, g_vm
+    adrp    x0, g_vm
+    add     x0, x0, :lo12:g_vm
 
     /* Save x1–x30 (genuine guest values, untouched since exception fired) */
     str     x1,       [x0, #0x08]
@@ -115,7 +117,8 @@ el1_sync_handler:
     bl      handle_exit
 
     /* Eret-back path (future milestones): restore and return to guest */
-    adr_l   x0, g_vm
+    adrp    x0, g_vm
+    add     x0, x0, :lo12:g_vm
     ldr     x1, [x0, #VCPU_ELR]
     msr     elr_el2, x1
     ldr     x1, [x0, #VCPU_SPSR]
@@ -146,7 +149,8 @@ el1_sync_handler:
 /* ------------------------------------------------------------------ */
     .globl hv_restore
 hv_restore:
-    adr_l   x0, g_hv_ctx
+    adrp    x0, g_hv_ctx
+    add     x0, x0, :lo12:g_hv_ctx
     ldr     x1,       [x0, #HV_SP]
     mov     sp, x1
     ldp     x19, x20, [x0, #0x00]

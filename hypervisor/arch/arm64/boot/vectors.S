@@ -21,7 +21,7 @@ hv_vectors:
     VECTOR_ENTRY panic_vector
     VECTOR_ENTRY panic_vector
     /* Lower EL, AArch64 */
-    VECTOR_ENTRY panic_vector
+    VECTOR_ENTRY el1_sync_handler
     VECTOR_ENTRY panic_vector
     VECTOR_ENTRY panic_vector
     VECTOR_ENTRY panic_vector
