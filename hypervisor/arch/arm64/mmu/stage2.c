@@ -6,7 +6,9 @@
 /*
  * VTCR_EL2: T0SZ=25 (39-bit IPA), SL0=1 (L1 start), IRGN0/ORGN0=1 (WB RA-WA),
  * SH0=3 (Inner Shareable), TG0=0 (4KB granule), PS=2 (40-bit PA).
+ * Bit 31 is RES1 per ARM DDI0487 VTCR_EL2 definition.
  */
+#define VTCR_RES1   (1ULL  << 31)
 #define VTCR_T0SZ   (25ULL << 0)
 #define VTCR_SL0    (1ULL  << 6)
 #define VTCR_IRGN0  (1ULL  << 8)
@@ -15,7 +17,7 @@
 #define VTCR_TG0    (0ULL  << 14)
 #define VTCR_PS     (2ULL  << 16)
 #define VTCR_EL2_VALUE \
-    (VTCR_T0SZ | VTCR_SL0 | VTCR_IRGN0 | VTCR_ORGN0 | VTCR_SH0 | VTCR_TG0 | VTCR_PS)
+    (VTCR_RES1 | VTCR_T0SZ | VTCR_SL0 | VTCR_IRGN0 | VTCR_ORGN0 | VTCR_SH0 | VTCR_TG0 | VTCR_PS)
 
 /* Stage-2 Level-1 block descriptor fields */
 #define S2_BLOCK        0x1ULL
@@ -27,7 +29,8 @@
 #define S2_AF           (1ULL   << 10)  /* Access Flag */
 #define S2_XN           (1ULL   << 54)  /* Execute-never */
 
-static u64 l1_table[512];   /* 4 KB, BSS */
+/* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero. */
+static u64 l1_table[512] __attribute__((aligned(4096)));
 
 void stage2_init(struct vcpu *vcpu, u32 vmid)
 {
