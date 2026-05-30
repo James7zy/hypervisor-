@@ -45,7 +45,13 @@ ASFLAGS += $(CONFIG_DEFS) $(INCLUDES)
 ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs))
 LD_SCRIPT := $(arch-ldscript)
 
-.PHONY: all run clean defconfig menuconfig help
+SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -Wall -Wextra -Werror -O2 -g
+SVM_ELF    := $(BUILD_DIR)/svm/svm.elf
+SVM_BIN    := $(BUILD_DIR)/svm/svm.bin
+
+HOST_CC    := cc
+
+.PHONY: all run clean defconfig menuconfig help svm check-offsets test-qemu test
 
 all: $(ELF) $(BIN)
 
@@ -63,6 +69,27 @@ $(OBJ_DIR)/%.o: hypervisor/%.c
 $(OBJ_DIR)/%.o: hypervisor/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c -o $@ $<
+
+$(SVM_ELF): tests/svm/svm_main.c tests/svm/svm.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -T tests/svm/svm.lds -o $@ $<
+
+$(SVM_BIN): $(SVM_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+svm: $(SVM_BIN)
+
+$(BUILD_DIR)/check_offsets: tests/check_offsets.c
+	@mkdir -p $(BUILD_DIR)
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -o $@ $<
+
+check-offsets: $(BUILD_DIR)/check_offsets
+	$(BUILD_DIR)/check_offsets
+
+test-qemu: all svm
+	SVM_BIN=$(SVM_BIN) sh tests/run_svm_test.sh
+
+test: check-offsets test-qemu
 
 run: $(ELF)
 	./scripts/run-qemu.sh
