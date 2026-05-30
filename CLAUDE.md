@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
  mirrors ACRN's `hypervisor/` structure.
 
-**Current milestone: M0 — Hello EL2** (entering EL2, printing banner over PL011 UART, halting).
+**Current milestone: M2 — Multi-vCPU + interrupts**
+
+Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch).
 
 ## Build Commands
 
@@ -96,9 +98,9 @@ QEMU → _start (head.S)
 
 | Milestone | Status | Goal |
 |---|---|---|
-| M0 — Hello EL2 | **current** | Enter EL2, print banner |
-| M1 — Bare-metal guest | future | Stage-2 MMU, minimal vCPU |
-| M2 — Multi-vCPU + interrupts | future | vGICv3, virtual timer, PSCI |
+| M0 — Hello EL2 | **done** | Enter EL2, print banner |
+| M1 — Bare-metal guest | **done** | Stage-2 MMU, minimal vCPU |
+| M2 — Multi-vCPU + interrupts | **current** | vGICv3, virtual timer, PSCI |
 | M3 — Linux guest | future | Boot Linux to shell, virtio-console |
 | M4 — RK3588 port | future | Run on real RK3588 hardware |
 
