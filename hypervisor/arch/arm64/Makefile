@@ -10,6 +10,7 @@ arch-objs := \
 
 arch-includes := \
     -Ihypervisor/arch/arm64/board/$(BOARD) \
-    -Ihypervisor/arch/arm64/include
+    -Ihypervisor/arch/arm64/include \
+    -Ihypervisor/arch/arm64/mmu
 
 arch-ldscript := hypervisor/arch/arm64/board/$(BOARD)/linker.lds

@@ -20,6 +20,7 @@ BIN       := $(BUILD_DIR)/hypervisor.bin
 CFLAGS := \
     -ffreestanding -nostdlib -nostartfiles \
     -fno-pic -fno-stack-protector \
+    -fno-strict-aliasing \
     -mgeneral-regs-only -mstrict-align \
     -Wall -Wextra -Werror -O2 -g
 
@@ -45,7 +46,8 @@ ASFLAGS += $(CONFIG_DEFS) $(INCLUDES)
 ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs))
 LD_SCRIPT := $(arch-ldscript)
 
-SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -Wall -Wextra -Werror -O2 -g
+SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
+              -Wall -Wextra -Werror -O2 -g
 SVM_ELF    := $(BUILD_DIR)/svm/svm.elf
 SVM_BIN    := $(BUILD_DIR)/svm/svm.bin
 
@@ -86,10 +88,17 @@ $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 check-offsets: $(BUILD_DIR)/check_offsets
 	$(BUILD_DIR)/check_offsets
 
+$(BUILD_DIR)/check_offsets_target.o: tests/check_offsets_target.c
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
+	@echo "PASS: cross-compiled struct offsets match assembly macros"
+
 test-qemu: all svm
 	SVM_BIN=$(SVM_BIN) sh tests/run_svm_test.sh
 
-test: check-offsets test-qemu
+test: check-offsets check-offsets-target test-qemu
 
 run: $(ELF)
 	./scripts/run-qemu.sh

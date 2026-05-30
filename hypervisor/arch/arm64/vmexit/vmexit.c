@@ -12,7 +12,7 @@ static void handle_hvc(struct vcpu_regs *regs)
     u32 func_id = (u32)regs->x[0];
     u8  svc     = (u8)(func_id >> 24);
 
-    if (svc == 0x84) {
+    if (svc == 0x84 || svc == 0xC4) {   /* 32-bit or 64-bit PSCI */
         /* M2: psci_handle(regs); return; */
         regs->x[0] = SMCCC_NOT_SUPPORTED;
         return;

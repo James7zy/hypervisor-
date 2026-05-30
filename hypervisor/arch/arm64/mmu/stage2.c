@@ -48,6 +48,7 @@ void stage2_init(struct vcpu *vcpu, u32 vmid)
 void stage2_activate(const struct vcpu *vcpu)
 {
     asm volatile(
+        "dsb ish\n"         /* DDI0487 D5.7.2: page table writes must reach TLB walker */
         "msr vtcr_el2,  %0\n"
         "msr vttbr_el2, %1\n"
         "isb\n"

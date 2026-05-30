@@ -3,7 +3,7 @@
 #include <printk.h>
 #include <vm.h>
 #include "vm_config.h"
-#include "../../../arch/arm64/mmu/stage2.h"
+#include "stage2.h"
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -39,4 +39,5 @@ void vm_run(void)
     stage2_activate(&g_vm.vcpu);
     vcpu_run(&g_vm.vcpu);
     /* Returns here after hv_restore() is called from HVC handler */
+    /* TODO M2: clear HCR_EL2.VM (bit 0) before scheduling next vCPU */
 }
