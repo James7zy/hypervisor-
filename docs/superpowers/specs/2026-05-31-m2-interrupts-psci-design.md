@@ -2,7 +2,7 @@
 
 - **Date**: 2026-05-31
 - **Project**: `hypervisor-`
-- **Milestone**: M2 — Multi-vCPU + Interrupts
+- **Milestone**: M2 — Interrupts + PSCI
 - **Target platform**: QEMU `virt` (AArch64), GICv3, PL011 UART, Cortex-A72
 - **Status**: Design approved, ready for implementation planning
 
@@ -36,10 +36,10 @@ fires, the hypervisor takes it at EL2 and injects it as a virtual IRQ, the guest
 own EL1 IRQ handler runs, and the guest then signals completion via HVC — all
 observable on the UART.
 
-Despite the milestone title "Multi-vCPU + Interrupts", M2 delivers the **interrupt
-and PSCI** half on a single vCPU. True multi-vCPU bring-up (PSCI `CPU_ON`, SMP
-scheduling) is deferred to M3; M2 only ensures its data structures and code do not
-*preclude* it (see §7).
+M2 deliberately runs on a **single vCPU**. Multi-vCPU bring-up (PSCI `CPU_ON`, SMP
+scheduling) was originally bundled into this milestone's name but is deferred to M3,
+where it couples naturally with the Linux guest; M2 only ensures its data structures
+and code do not *preclude* it (see §7).
 
 ### Roadmap context
 
@@ -224,25 +224,38 @@ QEMU `virt` GICv3 bases (in `board.h`): `GICD = 0x08000000`, `GICR CPU0 =
 3. PPI 27 → Group 1 (`GICR_IGROUPR0`), Non-Secure (`GICR_IGRPMODR0`), priority
    `0xA0` (`GICR_IPRIORITYR`, byte-addressed), enabled (`GICR_ISENABLER0`).
 4. `ICC_SRE_EL2 = 0xF` (SRE | DIL | DFB | Enable); `isb`.
-5. `ICC_PMR_EL1 = 0xFF`, `ICC_IGRPEN1_EL1 = 1` so EL2 can ack/EOI.
+5. `ICC_PMR_EL1 = 0xFF`, `ICC_IGRPEN1_EL1 = 1`, **`ICC_CTLR_EL1.EOImode = 1`**
+   (split priority-drop / deactivate — required so EL2 can priority-drop a
+   *forwarded* interrupt without deactivating it; see §5.1). Setting the physical
+   EOImode at EL2 does not affect the guest's virtual CPU interface, which is
+   governed independently by `ICH_VMCR_EL2.VEOIM`.
 
 API: `void gic_init(void)`, `u32 gic_ack_irq(void)` (reads `ICC_IAR1_EL1`, masks to
-24-bit INTID), `void gic_eoi_irq(u32 intid)` (priority drop `ICC_EOIR1_EL1` +
-deactivate `ICC_DIR_EL1`).
+24-bit INTID), `void gic_priority_drop(u32 intid)` (`ICC_EOIR1_EL1`),
+`void gic_deactivate(u32 intid)` (`ICC_DIR_EL1`). With `EOImode=1` the two are
+separate operations; the HW-forwarded timer path uses **priority-drop only**.
 
 ### 4.3 vGICv3 (`vgic.c`)
 
-State lives in `struct vcpu` (§4.6). Four operations, all keyed on `struct vcpu *`
-so they are ready for per-vCPU scheduling later:
+State lives in `struct vcpu` (§4.6). All operations are keyed on `struct vcpu *` so
+they are ready for per-vCPU scheduling later. The vGIC exposes **two injection
+paths**, because a hypervisor needs both (see §5.1):
 
+- `vgic_inject_sw(vcpu, vintid, prio)` — a **purely virtual** interrupt with no
+  physical source (`HW=0`). `ICH_LR` = State=Pending (`bit 62`) | Group 1 (`bit 60`)
+  | priority (`[55:48]`) | vINTID (`[31:0]`). Reserved for future sources (virtio,
+  SGIs); **not** used by the M2 timer path.
+- `vgic_inject_hw(vcpu, vintid, pintid, prio)` — a **hardware-forwarded** interrupt
+  (`HW=1`, bit 61) carrying the physical INTID in the pINTID field (`[44:32]`). Used
+  for the timer PPI so the guest's deactivate of the *virtual* interrupt deactivates
+  the *physical* INTID via the LR linkage.
 - `vgic_init(vcpu)` — `ICH_HCR_EL2.En=1`, `ICH_VMCR_EL2=0` (the guest configures
   VPMR/VENG1 itself via `ICC_*` writes), all LRs cleared; programs the registers.
-- `vgic_inject(vcpu, intid, prio)` — builds an `ICH_LR0` value with State=Pending
-  (`bit 62`), Group 1 (`bit 60`), priority (`[55:48]`), vINTID (`[31:0]`), stores it
-  in `vcpu->ich_lr[0]` and writes `ICH_LR0_EL2`. No `isb` — the caller's `eret`
-  synchronises delivery.
 - `vgic_save(vcpu)` / `vgic_restore(vcpu)` — read/write `ICH_HCR_EL2`,
   `ICH_VMCR_EL2`, `ICH_LR0..LR3` to/from the vcpu struct.
+
+Both inject functions write `ICH_LR0_EL2` and store into `vcpu->ich_lr[0]`; no `isb`
+— the caller's `eret` synchronises delivery.
 
 ### 4.4 EL2 IRQ handler (`irq_handler.c` + `irq_handler_asm.S`)
 
@@ -251,13 +264,20 @@ so they are ready for per-vCPU scheduling later:
 The C handler `el2_irq_handler()`:
 
 ```
-intid = gic_ack_irq()
+intid = gic_ack_irq()                         # ICC_IAR1 → phys INTID 27 now Active
 if intid == BOARD_VTIMER_IRQ:
-    vgic_inject(&g_vm.vcpu, 27, 0xA0)   # pending Group-1 vIRQ
-    gic_eoi_irq(intid)
+    vgic_inject_hw(&g_vm.vcpu, 27, 27, 0xA0)  # HW=1: vINTID = pINTID = 27
+    gic_priority_drop(intid)                  # ICC_EOIR1 only — do NOT deactivate
 else:
-    printk("unexpected INTID"); gic_eoi_irq(intid)
+    printk("unexpected INTID")
+    gic_priority_drop(intid); gic_deactivate(intid)
 ```
+
+The physical INTID 27 is deliberately left **Active** across the guest window: a
+level-triggered timer line that is deactivated while still asserted re-pends
+immediately and, being routed to EL2, storms the guest before it can run (§5.1).
+The guest's deactivate of the *virtual* interrupt releases the physical INTID
+through the `HW=1` linkage.
 
 ### 4.5 Virtual timer (`vtimer.c`)
 
@@ -306,23 +326,37 @@ assembly offset macros change** — the M1 `vmexit_asm.S` contract is untouched.
 Each entry records the decision *as made* in the plan, the rejected alternative, and
 the condition under which the decision must be revisited.
 
-### 5.1 Single list-register injection vs full distributor emulation
+### 5.1 Single list register; software vs hardware-forwarded injection
 
-**Decision:** Inject the one virtual interrupt directly into `ICH_LR0_EL2`; the
-guest drives its CPU interface through the `ICC_*` system registers, which the
-hardware vGIC handles without trapping.
+**Decision:** Keep a single active list register (`ICH_LR0`) and no distributor MMIO
+emulation, but support **both** injection encodings: software (`HW=0`) for purely
+virtual sources, and **hardware-forwarded (`HW=1`)** for interrupts that originate
+from a real physical INTID. The M2 timer PPI uses the **HW=1** path.
 
-**Rejected:** Trap-and-emulate the guest's `GICD_*` / `GICR_*` MMIO accesses and
-maintain a software distributor model.
+**Rejected:** (a) Software injection only — see the storm below. (b) Full
+`GICD_*`/`GICR_*` MMIO trap-and-emulate.
 
-**Why:** M2 delivers exactly one interrupt source (the timer PPI). A single LR is
-sufficient and exercises the real GICv3 virtualization hardware with minimal code.
-Full MMIO emulation is a large subsystem whose only consumer is an unmodified guest
-OS.
+**Why HW=1 for the timer:** The EL1 virtual-timer PPI (INTID 27) is
+**level-sensitive** — its line stays asserted until the guest writes `CNTV_CTL`.
+With software injection the EL2 handler would have to deactivate the physical INTID
+at the GIC, but the still-asserted line re-pends it immediately. Because INTID 27 is
+routed to EL2 (`HCR_EL2.IMO=1`) and an EL2-targeted interrupt preempts a lower EL
+*regardless of that EL's `PSTATE.I`*, the `eret` to EL1 is taken straight back into
+EL2 before the guest executes a single instruction — a re-pend storm in which the
+guest never reaches its handler to disarm the timer. Hardware forwarding breaks the
+loop: EL2 only **priority-drops**, the physical INTID stays **Active** (so it cannot
+re-pend), and the guest's deactivate of the *virtual* interrupt releases the
+physical one through the LR's `HW`/pINTID linkage. This requires
+`ICC_CTLR_EL1.EOImode = 1` at EL2 (§4.2).
 
-**Revisit when:** M3 boots Linux, which programs the distributor via MMIO and uses
-many INTIDs — that requires a real distributor model and LR allocation/overflow
-handling across `ICH_LR0..LRn`.
+**Why keep software injection too:** future virtual sources (virtio devices,
+SGIs/IPIs) have no physical INTID to forward and must be injected purely in
+software. Adding `vgic_inject_sw` now fixes the API shape so M3 adds *sources*, not
+*signatures*.
+
+**Revisit when:** M3 boots Linux — many INTIDs and MMIO distributor programming
+require a real distributor model and multi-LR (`ICH_LR0..LRn`) allocation/overflow
+handling.
 
 ### 5.2 Hypervisor-owned physical GIC vs guest passthrough
 
@@ -432,7 +466,13 @@ the entire physical-IRQ → EL2 → inject → EL1-delivery chain end to end.
 The design keeps SMP bring-up additive rather than a rewrite:
 
 - `g_hv_ctx` (in `vmexit_asm.S`) and `g_vm` (in `vm.c` / `irq_handler.c`) are
-  single instances today; M3 turns them into per-CPU / per-vCPU arrays.
+  single instances today. Making them per-CPU/per-vCPU is **not** just array
+  indexing: the exception entry stubs (`el1_sync_handler`, `el1_irq_handler_asm`)
+  resolve the vCPU via a fixed `adrp g_vm`, and on SMP an exception can fire on any
+  physical CPU. M3 must introduce a per-physical-CPU **"current vCPU" pointer**
+  (idiomatically `TPIDR_EL2`, loaded in `vcpu_run` and read at the top of every
+  stub) to replace the fixed symbol. The C-level `struct vcpu *` signatures are
+  already shaped for this — the work is in the asm entry paths, not the signatures.
 - PSCI `CPU_ON` already exists as a dispatch case returning `NOT_SUPPORTED` with an
   "M3" comment — M3 fills it in.
 - `vgic_init/inject/save/restore` already take `struct vcpu *`, so per-vCPU vGIC
