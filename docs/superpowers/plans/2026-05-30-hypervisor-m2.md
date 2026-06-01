@@ -1,5 +1,20 @@
 # Hypervisor M2 — Interrupts + PSCI Implementation Plan
 
+> **⚠️ SUPERSEDED (2026-06-01).** The combined M2 was split into **M1.5 / M2 / M2.5**
+> (see the specs dated 2026-06-01). This plan's tasks map to the new milestones:
+> - **M1.5 (PSCI):** Tasks 1–2, plus the PSCI dispatch wiring in Task 7.
+> - **M2 (vGIC software injection):** Task 5 (struct vcpu + vGIC core, *software inject
+>   only*) + the `ICH_*`/`ICC_SRE` sysreg aliases from Task 3 + a software-injection
+>   test guest. No physical GIC, no `+0x480` vector, no EL2 DAIF change.
+> - **M2.5 (timer + GIC + HW-forwarding):** Tasks 3–4 (physical GIC), 6 (vtimer), 7–8
+>   (EL2 IRQ entry + DAIF unmask), the HW-forwarding (`vgic_inject_hw`, `EOImode=1`),
+>   and the timer test (Task 10). **ADR-0001 applies here.**
+>
+> The code blocks below remain a useful reference but reflect the *old combined*
+> design (e.g. they predate the `vgic_inject_sw` / `vgic_inject_hw` split and still
+> show `vgic_inject` + `gic_eoi_irq`). Generate each milestone's real plan from its
+> 2026-06-01 spec via writing-plans when implementation begins.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Enable the SVM to receive a virtual timer interrupt delivered via the vGICv3, and respond to PSCI queries, producing observable output from both sides.

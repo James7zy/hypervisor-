@@ -1,5 +1,10 @@
 # Forward the virtual-timer PPI with ICH_LR.HW=1, do not deactivate it at EL2
 
+> **Status:** Accepted. **Milestone: M2.5** (physical timer + GIC + HW-forwarding).
+> Originally written for the combined M2; that milestone was split on 2026-06-01 and
+> this decision now belongs to M2.5. Not relevant to M2 (vGIC software injection),
+> which uses `vgic_inject_sw` and takes no physical interrupt.
+
 The EL1 virtual-timer interrupt (INTID 27) is level-sensitive: its line stays
 asserted until the guest writes `CNTV_CTL`. If the EL2 IRQ handler deactivates it at
 the GIC after injecting the virtual interrupt, the still-asserted line re-pends it
