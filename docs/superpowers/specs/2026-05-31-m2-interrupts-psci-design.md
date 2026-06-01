@@ -14,6 +14,19 @@
 > disagree, the plan is the implementation source of truth and this spec should be
 > corrected to match.
 
+> **⚠️ SUPERSEDED — pending re-split (decided 2026-06-01).** A grilling session
+> concluded this single milestone is too big to land/verify in one step. M2 is being
+> decomposed into smaller, each-independently-observable milestones:
+>
+> | New milestone | Scope | Source of this content |
+> |---|---|---|
+> | **M1.5 — PSCI** | `VERSION`/`FEATURES`/`CPU_OFF`/`SYSTEM_OFF` over the M1 HVC path (no GIC/timer) | §2.1, §4.7, §5.5 |
+> | **M2 — vGIC software injection** | guest `HVC "inject vIRQ"` → `vgic_inject_sw` (HW=0) → guest EL1 handler. **No** physical GIC init, **no** timer, **no** HW-forwarding, **no** `EOImode`, **no** storm. | §3.4, §4.3 (sw path), §4.6 |
+> | **M2.5 — physical timer + GIC + HW-forwarding** | `gic_init`, `vtimer_init`, `vgic_inject_hw` (HW=1). **ADR-0001 belongs here.** | §4.2, §4.4, §4.5, §5.1, §5.3, §5.4 |
+>
+> Until the re-split lands, this doc still describes the *old* combined M2. The
+> implementation plan and ADR-0001 are likewise pending re-scope.
+
 ---
 
 ## 1. Purpose & Positioning
