@@ -29,6 +29,9 @@ _Static_assert(offsetof(struct vcpu_regs, elr_el2)  == VCPU_ELR,       "VCPU_ELR
 _Static_assert(offsetof(struct vcpu_regs, spsr_el2) == VCPU_SPSR,      "VCPU_SPSR mismatch");
 _Static_assert(offsetof(struct vcpu, hcr_el2)       == VCPU_HCR_EL2,   "VCPU_HCR_EL2 mismatch");
 _Static_assert(offsetof(struct vcpu, vttbr_el2)     == VCPU_VTTBR_EL2, "VCPU_VTTBR_EL2 mismatch");
+_Static_assert(offsetof(struct vcpu, ich_hcr_el2)   == 0x120,          "ich_hcr_el2 offset mismatch");
+_Static_assert(offsetof(struct vcpu, ich_vmcr_el2)  == 0x128,          "ich_vmcr_el2 offset mismatch");
+_Static_assert(offsetof(struct vcpu, ich_lr)        == 0x130,          "ich_lr offset mismatch");
 _Static_assert(offsetof(struct hv_ctx, lr)          == HV_LR,          "HV_LR mismatch");
 _Static_assert(offsetof(struct hv_ctx, sp)          == HV_SP,          "HV_SP mismatch");
 _Static_assert(sizeof(struct hv_ctx)                == HV_CTX_SIZE,    "HV_CTX_SIZE mismatch");

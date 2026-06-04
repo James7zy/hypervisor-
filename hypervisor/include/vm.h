@@ -17,6 +17,9 @@ struct vcpu {
     struct vcpu_regs regs;   /* MUST be first */
     u64 hcr_el2;             /* offset 0x110 */
     u64 vttbr_el2;           /* offset 0x118 */
+    u64 ich_hcr_el2;         /* offset 0x120 */
+    u64 ich_vmcr_el2;        /* offset 0x128 */
+    u64 ich_lr[4];           /* offset 0x130 (LR0..LR3, 0x130..0x14F) */
 };
 
 struct vm_config;
