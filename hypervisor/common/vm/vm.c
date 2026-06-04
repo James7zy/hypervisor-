@@ -4,6 +4,7 @@
 #include <vm.h>
 #include "vm_config.h"
 #include "stage2.h"
+#include <vgic.h>
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -30,6 +31,8 @@ void vm_init(void)
 
     stage2_init(&g_vm.vcpu, (u32)svm_config.vmid);
 
+    vgic_init(&g_vm.vcpu);
+
     printk("[hv] SVM: launching VMID=%u entry=0x%lx\n",
            (unsigned)svm_config.vmid, svm_config.entry);
 }
@@ -37,6 +40,7 @@ void vm_init(void)
 void vm_run(void)
 {
     stage2_activate(&g_vm.vcpu);
+    vgic_restore(&g_vm.vcpu);
     vcpu_run(&g_vm.vcpu);
     /* Returns here after hv_restore() is called from HVC handler */
     /* TODO M2: clear HCR_EL2.VM (bit 0) before scheduling next vCPU */

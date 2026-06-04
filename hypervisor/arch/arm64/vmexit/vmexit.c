@@ -4,6 +4,7 @@
 #include <vm.h>
 #include <hypercall.h>
 #include <psci.h>
+#include <vgic.h>
 
 /* Defined in vmexit_asm.S; does not return */
 extern void hv_restore(void);
@@ -19,6 +20,10 @@ static void handle_hvc(struct vcpu_regs *regs)
     }
 
     switch (func_id) {
+    case HC_INJECT_TEST:
+        vgic_inject_sw(&g_vm.vcpu, (u32)regs->x[1], 0xA0);
+        printk("[hv] SVM HVC: inject vINTID=%u\n", (unsigned)regs->x[1]);
+        break;
     case HC_GUEST_DONE:
         printk("[hv] SVM HVC: done (x1=0x%lx)\n", regs->x[1]);
         hv_restore();   /* no return */
