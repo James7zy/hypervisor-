@@ -50,10 +50,12 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 SVM_ELF    := $(BUILD_DIR)/svm/svm.elf
 SVM_BIN    := $(BUILD_DIR)/svm/svm.bin
+SVM2_ELF   := $(BUILD_DIR)/svm2/svm2.elf
+SVM2_BIN   := $(BUILD_DIR)/svm2/svm2.bin
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm check-offsets test-qemu test
+.PHONY: all run clean defconfig menuconfig help svm svm2 check-offsets test-qemu test-qemu-svm2 test
 
 all: $(ELF) $(BIN)
 
@@ -81,6 +83,19 @@ $(SVM_BIN): $(SVM_ELF)
 
 svm: $(SVM_BIN)
 
+$(SVM2_ELF): tests/svm2/svm2_main.c tests/svm2/svm2_vectors.S tests/svm2/svm2.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -T tests/svm2/svm2.lds -o $@ \
+	      tests/svm2/svm2_main.c tests/svm2/svm2_vectors.S
+
+$(SVM2_BIN): $(SVM2_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+svm2: $(SVM2_BIN)
+
+test-qemu-svm2: all svm2
+	SVM_BIN=$(SVM2_BIN) sh tests/run_svm2_test.sh
+
 $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 	@mkdir -p $(BUILD_DIR)
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -o $@ $<
@@ -98,7 +113,7 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 test-qemu: all svm
 	SVM_BIN=$(SVM_BIN) sh tests/run_svm_test.sh
 
-test: check-offsets check-offsets-target test-qemu
+test: check-offsets check-offsets-target test-qemu test-qemu-svm2
 
 run: $(ELF)
 	./scripts/run-qemu.sh
