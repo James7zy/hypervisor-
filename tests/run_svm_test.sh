@@ -24,7 +24,7 @@ check() {
 
 check "Hello from EL2"
 check "SVM: launching VMID="
-check "SVM HVC: done"
+check "SVM HVC: done (x1=0x10001)"
 
 if [ "${FAILURES}" -gt 0 ]; then
     printf "\n--- QEMU output ---\n%s\n---\n" "${OUTPUT}"
