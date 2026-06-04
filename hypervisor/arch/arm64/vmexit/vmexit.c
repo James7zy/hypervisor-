@@ -3,6 +3,7 @@
 #include <printk.h>
 #include <vm.h>
 #include <hypercall.h>
+#include <psci.h>
 
 /* Defined in vmexit_asm.S; does not return */
 extern void hv_restore(void);
@@ -13,8 +14,7 @@ static void handle_hvc(struct vcpu_regs *regs)
     u8  svc     = (u8)(func_id >> 24);
 
     if (svc == 0x84 || svc == 0xC4) {   /* 32-bit or 64-bit PSCI */
-        /* M2: psci_handle(regs); return; */
-        regs->x[0] = SMCCC_NOT_SUPPORTED;
+        psci_handle(regs);
         return;
     }
 

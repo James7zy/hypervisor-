@@ -4,8 +4,10 @@ hv-objs := \
     debug/uart_pl011.o \
     lib/string.o \
     lib/print.o \
-    common/vm/vm.o
+    common/vm/vm.o \
+    common/psci/psci.o
 
 hv-includes := \
     -Ihypervisor/include \
-    -Ihypervisor/common/vm
+    -Ihypervisor/common/vm \
+    -Ihypervisor/common/psci

@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: TBD */
+#ifndef HV_PSCI_H
+#define HV_PSCI_H
+
+#include <vm.h>   /* struct vcpu_regs */
+
+/* PSCI function IDs (Arm DEN0022; SMC32 unless suffixed _64). */
+#define PSCI_VERSION       0x84000000U
+#define PSCI_CPU_OFF       0x84000002U
+#define PSCI_CPU_ON_32     0x84000003U
+#define PSCI_SYSTEM_OFF    0x84000008U
+#define PSCI_SYSTEM_RESET  0x84000009U
+#define PSCI_FEATURES      0x8400000AU
+#define PSCI_CPU_ON_64     0xC4000003U
+
+/* Version word: major 1 (bits 31:16), minor 1 (bits 15:0) => PSCI v1.1. */
+#define PSCI_VERSION_1_1   0x00010001U
+
+/* Return codes. NOT_SUPPORTED is -1, sign-extended into the 64-bit reg. */
+#define PSCI_RET_SUCCESS        0ULL
+#define PSCI_RET_NOT_SUPPORTED  (~0ULL)
+
+/* Dispatch a PSCI call. regs->x[0] holds the function ID on entry; the
+ * result (for calls that return) is written back into regs->x[0]. The
+ * power-down calls (CPU_OFF/SYSTEM_OFF/SYSTEM_RESET) do not return. */
+void psci_handle(struct vcpu_regs *regs);
+
+#endif /* HV_PSCI_H */
