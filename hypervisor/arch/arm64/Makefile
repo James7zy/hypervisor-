@@ -8,12 +8,14 @@ arch-objs := \
     arch/arm64/vmexit/vmexit.o \
     arch/arm64/vmexit/vmexit_asm.o \
     arch/arm64/irq/vgic.o \
-    arch/arm64/irq/gic_v3.o
+    arch/arm64/irq/gic_v3.o \
+    arch/arm64/timer/vtimer.o
 
 arch-includes := \
     -Ihypervisor/arch/arm64/board/$(BOARD) \
     -Ihypervisor/arch/arm64/include \
     -Ihypervisor/arch/arm64/mmu \
-    -Ihypervisor/arch/arm64/irq
+    -Ihypervisor/arch/arm64/irq \
+    -Ihypervisor/arch/arm64/timer
 
 arch-ldscript := hypervisor/arch/arm64/board/$(BOARD)/linker.lds
