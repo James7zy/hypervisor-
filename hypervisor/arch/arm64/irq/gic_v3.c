@@ -1,0 +1,80 @@
+/* SPDX-License-Identifier: TBD */
+/*
+ * Physical GICv3 driver (QEMU virt, single CPU).
+ *
+ * The hypervisor owns the physical GIC; the guest sees only the virtual CPU
+ * interface (ICC_* redirected to ICV_* by the hardware). M2.5 enables just
+ * enough of the distributor/redistributor to deliver the virtual-timer PPI
+ * (INTID 27) to EL2, then hardware-forwards it (see vgic_inject_hw / ADR-0001).
+ */
+#include <types.h>
+#include <board.h>
+#include <printk.h>
+#include <asm/sysreg.h>
+#include <gic_v3.h>
+
+static inline void mmio_write32(unsigned long addr, u32 val)
+{
+    *(volatile u32 *)addr = val;
+}
+
+static inline u32 mmio_read32(unsigned long addr)
+{
+    return *(volatile u32 *)addr;
+}
+
+static inline void mmio_write8(unsigned long addr, u8 val)
+{
+    *(volatile u8 *)addr = val;
+}
+
+void gic_init(void)
+{
+    const unsigned long dist = BOARD_GIC_DIST_BASE;
+    const unsigned long rd   = BOARD_GIC_RDIST_BASE;
+    const unsigned long sgi  = rd + GICR_SGI_OFFSET;
+    const u32 ppi = BOARD_VTIMER_IRQ;
+
+    /* 1. Distributor: affinity routing + Group 1 NS. */
+    mmio_write32(dist + GICD_CTLR, GICD_CTLR_ARE_NS | GICD_CTLR_ENGRP1NS);
+
+    /* 2. Wake CPU0 redistributor: clear ProcessorSleep, wait ChildrenAsleep=0. */
+    mmio_write32(rd + GICR_WAKER,
+                 mmio_read32(rd + GICR_WAKER) & ~GICR_WAKER_PROC_SLEEP);
+    while (mmio_read32(rd + GICR_WAKER) & GICR_WAKER_CHILD_ASLEEP)
+        ;
+
+    /* 3. Configure the virtual-timer PPI in the SGI/PPI frame:
+     *    Group 1 NS, priority 0xA0, enabled. */
+    mmio_write32(sgi + GICR_IGROUPR0,
+                 mmio_read32(sgi + GICR_IGROUPR0) | (1U << ppi));
+    mmio_write8(sgi + GICR_IPRIORITYR + ppi, 0xA0);
+    mmio_write32(sgi + GICR_ISENABLER0, (1U << ppi));
+
+    /* 4. EL2 physical CPU interface. */
+    SYSREG_WRITE(ICC_SRE_EL2, 0xFULL);          /* SRE|DFB|DIB|Enable */
+    asm volatile("isb");
+    SYSREG_WRITE(ICC_PMR_EL1, 0xFFULL);         /* allow all priorities */
+    SYSREG_WRITE(ICC_IGRPEN1_EL1, 1ULL);        /* enable Group 1 */
+    SYSREG_WRITE(ICC_CTLR_EL1,
+                 SYSREG_READ(ICC_CTLR_EL1) | ICC_CTLR_EL1_EOIMODE);
+    asm volatile("isb");
+
+    printk("[hv] GIC: initialized (dist=0x%lx rdist=0x%lx PPI=%u)\n",
+           dist, rd, (unsigned)ppi);
+}
+
+u32 gic_ack_irq(void)
+{
+    return (u32)(SYSREG_READ(ICC_IAR1_EL1) & 0xFFFFFFULL);
+}
+
+void gic_priority_drop(u32 intid)
+{
+    SYSREG_WRITE(ICC_EOIR1_EL1, intid);
+}
+
+void gic_deactivate(u32 intid)
+{
+    SYSREG_WRITE(ICC_DIR_EL1, intid);
+}
