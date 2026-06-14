@@ -68,6 +68,9 @@ vcpu_run:
     ldr     x30,      [x0, #0xF0]
     ldr     x0,       [x0, #0x00]   /* x0 last */
 
+    /* Unmask EL2 IRQs so the physical timer PPI (HCR_EL2.IMO=1) is taken at
+     * EL2 while the guest runs. EL2 auto-masks I on every exception entry. */
+    msr     daifclr, #2
     eret
 
 /* ------------------------------------------------------------------ */

@@ -9,6 +9,8 @@ arch-objs := \
     arch/arm64/vmexit/vmexit_asm.o \
     arch/arm64/irq/vgic.o \
     arch/arm64/irq/gic_v3.o \
+    arch/arm64/irq/irq_handler.o \
+    arch/arm64/irq/irq_handler_asm.o \
     arch/arm64/timer/vtimer.o
 
 arch-includes := \
