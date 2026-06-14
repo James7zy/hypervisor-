@@ -52,10 +52,12 @@ SVM_ELF    := $(BUILD_DIR)/svm/svm.elf
 SVM_BIN    := $(BUILD_DIR)/svm/svm.bin
 SVM2_ELF   := $(BUILD_DIR)/svm2/svm2.elf
 SVM2_BIN   := $(BUILD_DIR)/svm2/svm2.bin
+SVM3_ELF   := $(BUILD_DIR)/svm3/svm3.elf
+SVM3_BIN   := $(BUILD_DIR)/svm3/svm3.bin
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm svm2 check-offsets test-qemu test-qemu-svm2 test
+.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets test-qemu test-qemu-svm2 test-qemu-svm3 test
 
 all: $(ELF) $(BIN)
 
@@ -96,6 +98,19 @@ svm2: $(SVM2_BIN)
 test-qemu-svm2: all svm2
 	SVM_BIN=$(SVM2_BIN) sh tests/run_svm2_test.sh
 
+$(SVM3_ELF): tests/svm3/svm3_main.c tests/svm3/svm3_vectors.S tests/svm3/svm3.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -T tests/svm3/svm3.lds -o $@ \
+	      tests/svm3/svm3_main.c tests/svm3/svm3_vectors.S
+
+$(SVM3_BIN): $(SVM3_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+svm3: $(SVM3_BIN)
+
+test-qemu-svm3: all svm3
+	SVM_BIN=$(SVM3_BIN) sh tests/run_svm3_test.sh
+
 $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 	@mkdir -p $(BUILD_DIR)
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -o $@ $<
@@ -113,7 +128,7 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 test-qemu: all svm
 	SVM_BIN=$(SVM_BIN) sh tests/run_svm_test.sh
 
-test: check-offsets check-offsets-target test-qemu test-qemu-svm2
+test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3
 
 run: $(ELF)
 	./scripts/run-qemu.sh
