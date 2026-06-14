@@ -32,6 +32,18 @@ void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
 
+void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
+{
+    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_HW | ICH_LR_GROUP1 |
+             ((u64)prio << ICH_LR_PRIO_SHIFT) |
+             ((u64)pintid << ICH_LR_PINTID_SHIFT) |
+             ((u64)vintid & ICH_LR_VINTID_MASK);
+
+    vcpu->ich_lr[0] = lr;
+    /* Write the live register; the eret back to EL1 synchronises (no isb). */
+    SYSREG_WRITE(ICH_LR0_EL2, lr);
+}
+
 void vgic_restore(struct vcpu *vcpu)
 {
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->ich_hcr_el2);

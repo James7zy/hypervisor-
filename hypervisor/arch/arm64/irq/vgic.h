@@ -17,6 +17,7 @@
 #define ICH_LR_HW            (1ULL << 61)    /* 0 = software injection      */
 #define ICH_LR_GROUP1        (1ULL << 60)    /* Group 1                     */
 #define ICH_LR_PRIO_SHIFT    48              /* Priority[55:48]             */
+#define ICH_LR_PINTID_SHIFT  32              /* pINTID[44:32] (HW=1)        */
 #define ICH_LR_VINTID_MASK   0xFFFFFFFFULL   /* vINTID[31:0]                */
 
 /* Enable the virtual CPU interface and blank per-vCPU vGIC state. */
@@ -25,6 +26,11 @@ void vgic_init(struct vcpu *vcpu);
 /* Inject a pending, Group-1, software (HW=0) virtual interrupt via ICH_LR0.
  * Writes the live register so the vIRQ is presented on the next eret to EL1. */
 void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio);
+
+/* Inject a pending, Group-1, hardware-forwarded (HW=1) virtual interrupt via
+ * ICH_LR0: the physical INTID is linked in pINTID so the guest's deactivate of
+ * the virtual IRQ releases the physical one. See docs/adr/0001-*. */
+void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 
 /* Save/restore the virtual interface state to/from struct vcpu. */
 void vgic_save(struct vcpu *vcpu);
