@@ -55,7 +55,7 @@ There is no automated test suite. Verification is:
 |       Linux / SOS VM           |   |  Linux / Android Guest  |   | RTOS Guest   |
 |                                |   |                         |   |              |
 | +----------------------------+ |   | +--------------------+  |   | +----------+ |
-| | ACRN Device Model, DM      | |   | | Guest OS           |  |   | | RTOS     | |
+| |    Device Model, DM      | |   | | Guest OS           |  |   | | RTOS     | |
 | |                            | |   | |                    |  |   | | Kernel   | |
 | | - Create / start VM        | |   | | - VirtIO frontend  |  |   | |          | |
 | | - Emulate virtual devices  | |<---->| - Virtual devices |  |   | | RT tasks | |
@@ -64,7 +64,7 @@ There is no automated test suite. Verification is:
 | +-------------+--------------+ |   | +--------------------+  |   |              |
 |               |                |   +------------+-----------+   +------+-------+
 | +-------------v--------------+ |                |                      |
-| | ACRN Manager / Tools       | |                |                      |
+| | Manager / Tools       | |                |                      |
 | | acrnctl / config / launch  | |                |                      |
 | +-------------+--------------+ |                |                      |
 |               |                                |                      |
@@ -74,7 +74,7 @@ There is no automated test suite. Verification is:
                 | VM lifecycle control          | MMIO / PIO / IRQ      |
                 v                                v                      v
 +--------------------------------------------------------------------------------+
-|                              ACRN Hypervisor                                   |
+|                              Hypervisor                                   |
 |                                                                                |
 | +--------------------+  +--------------------+  +----------------------------+ |
 | | VM Management      |  | vCPU Scheduler     |  | Memory Manager            | |
@@ -110,6 +110,7 @@ There is no automated test suite. Verification is:
 +--------------------------------------------------------------------------------+
 ```
 
+
 ### Layering
 ```
 +--------------------------------------------------------------------------------+
@@ -121,7 +122,7 @@ There is no automated test suite. Verification is:
 |  EL0 : User Applications                                                       |
 |  EL1 : Guest OS Kernel, Linux / Android / RTOS                                 |
 |                                                                                |
-|  ACRN Hypervisor                                                               |
+|  Hypervisor                                                               |
 |  ----------------------------------------------------------------------------  |
 |  EL2 : Hypervisor Mode                                                         |
 |       - vCPU scheduling                                                        |
