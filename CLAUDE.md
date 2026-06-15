@@ -2,12 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+The architecture documentation should include sequence diagrams, class diagrams, and diagrams showing the 
+relationships between modules, all represented using Mermaid. A picture is worth a thousand words.
+
 ## Project Overview
 
 A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
  mirrors ACRN's `hypervisor/` structure.
-
-**Current milestone: M2 — Multi-vCPU + interrupts**
 
 Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch).
 
@@ -37,25 +38,110 @@ There is no automated test suite. Verification is:
 3. **Run + observe**: `make run` must print `[hv] Hello from EL2, CurrentEL=0x8` within 3 seconds.
 
 ## Architecture
+```
++--------------------------------------------------------------------------------+
+|                         Applications / Workloads                               |
+|                                                                                |
+|   +----------------------+     +----------------------+     +----------------+ |
+|   | Linux Apps           |     | Android / Linux Apps |     | RT Apps        | |
+|   | Mgmt / Cloud / UI    |     | IVI / HMI / General  |     | Control Tasks  | |
+|   +----------+-----------+     +----------+-----------+     +-------+--------+ |
+|              |                            |                         |          |
++--------------|----------------------------|-------------------------|----------+
+               |                            |                         |
+               v                            v                         v
++-------------------------------+   +------------------------+   +--------------+
+|          Service VM            |   |        User VM          |   |   RTOS VM    |
+|       Linux / SOS VM           |   |  Linux / Android Guest  |   | RTOS Guest   |
+|                                |   |                         |   |              |
+| +----------------------------+ |   | +--------------------+  |   | +----------+ |
+| | ACRN Device Model, DM      | |   | | Guest OS           |  |   | | RTOS     | |
+| |                            | |   | |                    |  |   | | Kernel   | |
+| | - Create / start VM        | |   | | - VirtIO frontend  |  |   | |          | |
+| | - Emulate virtual devices  | |<---->| - Virtual devices |  |   | | RT tasks | |
+| | - Handle VM exits / MMIO   | |   | | - Guest drivers    |  |   | +----------+ |
+| | - Provide VirtIO backend   | |   | | - Applications     |  |   |              |
+| +-------------+--------------+ |   | +--------------------+  |   |              |
+|               |                |   +------------+-----------+   +------+-------+
+| +-------------v--------------+ |                |                      |
+| | ACRN Manager / Tools       | |                |                      |
+| | acrnctl / config / launch  | |                |                      |
+| +-------------+--------------+ |                |                      |
+|               |                                |                      |
++---------------|--------------------------------|----------------------|---------+
+                |                                |                      |
+                | Hypercall / ioctl             | VM Exit / Trap        |
+                | VM lifecycle control          | MMIO / PIO / IRQ      |
+                v                                v                      v
++--------------------------------------------------------------------------------+
+|                              ACRN Hypervisor                                   |
+|                                                                                |
+| +--------------------+  +--------------------+  +----------------------------+ |
+| | VM Management      |  | vCPU Scheduler     |  | Memory Manager            | |
+| | Create / destroy   |  | vCPU dispatch      |  | Stage-2 memory isolation  | |
+| +--------------------+  +--------------------+  +----------------------------+ |
+|                                                                                |
+| +--------------------+  +--------------------+  +----------------------------+ |
+| | VM Exit Handler    |  | Interrupt Manager  |  | I/O Virtualization        | |
+| | Forward exits to DM|  | GIC IRQ routing    |  | MMIO / device passthrough | |
+| +--------------------+  +--------------------+  +----------------------------+ |
+|                                                                                |
+|        CPU / Memory / Interrupt / Device Isolation & Virtualization             |
++--------------------------------------------------------------------------------+
+                |
+                v
++--------------------------------------------------------------------------------+
+|                              ARM Hardware / SoC                                |
+|                                                                                |
+| +----------------------+  +----------------------+  +------------------------+ |
+| | ARM CPU Cores        |  | Memory               |  | SoC / Physical Devices | |
+| | Cortex-A / Neoverse  |  | DDR / LPDDR RAM      |  | UART / I2C / SPI / CAN | |
+| | EL1 Guest OS         |  |                      |  | GPU / NPU / USB / PCIe | |
+| | EL2 Hypervisor       |  |                      |  | NIC / Storage / Display| |
+| +----------------------+  +----------------------+  +------------------------+ |
+|          |                         |                         |                 |
+|          +-------------------------+-------------------------+                 |
+|                                                                                |
+|        ARM Virtualization Extension / EL2                                      |
+|        Stage-2 Address Translation                                             |
+|        GICv3 / GICv4 Interrupt Controller                                      |
+|        SMMU / IOMMU for DMA Isolation                                          |
+|        PSCI / Power Management                                                 |
++--------------------------------------------------------------------------------+
+```
 
 ### Layering
-
 ```
-hypervisor/boot/main.c          ← arch-independent C entry (hypervisor_main)
-    ↓ #include <board.h>        ← resolved via -I path ordering (no arch name in source)
-hypervisor/arch/arm64/board/qemu_virt/board.h   ← BOARD_UART_BASE, BOARD_DRAM_BASE, board_name[]
-hypervisor/arch/arm64/boot/head.S               ← _start, EL2 assert, BSS clear, VBAR, DAIF, → C
-hypervisor/debug/uart_pl011.c   ← PL011 protocol driver (receives base via uart_init(base))
-hypervisor/lib/print.c          ← minimal printk → uart_putc
-hypervisor/lib/string.c         ← freestanding memset (memcpy added in M1)
-hypervisor/arch/arm64/cpu/cpu.c ← read_currentel(), cpu_wfi(), cpu_relax()
++--------------------------------------------------------------------------------+
+|                              ARM Exception Levels                              |
++--------------------------------------------------------------------------------+
+|                                                                                |
+|  Guest VM / Service VM / RTOS VM                                                |
+|  ----------------------------------------------------------------------------  |
+|  EL0 : User Applications                                                       |
+|  EL1 : Guest OS Kernel, Linux / Android / RTOS                                 |
+|                                                                                |
+|  ACRN Hypervisor                                                               |
+|  ----------------------------------------------------------------------------  |
+|  EL2 : Hypervisor Mode                                                         |
+|       - vCPU scheduling                                                        |
+|       - Stage-2 translation                                                    |
+|       - trap and emulate                                                       |
+|       - interrupt virtualization                                               |
+|       - device passthrough control                                             |
+|                                                                                |
+|  Optional Secure World                                                         |
+|  ----------------------------------------------------------------------------  |
+|  EL3 : Secure Monitor / Trusted Firmware-A / PSCI                              |
+|                                                                                |
++--------------------------------------------------------------------------------+
+|                              ARM SoC Hardware                                  |
+|                                                                                |
+|  ARM Cores | DDR Memory | GICv3/GICv4 | SMMU | PCIe | MMIO Devices | DMA        |
++--------------------------------------------------------------------------------+
 ```
-
-The arch sub-Makefile passes `-Ihypervisor/arch/arm64/board/$(BOARD) -Ihypervisor/arch/arm64/include` so `#include <board.h>` in arch-independent code resolves to the active board's header without naming the board in source.
 
 ### Board vs Driver separation
-
-`hypervisor/debug/uart_pl011.c` is the PL011 *protocol* driver — it never contains a hard-coded UART address. The board's `board.h` provides `BOARD_UART_BASE`. The only chartered exception is `head.S`'s pre-C early-panic path, where C is not yet available.
 
 ### Key invariants
 
@@ -100,16 +186,21 @@ QEMU → _start (head.S)
 |---|---|---|
 | M0 — Hello EL2 | **done** | Enter EL2, print banner |
 | M1 — Bare-metal guest | **done** | Stage-2 MMU, minimal vCPU |
-| M2 — Multi-vCPU + interrupts | **current** | vGICv3, virtual timer, PSCI |
-| M3 — Linux guest | future | Boot Linux to shell, virtio-console |
+| M1.5 — PSCI | **current** | PSCI VERSION/FEATURES/CPU_OFF/SYSTEM_OFF over HVC (no GIC) |
+| M2 — vGIC software injection | next | HVC → `vgic_inject_sw` → guest EL1 IRQ handler (no physical HW) |
+| M2.5 — Physical timer + GIC + HW-forwarding | next | timer PPI → EL2 → `vgic_inject_hw` → guest (ADR-0001) |
+TODO..More detail
+| M3 — Linux guest | future | Boot Linux to shell, virtio-console; SMP via PSCI CPU_ON |
 | M4 — RK3588 port | future | Run on real RK3588 hardware |
 
 Each milestone gets its own spec in `docs/superpowers/specs/` and plan in `docs/superpowers/plans/`.
 
-**Design principle:** every file written in M0 must leave room for M1–M4 to add code, but must not contain placeholder stubs for them.
+**Design principle:** My design philosophy is to move forward in small, fast iterations, 
+breaking requirements down into the smallest practical units and defining them clearly. 
+The goal is to achieve high cohesion and low coupling across the system.
+
 
 ## Reference Source Trees
-
 The following production hypervisor source trees are available in the parent directory (`../`) for reference when making design or implementation decisions:
 
 | Path | Project | Notes |
@@ -119,3 +210,9 @@ The following production hypervisor source trees are available in the parent dir
 | `../hypervisor` | local Rust hypervisor | Rust-based hypervisor (NOT a copy of this project); reference for Rust idioms applied to bare-metal hypervisor design |
 
 **When to consult these:** look up an existing implementation before designing any new subsystem (Stage-2 MMU, vGIC, PSCI, virtio, etc.). Prefer reading the smallest relevant file rather than loading entire trees.
+
+Import Reference
+
+- [ARM Architecture Reference Manual (ARMv8-A)](https://developer.arm.com/documentation/ddi0487/latest)
+- [ARM GIC Architecture Specification](https://developer.arm.com/documentation/ihi0069/latest)
+- [pKVM (Protected KVM)](https://source.android.com/docs/core/virtualization)
