@@ -42,11 +42,11 @@ of work (multi-vCPU data structures, per-CPU GICR, SGIs, scheduling).
 
 ```mermaid
 graph LR
-  M3.0[M3.0 Boot protocol<br/>+ PL011 passthrough] --> M3.1[M3.1 MMIO trap<br/>framework]
-  M3.1 --> M3.2[M3.2 vGIC dist/redist<br/>emulation]
-  M3.2 --> M3.3[M3.3 virtio-console]
-  M3.3 --> M3.4[M3.4 Boot to shell<br/>initramfs]
-  M3.4 -.deferred.-> SMP[M4? SMP via<br/>PSCI CPU_ON]
+  S30["M3.0 Boot protocol<br/>+ PL011 passthrough"] --> S31["M3.1 MMIO trap<br/>framework"]
+  S31 --> S32["M3.2 vGIC dist/redist<br/>emulation"]
+  S32 --> S33["M3.3 virtio-console"]
+  S33 --> S34["M3.4 Boot to shell<br/>initramfs"]
+  S34 -.->|deferred| SMP["M4 SMP via<br/>PSCI CPU_ON"]
 ```
 
 ### Slice summary
@@ -134,23 +134,23 @@ problem cleanly to M3.1/M3.2 at a well-defined stall point.
 ```mermaid
 sequenceDiagram
     participant Q as QEMU
-    participant HV as Hypervisor (EL2)
+    participant HV as Hypervisor EL2
     participant S2 as Stage-2 map
-    participant G as Guest Linux (EL1)
-    participant U as PL011 (HW)
+    participant G as Guest Linux EL1
+    participant U as PL011 HW
 
     Q->>Q: -device loader Image@PA, dtb@PA
     Q->>HV: boot hypervisor.elf @0x40080000
-    HV->>S2: map guest RAM (IPA 0x40000000 → PA range)
-    HV->>S2: map PL011 page (0x09000000, Device-nGnRE)
-    HV->>HV: vCPU init: x0=dtb_ipa, x1..x3=0,<br/>ELR=entry, SPSR=EL1h
+    HV->>S2: map guest RAM, IPA 0x40000000 to PA range
+    HV->>S2: map PL011 page, 0x09000000, Device-nGnRE
+    HV->>HV: vCPU init - x0=dtb_ipa, x1..x3=0, ELR=entry, SPSR=EL1h
     HV->>G: eret to EL1
-    G->>U: earlycon writes (banner, "Booting Linux…")
+    G->>U: earlycon writes (banner, Booting Linux...)
     U-->>Q: serial output (interleaved w/ hv)
-    G->>HV: PSCI HVC (CPU features) → M1.5 responder
+    G->>HV: PSCI HVC (CPU features) to M1.5 responder
     G->>S2: GICD MMIO read (unbacked)
     S2->>HV: data abort EC=0x24
-    HV->>HV: default case → print + wfi (M3.0 stall = DoD)
+    HV->>HV: default case - print + wfi (M3.0 stall = DoD)
 ```
 
 ### Out of scope for M3.0
