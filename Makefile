@@ -57,7 +57,7 @@ SVM3_BIN   := $(BUILD_DIR)/svm3/svm3.bin
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets test-qemu test-qemu-svm2 test-qemu-svm3 test
+.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets test-qemu test-qemu-svm2 test-qemu-svm3 test guest
 
 all: $(ELF) $(BIN)
 
@@ -107,6 +107,20 @@ $(SVM3_BIN): $(SVM3_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 svm3: $(SVM3_BIN)
+
+DTC        ?= dtc
+GUEST_DTS  := guest/qemu_virt.dts
+GUEST_DTB  := $(BUILD_DIR)/guest/guest.dtb
+
+$(GUEST_DTB): $(GUEST_DTS)
+	@command -v $(DTC) >/dev/null 2>&1 || { \
+	    echo "ERROR: '$(DTC)' not found. Install it:"; \
+	    echo "  Debian/Ubuntu: sudo apt-get install device-tree-compiler"; \
+	    exit 1; }
+	@mkdir -p $(dir $@)
+	$(DTC) -I dts -O dtb -o $@ $<
+
+guest: $(GUEST_DTB)
 
 test-qemu-svm3: all svm3
 	SVM_BIN=$(SVM3_BIN) sh tests/run_svm3_test.sh

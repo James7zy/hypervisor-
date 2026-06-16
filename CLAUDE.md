@@ -29,6 +29,7 @@ Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-l
 - `aarch64-none-linux-gnu-gcc` ≥ 10
 - `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
+- `dtc` (device-tree-compiler) — Debian/Ubuntu: `sudo apt-get install device-tree-compiler`
 
 Exit QEMU with `Ctrl-A x`. GDB attach: `QEMU_EXTRA_ARGS="-s -S" make run`, then `aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
 
