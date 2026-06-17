@@ -23,6 +23,12 @@ make run                # invoke scripts/run-qemu.sh (QEMU)
 make clean              # remove build/
 ```
 
+```sh
+# M3.0+: requires a prebuilt arm64 Linux `Image`. Supply its path:
+#   LINUX_IMAGE=/path/to/Image make run
+# Linux is NOT built in-repo; the kernel is user-supplied.
+```
+
 Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-linux-gnu-`
 
 **Toolchain required:**
@@ -193,8 +199,8 @@ QEMU → _start (head.S)
 | M1.5 — PSCI | **done** | PSCI VERSION/FEATURES/CPU_OFF/SYSTEM_OFF over HVC (no GIC) |
 | M2 — vGIC software injection | **done** | HVC → `vgic_inject_sw` → guest EL1 IRQ handler (no physical HW) |
 | M2.5 — Physical timer + GIC + HW-forwarding | **done** | timer PPI → EL2 → `vgic_inject_hw` → guest (ADR-0001) |
-| **M3.0 — Linux alive (no interrupts)** | **current** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
-| **M3.1 — MMIO trap framework** | next | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
+| M3.0 — Linux alive (no interrupts) | **done** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
+| **M3.1 — MMIO trap framework** | **current** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
 | **M3.2 — vGICv3 emulation** | next | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | **M3.3 — virtio-console** | next | virtio-mmio transport + virtio-console + virtqueue + used-buffer IRQ |
 | **M3.4 — Boot to shell** | next | initramfs load + DTB initrd nodes → interactive busybox shell prompt |
