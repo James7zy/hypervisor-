@@ -6,6 +6,7 @@
 #include "stage2.h"
 #include <vgic.h>
 #include "../../arch/arm64/irq/vgic_v3_mmio.h"
+#include "virtio_console.h"
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -50,6 +51,8 @@ void vm_init(void)
            (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
 
     vgicv3_mmio_init();
+
+    virtio_console_init();
 }
 
 void vm_run(void)
@@ -58,6 +61,7 @@ void vm_run(void)
     vgic_restore(&g_vm.vcpu);
 
     for (;;) {
+        virtio_console_rx_poll();
         vcpu_run(&g_vm.vcpu);
         /* vcpu_run returns to the hv on each handled exit (MMIO data abort,
          * HVC) and on the timer IRQ exit. Re-enter the guest so successive
