@@ -65,6 +65,14 @@
         clock-frequency = <24000000>;
     };
 
+    virtio0: virtio_mmio@a000000 {
+        compatible = "virtio,mmio";
+        /* 2-cell address + 2-cell size (root uses #address-cells=<2>). */
+        reg = <0x00000000 0x0a000000 0x00000000 0x00000200>;
+        /* SPI 16 (GIC INTID 48). type 0 = SPI, num 16, flags 4 = level-high. */
+        interrupts = <0 16 4>;
+    };
+
     gic: interrupt-controller@8000000 {
         compatible = "arm,gic-v3";
         #interrupt-cells = <3>;
