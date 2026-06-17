@@ -5,6 +5,7 @@
 #include <hypercall.h>
 #include <psci.h>
 #include <vgic.h>
+#include "mmio.h"
 
 /* Defined in vmexit_asm.S; does not return */
 extern void hv_restore(void);
@@ -44,6 +45,11 @@ void handle_exit(struct vcpu_regs *regs, u64 esr)
     case 0x16:   /* HVC from AArch64 EL1 */
         handle_hvc(regs);
         return;
+    case 0x24:   /* Data Abort from lower EL → MMIO trap-and-emulate */
+        if (mmio_handle_data_abort(regs, esr) == 0)
+            return;   /* handled: ELR advanced; el1_sync_handler erets back */
+        /* fall through to the diagnostic + park on no handler / ISV=0 */
+        /* fallthrough */
     default:
         printk("[hv] unexpected exit EC=0x%x ESR=0x%lx ELR=0x%lx\n",
                (unsigned)ec, esr, regs->elr_el2);
