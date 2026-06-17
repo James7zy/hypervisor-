@@ -45,8 +45,4 @@ int mmio_bus_register(u64 base, u64 len, mmio_handler_t handler, void *ctx);
  */
 int mmio_handle_data_abort(struct vcpu_regs *regs, u64 esr);
 
-/* M3.1 scaffold (TEMPORARY — removed in M3.2). Registers a GICD-range test
- * device that prints decoded accesses. */
-void mmio_scaffold_init(void);
-
 #endif /* HV_ARM64_MMIO_H */

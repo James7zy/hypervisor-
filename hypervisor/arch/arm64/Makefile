@@ -8,8 +8,8 @@ arch-objs := \
     arch/arm64/vmexit/vmexit.o \
     arch/arm64/vmexit/vmexit_asm.o \
     arch/arm64/vmexit/mmio.o \
-    arch/arm64/vmexit/mmio_scaffold.o \
     arch/arm64/irq/vgic.o \
+    arch/arm64/irq/vgic_v3_mmio.o \
     arch/arm64/irq/gic_v3.o \
     arch/arm64/irq/irq_handler.o \
     arch/arm64/irq/irq_handler_asm.o \
