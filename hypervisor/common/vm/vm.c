@@ -5,7 +5,7 @@
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
-#include "../../arch/arm64/vmexit/mmio.h"
+#include "../../arch/arm64/irq/vgic_v3_mmio.h"
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -49,14 +49,20 @@ void vm_init(void)
            (unsigned)cfg->vmid, (unsigned long)cfg->entry,
            (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
 
-    mmio_scaffold_init();
+    vgicv3_mmio_init();
 }
 
 void vm_run(void)
 {
     stage2_activate(&g_vm.vcpu);
     vgic_restore(&g_vm.vcpu);
-    vcpu_run(&g_vm.vcpu);
-    /* Returns here after hv_restore() is called from HVC handler */
-    /* TODO M2: clear HCR_EL2.VM (bit 0) before scheduling next vCPU */
+
+    for (;;) {
+        vcpu_run(&g_vm.vcpu);
+        /* vcpu_run returns to the hv on each handled exit (MMIO data abort,
+         * HVC) and on the timer IRQ exit. Re-enter the guest so successive
+         * timer PPIs (injected by el2_irq_handler) keep advancing guest time.
+         * The HVC "done" path still calls hv_restore(), which longjmps past
+         * this loop and out of vm_run. */
+    }
 }
