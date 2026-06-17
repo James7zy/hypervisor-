@@ -44,6 +44,14 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
 
+/* Device SPIs are software-injected (no physical line). Priority 0xA0 matches
+ * the timer-PPI class already used in el2_irq_handler; the guest reorders by
+ * its own ICC_PMR/IPRIORITYR. */
+void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
+{
+    vgic_inject_sw(vcpu, intid, 0xA0);
+}
+
 void vgic_restore(struct vcpu *vcpu)
 {
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->ich_hcr_el2);

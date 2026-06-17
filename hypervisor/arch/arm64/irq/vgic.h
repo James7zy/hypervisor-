@@ -32,6 +32,12 @@ void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio);
  * the virtual IRQ releases the physical one. See docs/adr/0001-*. */
 void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 
+/* Inject a Shared Peripheral Interrupt (SPI, INTID >= 32) into the guest as a
+ * software (HW=0) virtual interrupt via the list registers. Used by emulated
+ * devices (M3.3 virtio-console: SPI 48) that have no physical GIC line. Thin
+ * wrapper over vgic_inject_sw with a device-class priority. */
+void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
+
 /* Save/restore the virtual interface state to/from struct vcpu. */
 void vgic_save(struct vcpu *vcpu);
 void vgic_restore(struct vcpu *vcpu);
