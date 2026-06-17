@@ -5,6 +5,7 @@
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
+#include "../../arch/arm64/vmexit/mmio.h"
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -47,6 +48,8 @@ void vm_init(void)
     printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
            (unsigned)cfg->vmid, (unsigned long)cfg->entry,
            (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
+
+    mmio_scaffold_init();
 }
 
 void vm_run(void)
