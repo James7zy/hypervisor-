@@ -10,6 +10,7 @@
 #define UART_CR    0x030
 #define UART_IMSC  0x038
 
+#define FR_RXFE       (1U << 4)
 #define FR_TXFF       (1U << 5)
 #define LCR_H_WLEN_8  (3U << 5)
 #define LCR_H_FEN     (1U << 4)
@@ -49,4 +50,11 @@ void uart_putc(char c)
 {
     while (mmio_read32(uart_base_addr + UART_FR) & FR_TXFF);
     mmio_write32(uart_base_addr + UART_DR, (u32)(unsigned char)c);
+}
+
+int uart_getc(void)
+{
+    if (mmio_read32(uart_base_addr + UART_FR) & FR_RXFE)
+        return -1;                                   /* RX FIFO empty */
+    return (int)(mmio_read32(uart_base_addr + UART_DR) & 0xFFU);
 }
