@@ -29,7 +29,7 @@ void vm_init(void)
     g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
                         (1ULL << 31);
 
-    stage2_init(&g_vm.vcpu, (u32)svm_config.vmid);
+    stage2_init(&g_vm.vcpu, (u32)g_vm.config->vmid, g_vm.config->ram_pa);
 
     vgic_init(&g_vm.vcpu);
 

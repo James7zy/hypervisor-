@@ -32,14 +32,19 @@
 /* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero. */
 static u64 l1_table[512] __attribute__((aligned(4096)));
 
-void stage2_init(struct vcpu *vcpu, u32 vmid)
+void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
 {
-    /* IPA 0x00000000–0x3FFFFFFF → PA 0x00000000: Device (covers UART @ 0x09000000) */
+    /* IPA 0x00000000–0x3FFFFFFF → PA identity: Device (covers PL011 @ 0x09000000) */
     l1_table[0] = 0x00000000UL |
                   S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
 
-    /* IPA 0x40000000–0x7FFFFFFF → PA 0x40000000: Normal WB (covers all DRAM) */
-    l1_table[1] = 0x40000000UL |
+    /*
+     * IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM).
+     * Non-identity for the Linux guest: ram_pa is a dedicated region that
+     * does not overlap the hv image at 0x40080000. The 1 GB block output
+     * address must be 1 GB-aligned (low 30 bits zero); ram_pa is.
+     */
+    l1_table[1] = (ram_pa & 0xFFFFC0000000UL) |
                   S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
 
     vcpu->vttbr_el2 = ((u64)vmid << 48) | (u64)(uintptr_t)l1_table;
