@@ -144,7 +144,7 @@ test-qemu: all svm
 
 test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3
 
-run: $(ELF)
+run: $(ELF) $(GUEST_DTB)
 	./scripts/run-qemu.sh
 
 clean:
