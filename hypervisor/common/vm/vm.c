@@ -11,30 +11,42 @@ struct vm g_vm;
 
 void vm_init(void)
 {
-    g_vm.config = &svm_config;
+    g_vm.config = &linux_config;
+
+    const struct vm_config *cfg = g_vm.config;
 
     /*
-     * SPSR_EL2 = 0x3C5:
-     *   M[4:0] = 0b00101 = EL1h (use SP_EL1)
-     *   DAIF   = 0b1111  (bits[9:6], all interrupts masked)
+     * arm64 Linux boot protocol (Documentation/arm64/booting.rst):
+     *   x0 = physical address of the DTB (here: guest IPA of the DTB)
+     *   x1 = x2 = x3 = 0 (reserved, must be zero)
+     *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
      */
-    g_vm.vcpu.regs.elr_el2  = svm_config.entry;
+    g_vm.vcpu.regs.x[0] = (u64)cfg->dtb_ipa;
+    g_vm.vcpu.regs.x[1] = 0;
+    g_vm.vcpu.regs.x[2] = 0;
+    g_vm.vcpu.regs.x[3] = 0;
+
+    /*
+     * SPSR_EL2 = 0x3C5: M[4:0]=00101 (EL1h, SP_EL1), DAIF=1111 (all masked).
+     */
+    g_vm.vcpu.regs.elr_el2  = cfg->entry;
     g_vm.vcpu.regs.spsr_el2 = 0x3C5ULL;
-    g_vm.vcpu.regs.sp_el1   = svm_config.mem_base + svm_config.mem_size - 0x10UL;
+    g_vm.vcpu.regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
 
     /*
      * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC).
-     * RW=1: EL1 executes in AArch64 state; without it eret to EL1h is illegal.
+     * RW=1: EL1 executes in AArch64 state.
      */
     g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
                         (1ULL << 31);
 
-    stage2_init(&g_vm.vcpu, (u32)g_vm.config->vmid, g_vm.config->ram_pa);
+    stage2_init(&g_vm.vcpu, (u32)cfg->vmid, cfg->ram_pa);
 
     vgic_init(&g_vm.vcpu);
 
-    printk("[hv] SVM: launching VMID=%u entry=0x%lx\n",
-           (unsigned)svm_config.vmid, svm_config.entry);
+    printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
+           (unsigned)cfg->vmid, (unsigned long)cfg->entry,
+           (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
 }
 
 void vm_run(void)
