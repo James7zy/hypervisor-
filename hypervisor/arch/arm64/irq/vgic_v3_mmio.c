@@ -172,3 +172,138 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
 
     return 0;
 }
+
+/* ── GICR cpu0 shadow state (INTIDs 0..31: SGIs 0-15 + PPIs 16-31) ── */
+struct vgicv3_redist {
+    /* RD frame */
+    u32 ctlr;
+    u32 waker;            /* reset: ProcessorSleep | ChildrenAsleep */
+    /* SGI frame */
+    u32 igroupr0;
+    u32 isenabler0;       /* PPI 27 enable lands here */
+    u32 ispendr0;
+    u32 isactiver0;
+    u32 ipriorityr[8];    /* 8 regs x 4 INTIDs = 32 */
+    u32 icfgr1;           /* PPIs (ICFGR0 = SGIs, RO edge) */
+};
+
+static struct vgicv3_redist g_vgicr = {
+    .waker = VGICR_WAKER_PROCESSOR_SLEEP | VGICR_WAKER_CHILDREN_ASLEEP,
+    .icfgr1 = 0,
+};
+
+/* GICR_TYPER for the single cpu0 redistributor:
+ *   Aff0 (Processor affinity) at bits [39:32] = 0
+ *   Processor_Number [23:8]   = 0
+ *   Last (bit 4)              = 1  (cpu0 is the only/last redistributor)
+ */
+static u64 vgicr_typer(void)
+{
+    return (1ULL << 4);
+}
+
+static u32 vgicr_read_rd(u64 off, u8 size)
+{
+    switch (off) {
+    case VGICR_CTLR:    return g_vgicr.ctlr;
+    case VGICR_IIDR:    return 0x0000043BU;
+    case VGICR_TYPER:   return (size == 8U) ? (u32)vgicr_typer()
+                                            : (u32)(vgicr_typer() & 0xFFFFFFFFU);
+    case VGICR_TYPER + 4: return (u32)(vgicr_typer() >> 32);  /* high half */
+    case VGICR_STATUSR: return 0U;
+    case VGICR_WAKER:   return g_vgicr.waker;
+    case VGICR_PIDR2:   return VGIC_PIDR2_GICV3;
+    default:            return 0U;   /* RAZ */
+    }
+}
+
+static void vgicr_write_rd(u64 off, u32 val)
+{
+    switch (off) {
+    case VGICR_CTLR:
+        g_vgicr.ctlr = val;
+        break;
+    case VGICR_WAKER:
+        /* Handshake: guest clears ProcessorSleep, then polls ChildrenAsleep
+         * until it reads 0. Clearing ProcessorSleep clears ChildrenAsleep. */
+        if ((val & VGICR_WAKER_PROCESSOR_SLEEP) == 0U)
+            g_vgicr.waker = 0U;
+        else
+            g_vgicr.waker = VGICR_WAKER_PROCESSOR_SLEEP |
+                            VGICR_WAKER_CHILDREN_ASLEEP;
+        break;
+    default:
+        break;   /* WI */
+    }
+}
+
+static u32 vgicr_read_sgi(u64 off)
+{
+    switch (off) {
+    case VGICR_IGROUPR0:   return g_vgicr.igroupr0;
+    case VGICR_ISENABLER0: return g_vgicr.isenabler0;
+    case VGICR_ICENABLER0: return g_vgicr.isenabler0;
+    case VGICR_ISPENDR0:   return g_vgicr.ispendr0;
+    case VGICR_ICPENDR0:   return g_vgicr.ispendr0;
+    case VGICR_ISACTIVER0: return g_vgicr.isactiver0;
+    case VGICR_ICACTIVER0: return g_vgicr.isactiver0;
+    case VGICR_ICFGR0:     return 0xAAAAAAAAU;   /* SGIs edge-triggered, RO */
+    case VGICR_ICFGR1:     return g_vgicr.icfgr1;
+    default:
+        if (off >= VGICR_IPRIORITYR_BASE && off <= VGICR_IPRIORITYR_END)
+            return g_vgicr.ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)];
+        return 0U;
+    }
+}
+
+static void vgicr_write_sgi(u64 off, u32 val)
+{
+    switch (off) {
+    case VGICR_IGROUPR0:   g_vgicr.igroupr0   = val;  break;
+    case VGICR_ISENABLER0: g_vgicr.isenabler0 |= val; break;   /* set */
+    case VGICR_ICENABLER0: g_vgicr.isenabler0 &= ~val; break;  /* clear */
+    case VGICR_ISPENDR0:   g_vgicr.ispendr0   |= val; break;
+    case VGICR_ICPENDR0:   g_vgicr.ispendr0   &= ~val; break;
+    case VGICR_ISACTIVER0: g_vgicr.isactiver0 |= val; break;
+    case VGICR_ICACTIVER0: g_vgicr.isactiver0 &= ~val; break;
+    case VGICR_ICFGR0:     break;   /* SGIs RO */
+    case VGICR_ICFGR1:     g_vgicr.icfgr1 = val; break;
+    default:
+        if (off >= VGICR_IPRIORITYR_BASE && off <= VGICR_IPRIORITYR_END)
+            g_vgicr.ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)] = val;
+        break;   /* else WI */
+    }
+}
+
+static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
+{
+    (void)ctx;
+
+    bool sgi = (acc->offset >= VGICR_SGI_OFFSET);
+    u64  off = sgi ? (acc->offset - VGICR_SGI_OFFSET) : acc->offset;
+
+    if (acc->is_write) {
+        if (sgi)
+            vgicr_write_sgi(off, (u32)acc->data);
+        else
+            vgicr_write_rd(off, (u32)acc->data);
+    } else {
+        acc->data = sgi ? vgicr_read_sgi(off) : vgicr_read_rd(off, acc->size);
+    }
+    return 0;
+}
+
+void vgicv3_mmio_init(void)
+{
+    int rd = mmio_bus_register(BOARD_GIC_DIST_BASE, VGICD_SIZE,
+                               vgicd_mmio_handler, NULL);
+    int rr = mmio_bus_register(BOARD_GIC_RDIST_BASE, VGICR_SIZE,
+                               vgicr_mmio_handler, NULL);
+    if (rd != 0 || rr != 0)
+        printk("[hv] vGICv3: bus full, registration failed (d=%d r=%d)\n",
+               rd, rr);
+    else
+        printk("[hv] vGICv3: GICD 0x%lx/0x%lx GICR 0x%lx/0x%lx registered\n",
+               (unsigned long)BOARD_GIC_DIST_BASE, (unsigned long)VGICD_SIZE,
+               (unsigned long)BOARD_GIC_RDIST_BASE, (unsigned long)VGICR_SIZE);
+}
