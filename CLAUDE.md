@@ -10,9 +10,11 @@ relationships between modules, all represented using Mermaid. A picture is worth
 A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
  mirrors ACRN's `hypervisor/` structure.
 
-Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch), M1.5 (PSCI), M2 (vGIC SW injection), M2.5 (physical timer + GIC + HW-forwarding).
+Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch), M1.5 (PSCI), M2 (vGIC SW injection), M2.5 (physical timer + GIC + HW-forwarding), **M3 — boot an unmodified single-core (UP) Linux guest to a busybox shell** (QEMU `virt`, GICv3, `-smp 1`).
 
-Current: **M3 — boot an unmodified single-core (UP) Linux guest to a busybox shell** (QEMU `virt`, GICv3, `-smp 1`). SMP is removed from M3 and deferred to its own later milestone (M4); UP boot-to-shell is the smaller, faster first win. M3 is decomposed into five small, dependency-ordered sub-milestones: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
+M3 (done) was decomposed into five small, dependency-ordered sub-milestones, all complete: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell; see `docs/guest-initramfs.md`). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
+
+Next: **M3.5 (SMP)** then **M4 (RK3588 port)**.
 
 ## Build Commands
 
@@ -27,6 +29,10 @@ make clean              # remove build/
 # M3.0+: requires a prebuilt arm64 Linux `Image`. Supply its path:
 #   LINUX_IMAGE=/path/to/Image make run
 # Linux is NOT built in-repo; the kernel is user-supplied.
+
+# M3.4: to boot all the way to a busybox shell, also supply an initramfs:
+#   LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
+# The initramfs is user-supplied (see docs/guest-initramfs.md); not built in-repo.
 ```
 
 Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-linux-gnu-`
@@ -203,7 +209,7 @@ QEMU → _start (head.S)
 | M3.1 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.3 — virtio-console | **done** | virtio-mmio transport + virtio-console + virtqueue + used-buffer IRQ |
-| **M3.4 — Boot to shell** | **current** | initramfs load + DTB initrd nodes → interactive busybox shell prompt |
+| M3.4 — Boot to shell | **done** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell) |
 | M3.5 — SMP | future | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
 | M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |
 
