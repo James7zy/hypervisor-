@@ -22,6 +22,19 @@ void el2_irq_handler(void)
     if (intid == BOARD_VTIMER_IRQ) {
         vgic_inject_hw(&g_vm.vcpu, BOARD_VTIMER_IRQ, BOARD_VTIMER_IRQ, 0xA0);
         gic_priority_drop(intid);   /* EOIR1 only — leave Active (ADR-0001) */
+    } else if (intid == BOARD_PL011_IRQ) {
+        /*
+         * PL011 RX (ttyAMA0 passthrough). Software-inject the SPI into the
+         * guest vGIC so its UART ISR runs and reads the RX byte from the
+         * passed-through DR. Drop AND deactivate the physical SPI: the byte is
+         * already latched in the PL011 FIFO, and QEMU only re-asserts the line
+         * when there is fresh RX data, so this cannot storm. (Unlike the
+         * vtimer, there is no HW-forward LR linkage to gate re-pend.)
+         */
+        vgic_inject_spi(&g_vm.vcpu, BOARD_PL011_IRQ);
+        gic_priority_drop(intid);   /* leave Active so the level line cannot
+                                     * re-pend and storm before the guest's ISR
+                                     * reads DR (mirrors the vtimer, ADR-0001) */
     } else {
         /* Unexpected (incl. spurious 1023): drop AND deactivate. */
         gic_priority_drop(intid);

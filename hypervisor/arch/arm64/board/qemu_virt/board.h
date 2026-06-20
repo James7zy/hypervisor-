@@ -15,6 +15,7 @@
 #define BOARD_GIC_DIST_BASE   0x08000000UL   /* GICD                  */
 #define BOARD_GIC_RDIST_BASE  0x080A0000UL   /* GICR CPU0 RD_base     */
 #define BOARD_VTIMER_IRQ      27U            /* EL1 virtual timer PPI */
+#define BOARD_PL011_IRQ       33U            /* PL011 UART SPI (DTS interrupts=<0 1 4> → 32+1) */
 
 /*
  * M3.0: Linux UP guest. Guest RAM is a dedicated PA region that does NOT
@@ -26,11 +27,11 @@
  * node and the boot-protocol register state use the IPA values.
  */
 #define BOARD_LINUX_RAM_IPA   0x40000000UL  /* guest sees RAM base here     */
-#define BOARD_LINUX_RAM_PA    0x48000000UL  /* backing physical RAM         */
+#define BOARD_LINUX_RAM_PA    0x80000000UL  /* backing physical RAM (1GB-aligned: a Stage-2 L1 1GB block requires a 1GB-aligned output PA) */
 #define BOARD_LINUX_RAM_SIZE  0x10000000UL  /* 256 MB                       */
-#define BOARD_LINUX_IMAGE_PA  0x48080000UL  /* RAM_PA + text_offset 0x80000 */
+#define BOARD_LINUX_IMAGE_PA  0x80080000UL  /* RAM_PA + text_offset 0x80000 */
 #define BOARD_LINUX_DTB_IPA   0x42000000UL  /* guest sees DTB here          */
-#define BOARD_LINUX_DTB_PA    0x4A000000UL  /* RAM_PA + 0x02000000          */
+#define BOARD_LINUX_DTB_PA    0x82000000UL  /* RAM_PA + 0x02000000          */
 
 extern const char board_name[];
 

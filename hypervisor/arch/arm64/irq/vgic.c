@@ -44,12 +44,21 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
 
-/* Device SPIs are software-injected (no physical line). Priority 0xA0 matches
- * the timer-PPI class already used in el2_irq_handler; the guest reorders by
- * its own ICC_PMR/IPRIORITYR. */
+/* Hardware-forwarded SPI injection into LR1 (the vtimer owns LR0 and is
+ * re-injected every tick, so sharing LR0 would clobber this before the guest
+ * takes it). HW=1 with the physical INTID means the guest's deactivate of the
+ * virtual IRQ releases the physical one through the LR linkage — required for a
+ * level-sensitive passthrough line (e.g. PL011 RX) so it does not stay Active
+ * after the first byte. LR1 is saved/restored by vgic_{save,restore}. */
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
 {
-    vgic_inject_sw(vcpu, intid, 0xA0);
+    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_HW | ICH_LR_GROUP1 |
+             ((u64)0xA0 << ICH_LR_PRIO_SHIFT) |
+             ((u64)intid << ICH_LR_PINTID_SHIFT) |
+             ((u64)intid & ICH_LR_VINTID_MASK);
+
+    vcpu->ich_lr[1] = lr;
+    SYSREG_WRITE(ICH_LR1_EL2, lr);
 }
 
 void vgic_restore(struct vcpu *vcpu)

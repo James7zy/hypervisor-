@@ -41,8 +41,11 @@ void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
     /*
      * IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM).
      * Non-identity for the Linux guest: ram_pa is a dedicated region that
-     * does not overlap the hv image at 0x40080000. The 1 GB block output
-     * address must be 1 GB-aligned (low 30 bits zero); ram_pa is.
+     * does not overlap the hv image at 0x40080000. An L1 block is 1 GB, so its
+     * output address MUST be 1 GB-aligned (low 30 bits zero); ram_pa
+     * (BOARD_LINUX_RAM_PA = 0x80000000) is. The mask is an assertion of that
+     * invariant, not a rounding step — if ram_pa were not 1 GB-aligned the
+     * masked-away low bits would silently mis-map the guest.
      */
     l1_table[1] = (ram_pa & 0xFFFFC0000000UL) |
                   S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;

@@ -61,7 +61,14 @@ void vm_run(void)
     vgic_restore(&g_vm.vcpu);
 
     for (;;) {
-        virtio_console_rx_poll();
+        /*
+         * NOTE: do NOT poll virtio-console RX here. The Linux guest runs its
+         * interactive console on console=ttyAMA0 (the PL011 passthrough), so it
+         * reads the PL011 RX FIFO directly. virtio_console_rx_poll() calls
+         * uart_getc(), which drains that same FIFO and would steal the guest's
+         * input. The virtio-console (hvc0) RX path is only needed if the guest
+         * is switched to console=hvc0 (see docs/guest-initramfs.md).
+         */
         vcpu_run(&g_vm.vcpu);
         /* vcpu_run returns to the hv on each handled exit (MMIO data abort,
          * HVC) and on the timer IRQ exit. Re-enter the guest so successive

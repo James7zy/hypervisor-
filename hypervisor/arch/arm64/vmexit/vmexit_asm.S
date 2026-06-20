@@ -68,9 +68,15 @@ vcpu_run:
     ldr     x30,      [x0, #0xF0]
     ldr     x0,       [x0, #0x00]   /* x0 last */
 
-    /* Unmask EL2 IRQs so the physical timer PPI (HCR_EL2.IMO=1) is taken at
-     * EL2 while the guest runs. EL2 auto-masks I on every exception entry. */
-    msr     daifclr, #2
+    /*
+     * Do NOT unmask EL2 IRQs before `eret`. With HCR_EL2.IMO=1 a physical IRQ
+     * taken while the guest runs at EL1 is delivered to EL2 regardless of the
+     * guest's PSTATE.I — it is gated only by EL2's PSTATE.I, which does not
+     * apply once we are at EL1. So the timer PPI is still taken (via the
+     * Lower-EL IRQ vector +0x480). Unmasking here instead opens a
+     * one-instruction window in which the IRQ is taken AT EL2, where vectors.S
+     * routes the current-EL IRQ entry to panic_vector. (See irq_handler_asm.S.)
+     */
     eret
 
 /* ------------------------------------------------------------------ */

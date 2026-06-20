@@ -28,6 +28,11 @@ static inline void mmio_write8(unsigned long addr, u8 val)
     *(volatile u8 *)addr = val;
 }
 
+static inline void mmio_write64(unsigned long addr, u64 val)
+{
+    *(volatile u64 *)addr = val;
+}
+
 void gic_init(void)
 {
     const unsigned long dist = BOARD_GIC_DIST_BASE;
@@ -50,6 +55,22 @@ void gic_init(void)
                  mmio_read32(sgi + GICR_IGROUPR0) | (1U << ppi));
     mmio_write8(sgi + GICR_IPRIORITYR + ppi, 0xA0);
     mmio_write32(sgi + GICR_ISENABLER0, (1U << ppi));
+
+    /* 3b. PL011 UART SPI (INTID 33) in the distributor: Group 1 NS, priority
+     *     0xA0, routed to CPU0 (Aff=0), enabled. The guest's ttyAMA0 driver is
+     *     interrupt-driven; this physical SPI is taken to EL2 (HCR_EL2.IMO) and
+     *     injected into the guest's vGIC by el2_irq_handler so the guest reads
+     *     the RX byte from the passed-through PL011 DR. */
+    {
+        const u32 spi  = BOARD_PL011_IRQ;
+        const u32 word = spi / 32U;          /* register index               */
+        const u32 bit  = spi % 32U;          /* bit within the 32-bit word    */
+        mmio_write32(dist + GICD_IGROUPR + word * 4U,
+                     mmio_read32(dist + GICD_IGROUPR + word * 4U) | (1U << bit));
+        mmio_write8(dist + GICD_IPRIORITYR + spi, 0xA0);
+        mmio_write64(dist + GICD_IROUTER + spi * 8U, 0ULL);   /* Aff3.2.1.0 = 0 */
+        mmio_write32(dist + GICD_ISENABLER + word * 4U, (1U << bit));
+    }
 
     /* 4. EL2 physical CPU interface. */
     SYSREG_WRITE(ICC_SRE_EL2, 0xFULL);          /* SRE|DFB|DIB|Enable */

@@ -79,5 +79,13 @@ el1_irq_handler_asm:
     ldp     x28, x29, [x0, #0xE0]
     ldr     x30,      [x0, #0xF0]
     ldr     x0,       [x0, #0x00]
-    msr     daifclr, #2
+    /*
+     * Do NOT unmask EL2 IRQs here. EL2 has no current-EL IRQ handler (vectors.S
+     * routes "Current EL SP_ELx / IRQ" to panic_vector). A pending physical IRQ
+     * unmasked in the one-instruction window before `eret` is taken AT EL2 and
+     * panics. The `eret` restores the guest's SPSR; with HCR_EL2.IMO=1 the next
+     * physical IRQ is taken from the guest via the Lower-EL vector (+0x480),
+     * which re-enters this handler. A level-sensitive line (e.g. the vtimer,
+     * left Active per ADR-0001) stays pending and is serviced on that path.
+     */
     eret

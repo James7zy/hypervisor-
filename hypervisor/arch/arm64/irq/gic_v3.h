@@ -8,6 +8,11 @@
 #define GICD_CTLR              0x0000U
 #define GICD_CTLR_ENGRP1NS     (1U << 1)   /* Enable Group 1 NS */
 #define GICD_CTLR_ARE_NS       (1U << 4)   /* Affinity Routing Enable, NS */
+/* SPI configuration (INTID >= 32). Index by INTID; see ARM IHI0069. */
+#define GICD_IGROUPR           0x0080U     /* 32 INTIDs per 32-bit word    */
+#define GICD_ISENABLER         0x0100U     /* 32 INTIDs per 32-bit word    */
+#define GICD_IPRIORITYR        0x0400U     /* byte per INTID               */
+#define GICD_IROUTER           0x6000U     /* 64-bit per INTID (from 32)   */
 
 /* GICR (redistributor) register offsets, relative to RD_base. */
 #define GICR_CTLR              0x0000U
