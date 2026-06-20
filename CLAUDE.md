@@ -7,7 +7,7 @@ relationships between modules, all represented using Mermaid. A picture is worth
 
 ## Project Overview
 
-A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
+A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
  mirrors ACRN's `hypervisor/` structure.
 
 Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch), M1.5 (PSCI), M2 (vGIC SW injection), M2.5 (physical timer + GIC + HW-forwarding), **M3 — boot an unmodified single-core (UP) Linux guest to a busybox shell** (QEMU `virt`, GICv3, `-smp 1`).
