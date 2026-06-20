@@ -344,3 +344,65 @@ guest 用 **`TTBR0_EL1`** 做 VA→IPA（它以为到此为止），硬件再用
 bit[38:30]=1 命中 `l1_table[1]` 这个 1GB block，加偏移得真 PA `0x80080000`，最终落在
 `-m 2G` 的真实 DRAM 里（见第 6 节：这个目标 PA 必须命中 `-m` 划出的 DRAM 区间）。两阶段
 对 guest 完全透明，隔离与重定位都发生在 Stage-2 这一层。
+
+---
+
+## 8. `HCR_EL2` 在哪里设置？（Stage-2 总开关 VM bit）
+
+> 疑问：第 7 节说 Stage-2 由 `HCR_EL2.VM=1` 这个总开关启用，那 **`HCR_EL2` 到底在哪
+> 设置的**？
+
+设置分**两步**——一处“算出值并存起来”，另一处“真正写进硬件寄存器”。这是典型的
+**配置与生效分离**。
+
+### 8.1 值在哪里算：`hypervisor/common/vm/vm.c:42`
+
+VM 初始化时把 `HCR_EL2` 的值算好，存进 vCPU 结构体的**软件副本** `vcpu->hcr_el2`
+（`vm.h:18`，offset `0x110`）：
+
+```c
+/* HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC). */
+g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
+                    (1ULL << 31);
+```
+
+各 bit 含义：
+
+| bit | 名称 | 作用 |
+|-----|------|------|
+| 0  | **VM**  | **启用 Stage-2 翻译**（第 7 节那个总开关） |
+| 3  | FMO | 物理 FIQ 路由到 EL2 |
+| 4  | IMO | 物理 IRQ 路由到 EL2（vGIC 注入依赖它） |
+| 5  | AMO | 物理 SError 路由到 EL2 |
+| 31 | RW  | EL1 运行在 AArch64 |
+| 29 | HCD | **未置位（清零）** → 允许 guest 发 HVC（PSCI 走这条） |
+
+此处只写**内存里的结构体字段**，还没碰真硬件。
+
+### 8.2 真正写进硬件：`hypervisor/arch/arm64/vmexit/vmexit_asm.S:41`
+
+每次切进 guest（world switch）前，在汇编里把软件副本加载进真正的 `HCR_EL2` 系统寄存器：
+
+```asm
+/* 2. Configure HCR_EL2 for this vCPU */
+ldr     x1, [x0, #VCPU_HCR_EL2]    // 从 vcpu 结构读出 offset 0x110 的 hcr_el2
+msr     hcr_el2, x1                // 写入硬件 HCR_EL2 —— 到这一句才真正生效
+```
+
+`msr hcr_el2, x1` 执行后，Stage-2（VM bit）、IRQ 路由（IMO）等才对即将运行的 guest
+起作用。
+
+### 8.3 为什么分两步
+
+`HCR_EL2` 是 **per-vCPU** 的状态：在初始化期由 `vm.c` 算一次存进结构体；在**每次进入
+guest 前**由 `vmexit_asm.S` 从结构体加载到硬件。这样将来 **M3.5 多 vCPU** 时，world
+switch 切到哪个 vCPU 就加载哪个 vCPU 的 `hcr_el2`，天然支持每 vCPU 不同配置。
+
+### 8.4 别和 `ICH_HCR_EL2` 混淆
+
+代码里还有一组 `ICH_HCR_EL2`（`vgic.c` / `vgic.h`），那是 **GICv3 虚拟 CPU 接口**的控制
+寄存器（bit0 = EN，启用虚拟 CPU interface），和 `HCR_EL2` **完全是两个寄存器**，只是
+名字像：
+
+- **`HCR_EL2`** = Hypervisor Configuration Register —— 整个 EL2 行为的总配置，含 Stage-2 开关。
+- **`ICH_HCR_EL2`** = Interrupt Controller Hyp Control —— 只管 vGIC 的 list register / 虚拟中断注入。
