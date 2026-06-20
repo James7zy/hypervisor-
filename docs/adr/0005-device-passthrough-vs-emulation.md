@@ -27,6 +27,30 @@ one device) or unnecessary trap overhead.
 The dispatch mechanism for the emulated devices is the MMIO bus + Stage-2
 data-abort decoder (to be recorded by Task 4's ADR).
 
+### Where a guest MMIO access lands, per device
+
+```mermaid
+flowchart TD
+    G["Guest EL1 MMIO access"] --> Q{IPA?}
+
+    Q -->|"PL011 0x0900_0000"| PT["Identity Stage-2 map<br/>to real UART PA"]
+    PT --> HW["Physical PL011<br/>(shared with hypervisor)"]
+    HW --> R1["earlycon works with<br/>zero vGIC/virtio (M3.0 goal)"]
+
+    Q -->|"GIC 0x0800_0000"| TR1["No physical device behind PA<br/>→ Stage-2 data abort → EL2"]
+    Q -->|"virtio 0x0A00_0000"| TR2["No physical device behind PA<br/>→ Stage-2 data abort → EL2"]
+
+    TR1 --> BUS["MMIO bus (ADR-0006)"]
+    TR2 --> BUS
+    BUS -->|GICD / cpu0 GICR| VGIC["vGICv3 emulation<br/>vgic_v3_mmio.c"]
+    BUS -->|virtio frame| VIRT["virtio-console model<br/>dm/virtio_* → bridges to hv UART"]
+
+    classDef pass fill:#e6ffe6,stroke:#0a0;
+    classDef emul fill:#e6f0ff,stroke:#06c;
+    class PT,HW,R1 pass;
+    class TR1,TR2,BUS,VGIC,VIRT emul;
+```
+
 ## Considered Options
 
 - **Passthrough only** — rejected: the guest cannot be given the physical GIC

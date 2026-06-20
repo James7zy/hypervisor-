@@ -19,6 +19,32 @@ and vendor id `0x554D4551` ("QEMU"), and the console backend advertises
 Exactly **one** device is instantiated: a single virtio-console
 (`VIRTIO_CONSOLE_DEVICE_ID` = 3) at frame `0x0A00_0000`, INTID 48.
 
+### Modern (VERSION 2) console: probe → queue setup → I/O
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Guest virtio-mmio driver
+    participant F as Emulated frame @ 0x0A00_0000<br/>(dm/virtio_mmio.c)
+    participant VG as vGIC (ADR-0010)
+    participant U as hv PL011
+
+    D->>F: read MAGIC / VERSION / DEVICE_ID / VENDOR
+    F-->>D: 0x74726976 "virt" / 2 / 3 (console) / "QEMU"
+    Note over D,F: VERSION 2 advertised → driver picks modern transport
+    D->>F: read DEVICE_FEATURES
+    F-->>D: VIRTIO_F_VERSION_1 (bit 32) only
+    D->>F: write QUEUE_DESC / DRIVER / DEVICE_LOW+HIGH<br/>(split addr registers, no legacy guest-page-size)
+    D->>F: QUEUE_READY / STATUS = DRIVER_OK
+
+    Note over D,U: console I/O
+    D->>F: write QUEUE_NOTIFY (TX avail)
+    F->>U: backend bridges bytes to hv UART
+    U-->>F: input bytes
+    F->>VG: inject console SPI INTID 48 (vgic_inject_sw)
+    VG->>D: used-buffer IRQ → driver drains RX
+```
+
 ## Considered Options
 
 - **Modern (VERSION 2) only (chosen)** — cleaner, well-specified register ABI;

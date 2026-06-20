@@ -21,6 +21,37 @@ linear scan matches the faulting IPA to a region; the handler is invoked with a
 `struct mmio_access`, and on a read the result is written back to the guest's
 destination GPR before ELR is advanced past the instruction.
 
+### Data abort → structured access → emulator
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant G as Guest EL1
+    participant V as el1_sync_handler
+    participant M as mmio_handle_data_abort
+    participant B as MMIO bus<br/>(fixed [8] array)
+    participant H as Device handler<br/>(vGIC / virtio)
+
+    G->>V: load/store to emulated IPA<br/>(ESR.EC = 0x24 Data Abort)
+    V->>M: handle_data_abort(regs, esr)
+    alt ISS.ISV = 1
+        M->>M: decode SAS(size), SRT(reg), WnR(dir) from ESR.ISS
+        M->>M: IPA = (HPFAR[43:4]<<8) | (FAR[11:0])
+        M->>B: linear scan: base ≤ IPA < base+len ?
+        B->>H: handler(struct mmio_access)
+        alt read
+            H-->>M: value
+            M->>G: write-back to GPR (SRT==31 → discard, XZR)
+        else write
+            Note over H: SRT==31 → source 0 (XZR)
+        end
+        M->>G: advance ELR past instruction → resume
+    else ISV = 0 or no region
+        M-->>V: return -1 (logged)
+        V->>V: fail-stop / park (ADR-0007)
+    end
+```
+
 ## Considered Options
 
 - **Fixed array + linear lookup (chosen)** — M3.x has at most a handful of

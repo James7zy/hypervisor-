@@ -22,6 +22,33 @@ code with no exerciser.
 - **Group 1 only.** Injected interrupts set `ICH_LR_GROUP1`; the guest drives
   Group-1 enable/priority through its own `ICC_IGRPEN1_EL1`/`ICC_PMR_EL1`.
 
+### Minimal vGIC: every source funnels through LR0
+
+```mermaid
+flowchart LR
+    subgraph SRC["Live interrupt sources"]
+        T["vtimer PPI INTID 27<br/>vgic_inject_hw (ADR-0001)"]
+        C["virtio-console SPI INTID 48<br/>vgic_inject_spi → vgic_inject_sw (ADR-0011)"]
+    end
+
+    T --> LR0
+    C --> LR0
+
+    subgraph VCPU["struct vcpu vGIC state"]
+        LR0["ICH_LR0 ← the only LR written<br/>(GROUP1 set)"]
+        LRX["ICH_LR1..3<br/>(zeroed, saved/restored, never populated)"]
+    end
+
+    subgraph BUS["MMIO bus regions (ADR-0006)"]
+        GICD["GICD @ BOARD_GIC_DIST_BASE"]
+        GICR["cpu0 GICR @ BOARD_GIC_RDIST_BASE<br/>(no per-CPU array)"]
+    end
+
+    LR0 --> G["Guest EL1 receives 1 vIRQ at a time"]
+
+    note["Cap: cannot hold 2 pending vIRQs at once,<br/>no other CPUs. SMP (M3.5) supersedes:<br/>redistributor-per-CPU + multi-LR allocation."]
+```
+
 ## Considered Options
 
 - **Single LR0, cpu0-only, Group 1 (chosen)** — sufficient because the guest's

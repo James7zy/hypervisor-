@@ -23,6 +23,30 @@ hypervisor needs comes from `hypervisor/arch/arm64/board/qemu_virt/board.h`
 Note this is the hypervisor's *own* config; the *guest* still gets a DTB
 (`BOARD_LINUX_DTB_IPA`) that QEMU loads and the boot protocol points the guest at.
 
+### The discarded DTB and the compile-time source of truth
+
+```mermaid
+flowchart TD
+    QEMU["QEMU boot: DTB phys addr in x0"] --> HEAD["head.S forwards x0"]
+    HEAD --> MAIN["hypervisor_main(uintptr_t dtb_phys)"]
+    MAIN -->|"(void)dtb_phys;"| DROP["⊗ discarded<br/>(visible marker of the debt)"]
+
+    BOARD["board.h — BOARD_* constants<br/>(single source of truth)"]
+    BOARD --> CFG["struct vm_config (vm_config.h)"]
+    BOARD --> S2["Stage-2 map (ADR-0004)"]
+    BOARD --> DEV["passthrough/emulate split (ADR-0005)"]
+    CFG --> SUB["UART / GIC / RAM windows / Image+DTB PAs"]
+
+    MAIN --> BOARD
+
+    GDTB["Guest still gets its own DTB<br/>(BOARD_LINUX_DTB_IPA, loaded by QEMU,<br/>pointed at via arm64 boot protocol)"]
+
+    note["M4 (RK3588) supersedes this:<br/>real HW needs runtime DT/ACPI discovery<br/>→ will actually consume dtb_phys"]
+
+    classDef debt fill:#fee,stroke:#c00;
+    class DROP debt;
+```
+
 ## Considered Options
 
 - **Compile-time `BOARD_*` constants (chosen)** — zero runtime code, no parser to

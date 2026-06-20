@@ -17,6 +17,26 @@ guarded by `#ifdef __ASSEMBLER__`. Assembly includes `vm.h` and uses the macros
 Register slots within `vcpu_regs.x[]` are addressed by their literal `#0x08`,
 `#0x10`, … offsets in the save/restore sequences.
 
+### One header, two views — the unenforced contract
+
+```mermaid
+flowchart TB
+    subgraph H["hypervisor/include/vm.h"]
+        direction TB
+        S["C struct definitions<br/>struct vcpu / vcpu_regs / hv_ctx"]
+        M["#ifdef __ASSEMBLER__<br/>#define VCPU_ELR, VCPU_SP_EL1,<br/>HV_SP, HV_CTX_SIZE, …"]
+        S -. "must match (by inspection only)" .- M
+    end
+
+    C["C code<br/>(compiler lays out fields)"] -->|includes, uses structs| S
+    A["vmexit_asm.S<br/>(EL2↔EL1 context switch)"] -->|includes, uses macros + literal #0xNN| M
+
+    M -. "mismatch = silent wrong-register R/W<br/>no compile error, no test" .-> X((corrupted<br/>guest state))
+
+    classDef danger fill:#fee,stroke:#c00;
+    class X danger;
+```
+
 ## Considered Options
 
 - **Hand-maintained offset macros co-located with the structs (chosen)** — no

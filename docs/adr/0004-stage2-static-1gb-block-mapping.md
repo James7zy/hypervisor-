@@ -36,6 +36,27 @@ descriptors**, no L2/L3 tables:
 VMID goes in `VTTBR_EL2[63:48]`; the L1 table base in the low bits (the table is
 4 KB-aligned so `VTTBR_EL2[11:0]` are zero as required).
 
+### The two-descriptor IPA→PA map
+
+```mermaid
+flowchart LR
+    subgraph IPA["Guest IPA space (39-bit, SL0=1)"]
+        I0["l1_table[0]<br/>0x0000_0000–0x3FFF_FFFF<br/>(1 GB block)"]
+        I1["l1_table[1]<br/>0x4000_0000–0x7FFF_FFFF<br/>(1 GB block)"]
+    end
+    subgraph PA["Physical address space"]
+        P0["0x0000_0000–0x3FFF_FFFF<br/>QEMU virt low-peripheral window<br/>GIC 0x0800_0000 · PL011 0x0900_0000 · virtio 0x0A00_0000"]
+        PHV["hv image @ 0x4008_0000<br/>(inside guest IPA RAM window!)"]
+        P1["ram_pa = 0x8000_0000<br/>(1 GB-aligned; needs &gt;1 GB DRAM)"]
+    end
+
+    I0 -->|identity · Device-nGnRE · XN| P0
+    I1 -->|non-identity · Normal WB · Inner-Shareable| P1
+    I1 -. "must NOT identity-map<br/>(would hit hv image)" .-x PHV
+
+    note["GIC/virtio IPAs are identity-mapped Device,<br/>yet still trap: no physical device backs those PAs<br/>→ Stage-2 abort → MMIO emulation (ADR-0005)"]
+```
+
 ## Considered Options
 
 - **Two static 1 GB blocks, L1 only (chosen)** — two writes, no walker, no

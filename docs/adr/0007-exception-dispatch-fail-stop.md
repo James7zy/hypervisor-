@@ -25,6 +25,34 @@ loop. This is a deliberate park, not recovery. HVC is itself **two-level**:
 switches on the specific function ID, replying `SMCCC_NOT_SUPPORTED` for unknown
 ones.
 
+### `handle_exit` dispatch tree
+
+```mermaid
+flowchart TD
+    E["Synchronous exit → el1_sync_handler<br/>handle_exit(regs, esr)"] --> EC{ESR.EC?}
+
+    EC -->|"0x16 HVC"| HVC["handle_hvc"]
+    EC -->|"0x24 Data Abort"| DA["mmio_handle_data_abort<br/>(ADR-0006)"]
+    EC -->|"anything else"| PARK
+
+    HVC --> OWN{SMCCC owner byte?}
+    OWN -->|"0x84 / 0xC4 = PSCI"| PSCI["psci_handle"]
+    OWN -->|"other function ID"| FID{known FID?}
+    FID -->|yes| SERVE["service it"]
+    FID -->|no| NS["return SMCCC_NOT_SUPPORTED<br/>(non-fatal, defined ABI)"]
+
+    DA --> OK{emulated ok?}
+    OK -->|yes| RES["advance ELR → resume guest"]
+    OK -->|"no region / ISV=0"| PARK
+
+    PARK["FAIL-STOP: print EC/ESR/ELR<br/>infinite wfi (deliberate park)"]
+
+    classDef fatal fill:#fee,stroke:#c00;
+    classDef ok fill:#e6ffe6,stroke:#0a0;
+    class PARK fatal;
+    class RES,SERVE,PSCI,NS ok;
+```
+
 ## Considered Options
 
 - **Fail-stop / park on unhandled exits (chosen)** — the safest default while the

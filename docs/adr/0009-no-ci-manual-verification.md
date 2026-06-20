@@ -22,6 +22,26 @@ CI:
    (`[hv] Hello from EL2, …`) within a few seconds, and at M3.4 boots through to
    an interactive busybox shell.
 
+### The three-step gate
+
+```mermaid
+flowchart TD
+    START["Change ready"] --> B["1 · Build check<br/>make (-Werror → any warning fails)"]
+    B -->|warning / error| FAIL["✗ not done"]
+    B -->|zero warnings| S["2 · Static inspection<br/>readelf -h hypervisor.elf"]
+    S -->|"entry ≠ 0x40080000<br/>or .text ≠ 0x40080000"| FAIL
+    S -->|invariants pinned| R["3 · Run + observe<br/>make run"]
+    R -->|no banner / hang| FAIL
+    R -->|"[hv] Hello from EL2 …<br/>(M3.4: busybox shell)"| PASS["✓ done"]
+
+    note["No CI, no test suite.<br/>Everything past 'it booted and printed'<br/>is unguarded → reviewers compensate by inspection<br/>(esp. asm/C offsets, ADR-0003)"]
+
+    classDef pass fill:#e6ffe6,stroke:#0a0;
+    classDef fail fill:#fee,stroke:#c00;
+    class PASS pass;
+    class FAIL fail;
+```
+
 ## Considered Options
 
 - **Three-step manual gate (chosen)** — matches what can actually be asserted

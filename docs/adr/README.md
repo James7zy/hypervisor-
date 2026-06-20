@@ -75,6 +75,13 @@ Copy [`template.md`](template.md) for a new record. The minimal shape is:
 
 `0001-vtimer-hardware-forwarding.md` is a good worked example of this shape.
 
+Every ADR should also carry **at least one Mermaid diagram** — a picture is worth
+a thousand words. Choose the type that fits the decision: a `sequenceDiagram` for a
+flow over time (e.g. 0001, 0006, 0011), a `flowchart`/`graph` for dispatch trees,
+address maps or per-device routing (e.g. 0004, 0005, 0007, 0008, 0009), or a
+`classDiagram` for struct/object relationships (e.g. 0002, 0003, 0010). The
+template carries a placeholder block to fill in.
+
 ## ADRs vs specs
 
 This repo also keeps per-milestone design documents under

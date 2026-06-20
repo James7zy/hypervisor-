@@ -14,6 +14,33 @@ smallest practical increments.
 vCPU array, no allocator, and no scheduler. Code may refer to the guest by the
 `g_vm` symbol directly, including from assembly.
 
+### The single global object and its load-bearing consumers
+
+```mermaid
+flowchart TB
+    subgraph OBJ["Single statically-allocated object (g_vm)"]
+        direction TB
+        GVM["g_vm<br/>(struct vm): stage2 config, VMID"]
+        VCPU["vcpu<br/>(struct vcpu): sys regs ELR/SP_EL1, ich_lr0..3"]
+        REGS["vcpu_regs (first member)<br/>x[0..30] — so &vcpu == &vcpu.regs"]
+        GVM -->|exactly one| VCPU
+        VCPU -->|first field| REGS
+    end
+
+    VM["common/vm/vm.c<br/>the one guest; vm_run = plain re-enter loop"]
+    ASM["arch/.../vmexit_asm.S<br/>adrp x0, g_vm to reach guest frame"]
+    S2["arch/.../mmu/stage2.c<br/>one l1_table, one VMID"]
+    VGIC["arch/.../irq/vgic.c<br/>inject into &g_vm.vcpu unconditionally"]
+
+    VM -.-> GVM
+    ASM -.-> GVM
+    S2 -.-> GVM
+    VGIC -.-> VCPU
+
+    NOTE["Address known at link time → assembly reaches it with adrp/add.<br/>Superseded by M3.5 (SMP)."]
+    OBJ -.- NOTE
+```
+
 ## Considered Options
 
 - **Single global `g_vm` (chosen)** — zero allocation, the address is known at

@@ -22,6 +22,35 @@ through the LR linkage. This requires `ICC_CTLR_EL1.EOImode = 1` at EL2.
 A second, software injection path (`ICH_LR.HW=0`, `vgic_inject_sw`) is retained for
 future virtual sources that have no physical INTID to forward (virtio, SGIs/IPIs).
 
+### Why software-only re-pends (the storm), and how HW-forwarding breaks it
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant HW as Phys timer / GIC<br/>(INTID 27, level)
+    participant EL2 as EL2 IRQ handler
+    participant LR as ICH_LR0
+    participant G as Guest EL1
+
+    Note over HW,G: ✗ Software injection only (rejected)
+    HW->>EL2: INTID 27 pending (IMO=1 → EL2)
+    EL2->>LR: inject vIRQ (HW=0)
+    EL2->>HW: deactivate INTID 27 at GIC
+    Note over HW: line still asserted<br/>(guest hasn't touched CNTV_CTL)
+    HW-->>EL2: re-pend immediately
+    Note over EL2,G: preempts before guest runs 1 instr → storm
+
+    Note over HW,G: ✓ Hardware-forwarded injection (chosen)
+    HW->>EL2: INTID 27 pending
+    EL2->>LR: inject vIRQ (HW=1, pINTID=27)
+    EL2->>HW: priority-drop only (ICC_EOIR1_EL1)
+    Note over HW: phys INTID stays Active → cannot re-pend
+    EL2->>G: eret into guest
+    G->>G: handler writes CNTV_CTL (disarm)
+    G->>LR: deactivate vIRQ
+    LR-->>HW: LR linkage releases phys INTID
+```
+
 ## Considered Options
 
 - **Software injection only** — rejected: causes the storm above for any
