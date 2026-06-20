@@ -114,17 +114,92 @@ grep -rn '!EL' hypervisor/        # → head.S:61 panic_early
 
 **用指令 trace 验证 guest 在执行什么:**
 
+`grep` 只告诉我们"`!EL` 出自 `panic_early`",但**没证明 guest 真的跑到了那里**
+—— 也可能是别的路径误打了 4 个字节。要拿铁证,就让 QEMU 把**实际执行过的指令**
+打出来,逐条跟符号表对齐。
+
+#### (a) 开 trace:`-d in_asm,cpu`
+
+在 §0 的反馈环命令里,把诊断开关换成 `in_asm,cpu`,落到单独的日志:
+
 ```sh
-... -d in_asm,cpu -D /tmp/asm.log ...
-grep -E '^ PC=0000000040080000' /tmp/asm.log   # 找 guest 入口执行点
+timeout 80 qemu-system-aarch64 \
+  -machine virt,virtualization=on,gic-version=3 -cpu cortex-a72 -smp 1 -m 2G \
+  -nographic -serial mon:stdio -kernel build/hypervisor.elf \
+  -device loader,file=$IMAGE,addr=0x80080000 \
+  -device loader,file=build/guest/guest.dtb,addr=0x82000000 \
+  -device loader,file=$INITRD,addr=0x84000000 \
+  -d in_asm,cpu -D /tmp/asm.log \
+  </dev/null >/tmp/boot.log 2>&1
 ```
 
-看到入口处执行的指令字节是 `a90038d5...`(= `mrs x9, mpidr_el1`),再往下到
-`0x40080060` 执行的正是 `panic_early`:把 `'!' 'E' 'L' '\n'`(`X10=0x21=='!'`)
-写到 UART base `X09=0x09000000`。
+两个标志各管一半:
+
+- `in_asm` —— 每翻译一个 **TB(translation block,一段基本块)**,就把它的
+  **guest 物理/虚拟 PC + 反汇编**打一次。注意是"**首次翻译时**"打印,不是每次执行
+  都打;同一个块第二次跑(命中翻译缓存)**不会**再出现。所以 `in_asm` 适合回答
+  "**有没有执行到这段代码**",不适合数执行次数。
+- `cpu` —— 每进一个 TB 时 dump 一次**全寄存器**(`X0..X30 / PC / SP / PSTATE`),
+  这样能把"执行到哪"和"当时寄存器是什么"对上。
+
+> 坑:`in_asm` 的输出量很大(整个 boot 几十 MB),务必 `-D` 落盘再 `grep`,不要
+> 直接刷屏。只想看一小段时,也可以配合 `-dfilter 0x40080000..0x40081000` 把
+> trace 限定在某个地址区间(本步没用到,但定位窄区间时很省事)。
+
+#### (b) 在 trace 里定位 guest 入口
+
+日志里 `in_asm` 的块头长这样(`----` 分隔每个 TB,`IN:` 后面跟 PC 和反汇编),
+`cpu` 的寄存器 dump 则以 `PC=...` 开头。先按 guest 入口地址 `0x40080000`
+(= `BOARD_LINUX_ENTRY`,guest IPA)抓:
+
+```sh
+grep -n -E 'IN: |0x0*40080000' /tmp/asm.log | head        # 找入口块在第几行
+grep -E '^PC=0000000040080000' /tmp/asm.log | head        # cpu dump 里入口执行点
+```
+
+`-d int`(§3 会重用)里也能交叉印证:`Exception return from EL2 to EL1 PC
+0x40080000` —— `eret` 确实把 PC 投到了 `0x40080000`,所以 trace 里这个地址**是
+guest 在跑**,不是 boot CPU 早期那次。
+
+#### (c) 把执行到的指令跟符号对齐
+
+入口块在 `/tmp/asm.log` 里反汇编出来大致是:
+
+```
+----------------
+IN:
+0x0000000040080000:  d53800a9  mrs   x9, mpidr_el1
+0x0000000040080004:  92400d29  and   x9, x9, #0xff
+0x0000000040080008:  b4000069  cbz   x9, ...        ; boot CPU 继续
+...
+0x0000000040080060:  ...       <panic_early: 往 UART 写 '!' 'E' 'L'>
+```
+
+(若日志里是裸字节 `a90038d5`,那是小端的 `d53800a9` = `mrs x9, mpidr_el1`;
+endianness 别看反了。)拿这些地址跟 hv 自己的符号表对照,确认它们就是 `head.S`:
+
+```sh
+aarch64-none-linux-gnu-nm build/hypervisor.elf | sort | grep -iE '_start|panic_early'
+aarch64-none-linux-gnu-objdump -d build/hypervisor.elf \
+  --start-address=0x40080000 --stop-address=0x40080070
+```
+
+`objdump` 反汇编出来的指令序列(`mrs x9, mpidr_el1` 开头、`0x40080060` 处是
+`panic_early` 往 UART base 写字符)和 trace 里执行到的**逐条吻合**;`cpu` dump
+也佐证了:`panic_early` 那几个块里 `X10=0x21`(`'!'`)、`X09=0x09000000`
+(PL011 base),正是把 `!EL` 写出去的那段。
+
+**关键:同一个 IPA(`0x40080000`)既是 guest 入口、又是 hv 自己 `head.S` 的
+入口。** trace 证明 `eret` 之后 CPU 执行的指令字节 = hv 镜像的指令,而非 Linux
+Image 的指令。
 
 **推论:guest 在 IPA `0x40080000` 执行的是 hv 自己的 `head.S`,不是 Linux。**
-说明 Stage-2 把 guest 的 RAM 映射到了**错误的 PA**。
+说明 Stage-2 把 guest 的 RAM 映射到了**错误的 PA**(它把 IPA `0x4008_0000`
+翻成了 hv 镜像所在的 PA `0x4008_0000`,而不是 Linux Image 被 loader 写入的
+`0x8008_0000`)。
+
+> 一句话方法论:`grep` 找出"谁可能打印",`in_asm`+`cpu` trace 证明"确实执行到
+> 了那里、且寄存器对得上"。前者缩小范围,后者把"猜"变成"证"。
 
 **算 Stage-2 描述符:**
 

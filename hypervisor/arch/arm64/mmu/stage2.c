@@ -55,8 +55,12 @@ void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
 
 void stage2_activate(const struct vcpu *vcpu)
 {
+    /* dsb register 
+     * Part D → Chapter D8 → D8.2 Translation process → D8.2.6 Translation table walk properties → 
+     * “Ordering of memory accesses from translation table walks”
+     * */
     asm volatile(
-        "dsb ish\n"         /* DDI0487 D5.7.2: page table writes must reach TLB walker */
+        "dsb ish\n"
         "msr vtcr_el2,  %0\n"
         "msr vttbr_el2, %1\n"
         "isb\n"
@@ -65,3 +69,4 @@ void stage2_activate(const struct vcpu *vcpu)
         : "memory"
     );
 }
+

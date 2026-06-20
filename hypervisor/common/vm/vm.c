@@ -70,10 +70,16 @@ void vm_run(void)
          * is switched to console=hvc0 (see docs/reference/guest-initramfs.md).
          */
         vcpu_run(&g_vm.vcpu);
-        /* vcpu_run returns to the hv on each handled exit (MMIO data abort,
-         * HVC) and on the timer IRQ exit. Re-enter the guest so successive
-         * timer PPIs (injected by el2_irq_handler) keep advancing guest time.
-         * The HVC "done" path still calls hv_restore(), which longjmps past
-         * this loop and out of vm_run. */
+        /* Most synchronous exits (MMIO data abort, PSCI, unknown HVC) eret
+         * straight back to the guest from el1_sync_handler and never return to
+         * C. vcpu_run returns here only on the timer IRQ exit; the loop then
+         * re-enters the guest so successive timer PPIs (injected by
+         * el2_irq_handler) keep advancing guest time.
+         *
+         * The HC_GUEST_DONE HVC (an M2 debug hook a real Linux guest never
+         * issues) calls hv_restore(), which restores g_hv_ctx and rets to the
+         * most recent vcpu_run call site -- i.e. back into this same loop body,
+         * not out of vm_run. With a single UP vCPU and no scheduler this loop
+         * never exits; an exit path out of vm_run arrives with M3.5 (SMP). */
     }
 }
