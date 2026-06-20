@@ -75,10 +75,10 @@ VMID goes in `VTTBR_EL2[63:48]`; the L1 table base in the low bits (the table is
   than 1 GB** (`-m 2G` in `scripts/run-qemu.sh`). With `-m 1G` DRAM ends exactly
   at `0x8000_0000` and the guest Image fetch external-aborts. This is the direct
   cost of choosing a 1 GB-aligned base over subdividing to L2.
-- **Doc drift to fix in a later task:** `docs/stage2.md` §5 predicted that M3.1
+- **Doc drift to fix in a later task:** `docs/reference/stage2.md` §5 predicted that M3.1
   would "carve a hole" by splitting the L1 block into L2/L3 so GIC accesses
   fault. The code did **not** take that path — it relies on the absent-PA-device
-  fault described above and the two blocks are unchanged. `docs/stage2.md` should
+  fault described above and the two blocks are unchanged. `docs/reference/stage2.md` should
   be reconciled with this ADR.
 - Single L1 table ↔ single VMID ↔ single guest; this is one of the load-bearing
   consequences of [[0002-single-global-vm-single-vcpu]].

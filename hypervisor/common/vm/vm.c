@@ -67,7 +67,7 @@ void vm_run(void)
          * reads the PL011 RX FIFO directly. virtio_console_rx_poll() calls
          * uart_getc(), which drains that same FIFO and would steal the guest's
          * input. The virtio-console (hvc0) RX path is only needed if the guest
-         * is switched to console=hvc0 (see docs/guest-initramfs.md).
+         * is switched to console=hvc0 (see docs/reference/guest-initramfs.md).
          */
         vcpu_run(&g_vm.vcpu);
         /* vcpu_run returns to the hv on each handled exit (MMIO data abort,

@@ -12,7 +12,7 @@ A learning/research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) firs
 
 Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch), M1.5 (PSCI), M2 (vGIC SW injection), M2.5 (physical timer + GIC + HW-forwarding), **M3 — boot an unmodified single-core (UP) Linux guest to a busybox shell** (QEMU `virt`, GICv3, `-smp 1`).
 
-M3 (done) was decomposed into five small, dependency-ordered sub-milestones, all complete: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell; see `docs/guest-initramfs.md`). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
+M3 (done) was decomposed into five small, dependency-ordered sub-milestones, all complete: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell; see `docs/reference/guest-initramfs.md`). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
 
 **M3 was first validated by a real QEMU boot on 2026-06-19** (until then every M3.x sub-milestone was verified statically only — build + `readelf` — and the live boot was deferred as an "operator handoff"). That first boot found and fixed three chained bugs (Stage-2 1 GB-block mis-alignment, guest RAM placed past the end of `-m 1G` DRAM, and an IRQ taken at EL2 in the `daifclr`→`eret` window) and wired up interactive PL011 input. The committed `scripts/run-qemu.sh` now boots Linux 6.12.93 to an interactive `~ #` shell. Full step-by-step diagnosis: `docs/debug/m3-boot-debug-walkthrough.md`; result summary: `docs/debug/m3-boot-verification.md`.
 
@@ -34,7 +34,7 @@ make clean              # remove build/
 
 # M3.4: to boot all the way to a busybox shell, also supply an initramfs:
 #   LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
-# The initramfs is user-supplied (see docs/guest-initramfs.md); not built in-repo.
+# The initramfs is user-supplied (see docs/reference/guest-initramfs.md); not built in-repo.
 ```
 
 Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-walkthrough.md`):
