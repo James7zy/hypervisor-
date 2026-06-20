@@ -23,5 +23,10 @@ build/
 # Claude Code local settings
 .claude/
 
+# GNU GLOBAL tag files
+GPATH
+GRTAGS
+GTAGS
+
 # OS
 .DS_Store
