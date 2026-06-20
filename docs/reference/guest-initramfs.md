@@ -28,18 +28,28 @@ DTB; clear of the kernel at IPA `0x40080000`.
 ## Recipe (host tools — needs a static busybox binary)
 
 You need a statically-linked arm64 `busybox`. Either download a prebuilt
-static aarch64 busybox, or build it:
+static aarch64 busybox, or build it from the upstream source:
 
 ```sh
-# (optional) build a static arm64 busybox
+# build a static arm64 busybox from the upstream git
 git clone --depth=1 https://git.busybox.net/busybox
 cd busybox
 make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- defconfig
-# enable "Build static binary (no shared libs)" in: make menuconfig
+# Enable static linking non-interactively (equivalent to ticking
+# "Build static binary (no shared libs)" in `make menuconfig`):
+sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- -j"$(nproc)"
-# -> ./busybox  (static aarch64 ELF)
+file busybox   # must be: ELF ... ARM aarch64 ... statically linked
 cd ..
 ```
+
+> **实测(2026-06-19):** 用上游 `https://git.busybox.net/busybox` 的 master
+> (`git clone --depth=1`,当时是 **busybox 1.39.0**)交叉编译,用的是和内核同一
+> 套工具链 `aarch64-none-linux-gnu-` 14.2。产物 `./busybox` 约 2.1 MB,打成的
+> initramfs 约 1.2 MB。**必须静态链接**(`CONFIG_STATIC=y`):initramfs 里没有
+> 动态链接器(`ld-linux-aarch64.so`)和共享库,动态版的 busybox 一进去就因找不到
+> 解释器而失败,到不了 shell。注意 host 自带的 `/usr/bin/busybox` 通常是 x86-64
+> 的,guest(arm64)用不了——必须自己编一个 aarch64 的。
 
 Assemble the initramfs tree:
 
