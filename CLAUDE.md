@@ -14,6 +14,8 @@ Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context s
 
 M3 (done) was decomposed into five small, dependency-ordered sub-milestones, all complete: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell; see `docs/guest-initramfs.md`). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
 
+**M3 was first validated by a real QEMU boot on 2026-06-19** (until then every M3.x sub-milestone was verified statically only — build + `readelf` — and the live boot was deferred as an "operator handoff"). That first boot found and fixed three chained bugs (Stage-2 1 GB-block mis-alignment, guest RAM placed past the end of `-m 1G` DRAM, and an IRQ taken at EL2 in the `daifclr`→`eret` window) and wired up interactive PL011 input. The committed `scripts/run-qemu.sh` now boots Linux 6.12.93 to an interactive `~ #` shell. Full step-by-step diagnosis: `docs/debug/m3-boot-debug-walkthrough.md`; result summary: `docs/debug/m3-boot-verification.md`.
+
 Next: **M3.5 (SMP)** then **M4 (RK3588 port)**.
 
 ## Build Commands
@@ -34,6 +36,17 @@ make clean              # remove build/
 #   LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 # The initramfs is user-supplied (see docs/guest-initramfs.md); not built in-repo.
 ```
+
+Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-walkthrough.md`):
+- **`scripts/run-qemu.sh` uses `-m 2G` and this is required** — guest RAM is backed
+  at the 1 GB-aligned PA `0x80000000` (so the Stage-2 L1 1 GB block can map it),
+  which is only inside QEMU `virt` DRAM when more than 1 GB is present (ADR-0004).
+- **The kernel `Image` must fit the address budget** (~31 MB: Image at PA `0x80080000`,
+  DTB at `0x82000000`). A full arm64 `defconfig` Image is ~37 MB and overruns the
+  DTB; trim unused subsystems (NET/PCI/USB/DRM/DEBUG_INFO, keep PL011 + virtio +
+  devtmpfs + initramfs) to get under budget.
+- **The Makefile does not track header dependencies** — after editing any header
+  (e.g. `board.h`), run `make clean` or stale `.o`s relink with old values.
 
 Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-linux-gnu-`
 
@@ -209,7 +222,7 @@ QEMU → _start (head.S)
 | M3.1 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.3 — virtio-console | **done** | virtio-mmio transport + virtio-console + virtqueue + used-buffer IRQ |
-| M3.4 — Boot to shell | **done** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell) |
+| M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
 | M3.5 — SMP | future | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
 | M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |
 

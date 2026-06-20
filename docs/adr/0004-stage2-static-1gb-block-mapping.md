@@ -1,6 +1,8 @@
 # Map guest Stage-2 with two static 1 GB block descriptors
 
-> **Status:** Accepted. **Milestone:** M1 (introduced); refined through M3.x.
+> **Status:** Accepted. **Milestone:** M1 (introduced); refined through M3.x;
+> first validated by a real Linux boot on 2026-06-19 (which corrected the
+> `ram_pa` alignment — see below).
 
 The single Linux guest needs a Stage-2 (IPA→PA) translation that gives it RAM and
 lets it reach the low-address peripheral window of QEMU `virt`. A full
@@ -18,8 +20,18 @@ descriptors**, no L2/L3 tables:
   Covers the QEMU `virt` low-peripheral window (PL011 @ `0x0900_0000`,
   GIC @ `0x0800_0000`, virtio-mmio @ `0x0A00_0000`).
 - `l1_table[1]`: IPA `0x4000_0000–0x7FFF_FFFF` → **non-identity** to `ram_pa`,
-  Normal Write-Back, Inner-Shareable. Guest RAM. The 1 GB block output must be
-  1 GB-aligned; `ram_pa` (`0x4800_0000`) is.
+  Normal Write-Back, Inner-Shareable. Guest RAM. An L1 block is 1 GB, so its
+  output PA **must be 1 GB-aligned** (low 30 bits zero); `ram_pa`
+  (`0x8000_0000`) is.
+
+  > **Correction (2026-06-19, first real QEMU boot).** This slot originally used
+  > `ram_pa = 0x4800_0000`, which is **not** 1 GB-aligned. The code masks the
+  > output with `& 0xFFFF_C000_0000`, which silently rounded `0x4800_0000` down
+  > to `0x4000_0000` — the hypervisor's own image — so the guest executed the hv's
+  > `head.S` instead of Linux (it printed `!EL`). The bug was invisible until the
+  > guest was actually booted because every milestone up to M3.4 was verified
+  > statically only. Fixed by moving guest RAM to the 1 GB-aligned PA
+  > `0x8000_0000`. See `docs/debug/m3-boot-debug-walkthrough.md`.
 
 VMID goes in `VTTBR_EL2[63:48]`; the L1 table base in the low bits (the table is
 4 KB-aligned so `VTTBR_EL2[11:0]` are zero as required).
@@ -36,8 +48,13 @@ VMID goes in `VTTBR_EL2[63:48]`; the L1 table base in the low bits (the table is
   page-granular control.
 - **Identity-map RAM as well** — rejected: the hypervisor image loads at PA
   `0x4008_0000`, inside the guest's IPA RAM window `0x4000_0000+`. RAM is
-  therefore mapped **non-identity** to a dedicated `ram_pa` that does not overlap
-  the hv image.
+  therefore mapped **non-identity** to a dedicated `ram_pa` (`0x8000_0000`) that
+  does not overlap the hv image.
+- **Keep `ram_pa` at `0x4800_0000` and subdivide to L2 (2 MB blocks)** — the
+  other way to fix the alignment bug above: a 2 MB block *can* map a 128 MB-aligned
+  base, so RAM could stay at `0x4800_0000` inside 1 GB of DRAM. Rejected for now to
+  keep the two-block L1-only design; the cost is that the chosen 1 GB-aligned base
+  forces the guest to be backed by **>1 GB** of physical DRAM (see Consequences).
 
 ## Consequences
 
@@ -52,6 +69,12 @@ VMID goes in `VTTBR_EL2[63:48]`; the L1 table base in the low bits (the table is
 - Granularity is 1 GB. If a future need requires page-granular Stage-2 (e.g.
   protecting a sub-region, or true MMIO "holes"), `l1_table[0]` must be
   subdivided into an L2/L3 subtree. That work is not yet present.
+- **Guest RAM must be backed by >1 GB of DRAM.** Because `ram_pa = 0x8000_0000`
+  (1 GB-aligned, as the L1 block requires) and QEMU `virt` DRAM starts at
+  `0x4000_0000`, the backing PA is only inside memory when QEMU is given **more
+  than 1 GB** (`-m 2G` in `scripts/run-qemu.sh`). With `-m 1G` DRAM ends exactly
+  at `0x8000_0000` and the guest Image fetch external-aborts. This is the direct
+  cost of choosing a 1 GB-aligned base over subdividing to L2.
 - **Doc drift to fix in a later task:** `docs/stage2.md` §5 predicted that M3.1
   would "carve a hole" by splitting the L1 block into L2/L3 so GIC accesses
   fault. The code did **not** take that path — it relies on the absent-PA-device
