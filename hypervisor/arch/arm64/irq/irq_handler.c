@@ -14,15 +14,18 @@
 #include <board.h>
 #include <vgic.h>
 #include <gic_v3.h>
+#include "vgic_debug.h"
 
 void el2_irq_handler(void)
 {
     u32 intid = gic_ack_irq();
 
     if (intid == BOARD_VTIMER_IRQ) {
+        vgic_dbg("inject HW PPI=%u (timer, ICH_LR0)\n", intid);
         vgic_inject_hw(&g_vm.vcpu, BOARD_VTIMER_IRQ, BOARD_VTIMER_IRQ, 0xA0);
         gic_priority_drop(intid);   /* EOIR1 only — leave Active (ADR-0001) */
     } else if (intid == BOARD_PL011_IRQ) {
+        vgic_dbg("inject SPI=%u (PL011 RX, ICH_LR1)\n", intid);
         /*
          * PL011 RX (ttyAMA0 passthrough). Software-inject the SPI into the
          * guest vGIC so its UART ISR runs and reads the RX byte from the

@@ -14,6 +14,7 @@
 #include <vm.h>
 #include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
+#include "vgic_debug.h"
 
 /* ── GICD shadow state (1024 INTIDs => 32 words of 1 bit/INTID) ── */
 struct vgicv3_dist {
@@ -150,6 +151,10 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
 {
     (void)ctx;
 
+    vgic_dbg("GICD %s off=0x%lx size=%d data=0x%lx\n",
+             acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
+             (int)acc->size, (unsigned long)acc->data);
+
     /* 64-bit IROUTER access. */
     if (acc->size == 8U &&
         acc->offset >= VGICD_IROUTER_BASE && acc->offset <= VGICD_IROUTER_END) {
@@ -278,6 +283,10 @@ static void vgicr_write_sgi(u64 off, u32 val)
 static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
 {
     (void)ctx;
+
+    vgic_dbg("GICR %s off=0x%lx size=%d data=0x%lx\n",
+             acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
+             (int)acc->size, (unsigned long)acc->data);
 
     bool sgi = (acc->offset >= VGICR_SGI_OFFSET);
     u64  off = sgi ? (acc->offset - VGICR_SGI_OFFSET) : acc->offset;
