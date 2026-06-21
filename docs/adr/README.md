@@ -114,3 +114,4 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | [0009](0009-no-ci-manual-verification.md) | Verify with a three-step manual gate, not an automated test suite | Accepted (M0) |
 | [0010](0010-vgic-scope-cpu0-lr0-group1.md) | Scope the vGICv3 to one cpu0 redistributor, one list register, Group 1 | Accepted (M2/M3.2) |
 | [0011](0011-virtio-mmio-v2-modern-only.md) | Implement virtio-mmio as modern (VERSION 2) only, no legacy | Accepted (M3.3) |
+| [0012](0012-physical-gicv3-ownership.md) | Let the hypervisor own the physical GICv3; the guest sees only a virtual GIC | Accepted (M2.5; extended M3.0/M3.2) |
