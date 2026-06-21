@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: TBD */
 #include <types.h>
 #include <vm.h>
+#include <board.h>
+#include <printk.h>
 #include "stage2.h"
 
 /*
@@ -28,15 +30,39 @@
 #define S2_SH_ISH       (0x3ULL << 8)   /* Inner Shareable */
 #define S2_AF           (1ULL   << 10)  /* Access Flag */
 #define S2_XN           (1ULL   << 54)  /* Execute-never */
+#define S2_TABLE        0x3ULL          /* Table descriptor: bits[1:0]=0b11 (vs block 0b01) */
 
 /* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero. */
 static u64 l1_table[512] __attribute__((aligned(4096)));
 
+/*
+ * L2 table backing l1_table[0] (IPA 0x00000000–0x3FFFFFFF). 512 × 2 MB blocks,
+ * identity Device-nGnRE, EXCEPT the one entry covering GICD (0x08000000) +
+ * GICR (0x080A0000): left invalid so guest accesses fault → vgic_v3_mmio shadow.
+ */
+static u64 l2_dev[512] __attribute__((aligned(4096)));
+
 void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
 {
-    /* IPA 0x00000000–0x3FFFFFFF → PA identity: Device (covers PL011 @ 0x09000000) */
-    l1_table[0] = 0x00000000UL |
-                  S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
+    /*
+     * IPA 0x00000000–0x3FFFFFFF: split the old 1 GB Device block into an L2
+     * table so GICD/GICR can be punched out. Each L2 entry is 2 MB; fill all
+     * as identity Device-nGnRE (covers PL011 @ 0x09000000), then invalidate the
+     * single 2 MB entry holding GICD+GICR → guest access faults → MMIO trap →
+     * vgic_v3_mmio shadow emulation (ADR-0012).
+     */
+    for (u32 i = 0; i < 512U; i++)
+        l2_dev[i] = ((u64)i << 21) |
+                    S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
+
+    u32 gic_l2_idx = (u32)(BOARD_GIC_DIST_BASE >> 21);
+    if ((u32)(BOARD_GIC_RDIST_BASE >> 21) != gic_l2_idx)
+        printk("[hv] stage2: WARN GICD/GICR span >1 L2 entry "
+               "(D=%u R=%u); punch-hole only covers D's entry\n",
+               gic_l2_idx, (u32)(BOARD_GIC_RDIST_BASE >> 21));
+    l2_dev[gic_l2_idx] = 0;   /* invalid → fault */
+
+    l1_table[0] = (u64)(uintptr_t)l2_dev | S2_TABLE;
 
     /*
      * IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM).
