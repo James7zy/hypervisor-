@@ -45,5 +45,9 @@
   列表寄存器;`vgic_inject_sw` / `_hw` / `_spi` 三者区别(HW 位、pINTID、LR0/LR1
   分配);`el2_irq_handler` 按 INTID 选注入方式,以及为何 HW 转发只 drop 不
   deactivate。配套 [[adr-0001]]。
+- [vgic-debug-logging.md](vgic-debug-logging.md) — 内置 vGIC 调试日志开关
+  `CONFIG_DEBUG_VGIC`(默认关、零开销):怎么开、4 个打印点(GICD/GICR 寄存器影子
+  访问 + timer PPI / PL011 SPI 注入)的字段含义、典型 boot 片段怎么读、怎么据此判断
+  punch-hole / 注入链是否正常。续 [[vgic-injection]]、配套 [[adr-0012]]。
 
 > 实测启动到 shell 的完整过程见 `docs/debug/m3-boot-debug-walkthrough.md`。
