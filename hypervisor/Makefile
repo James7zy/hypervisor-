@@ -5,14 +5,9 @@ hv-objs := \
     lib/string.o \
     lib/print.o \
     common/vm/vm.o \
-    common/psci/psci.o \
-    dm/gpa.o \
-    dm/virtqueue.o \
-    dm/virtio_mmio.o \
-    dm/virtio_console.o
+    common/psci/psci.o
 
 hv-includes := \
     -Ihypervisor/include \
     -Ihypervisor/common/vm \
-    -Ihypervisor/common/psci \
-    -Ihypervisor/dm
+    -Ihypervisor/common/psci

@@ -7,14 +7,8 @@ relationships between modules, all represented using Mermaid. A picture is worth
 
 ## Project Overview
 
-A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor. The directory layout
- mirrors ACRN's `hypervisor/` structure.
-
-Completed: M0 (Hello EL2), M1 (bare-metal SVM guest: Stage-2 MMU, vCPU context switch, HVC dispatch), M1.5 (PSCI), M2 (vGIC SW injection), M2.5 (physical timer + GIC + HW-forwarding), **M3 — boot an unmodified single-core (UP) Linux guest to a busybox shell** (QEMU `virt`, GICv3, `-smp 1`).
-
-M3 (done) was decomposed into five small, dependency-ordered sub-milestones, all complete: **M3.0** (Linux alive — load `Image`/`guest.dtb` via QEMU `-device loader`, set the arm64 boot protocol, earlycon via PL011 passthrough; stalls at the first GIC MMIO access), **M3.1** (Stage-2 data-abort decode + MMIO trap-and-emulate dispatch framework), **M3.2** (vGICv3 GICD/GICR(cpu0) emulation on the M3.1 bus + timer-PPI injection), **M3.3** (virtio-mmio transport + virtio-console with used-buffer IRQ), and **M3.4** (initramfs load + DTB initrd nodes → interactive busybox shell; see `docs/reference/guest-initramfs.md`). See `docs/superpowers/specs/2026-06-15-m3-linux-guest-decomposition-design.md`.
-
-**M3 was first validated by a real QEMU boot on 2026-06-19** (until then every M3.x sub-milestone was verified statically only — build + `readelf` — and the live boot was deferred as an "operator handoff"). That first boot found and fixed three chained bugs (Stage-2 1 GB-block mis-alignment, guest RAM placed past the end of `-m 1G` DRAM, and an IRQ taken at EL2 in the `daifclr`→`eret` window) and wired up interactive PL011 input. The committed `scripts/run-qemu.sh` now boots Linux 6.12.93 to an interactive `~ #` shell. Full step-by-step diagnosis: `docs/debug/m3-boot-debug-walkthrough.md`; result summary: `docs/debug/m3-boot-verification.md`.
+A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, bao-hypervisor. The directory layout
+mirrors ACRN's `hypervisor/` structure.
 
 Next: **M3.5 (SMP)** then **M4 (RK3588 port)**.
 
@@ -25,16 +19,6 @@ make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
 make run                # invoke scripts/run-qemu.sh (QEMU)
 make clean              # remove build/
-```
-
-```sh
-# M3.0+: requires a prebuilt arm64 Linux `Image`. Supply its path:
-#   LINUX_IMAGE=/path/to/Image make run
-# Linux is NOT built in-repo; the kernel is user-supplied.
-
-# M3.4: to boot all the way to a busybox shell, also supply an initramfs:
-#   LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
-# The initramfs is user-supplied (see docs/reference/guest-initramfs.md); not built in-repo.
 ```
 
 Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-walkthrough.md`):
@@ -238,14 +222,15 @@ The following production hypervisor source trees are available in the parent dir
 
 | Path | Project | Notes |
 |------|---------|-------|
-| `../acrn-hypervisor` | [ACRN](https://github.com/projectacrn/acrn-hypervisor) | Type-1, x86 + ARM64; primary structural inspiration for this repo's layout |
+| `../acrn-hypervisor` | [ACRN](https://github.com/projectacrn/acrn-hypervisor) | Type-1, x86 ; primary structural inspiration for this repo's layout |
 | `../xvisor` | [Xvisor](https://github.com/avpatel/xvisor-next) | Type-1, ARM-first; reference for Stage-2 MMU and vCPU design |
-| `../hypervisor` | local Rust hypervisor | Rust-based hypervisor (NOT a copy of this project); reference for Rust idioms applied to bare-metal hypervisor design |
+| `../bao-hypervisor` | local hypervisor | bao hypervisor  | 
 
-**When to consult these:** look up an existing implementation before designing any new subsystem (Stage-2 MMU, vGIC, PSCI, virtio, etc.). Prefer reading the smallest relevant file rather than loading entire trees.
+**When to consult these:** look up an existing implementation before designing any new subsystem (Stage-2 MMU, vGIC, PSCI, virtio, etc.). 
+Prefer reading the smallest relevant file rather than loading entire trees.
 
 Import Reference
-
 - [ARM Architecture Reference Manual (ARMv8-A)](https://developer.arm.com/documentation/ddi0487/latest)
 - [ARM GIC Architecture Specification](https://developer.arm.com/documentation/ihi0069/latest)
 - [pKVM (Protected KVM)](https://source.android.com/docs/core/virtualization)
+

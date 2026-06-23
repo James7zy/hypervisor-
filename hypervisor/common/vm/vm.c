@@ -6,7 +6,6 @@
 #include "stage2.h"
 #include <vgic.h>
 #include "../../arch/arm64/irq/vgic_v3_mmio.h"
-#include "virtio_console.h"
 
 /* Non-static: vmexit_asm.S references g_vm by symbol */
 struct vm g_vm;
@@ -51,8 +50,6 @@ void vm_init(void)
            (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
 
     vgicv3_mmio_init();
-
-    virtio_console_init();
 }
 
 void vm_run(void)
@@ -62,12 +59,10 @@ void vm_run(void)
 
     for (;;) {
         /*
-         * NOTE: do NOT poll virtio-console RX here. The Linux guest runs its
-         * interactive console on console=ttyAMA0 (the PL011 passthrough), so it
-         * reads the PL011 RX FIFO directly. virtio_console_rx_poll() calls
-         * uart_getc(), which drains that same FIFO and would steal the guest's
-         * input. The virtio-console (hvc0) RX path is only needed if the guest
-         * is switched to console=hvc0 (see docs/reference/guest-initramfs.md).
+         * The guest's interactive console is console=ttyAMA0 (the PL011
+         * passthrough); it reads the PL011 RX FIFO directly, so this loop has no
+         * device emulation to poll. The EL2 virtio device model was removed in
+         * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
          */
         vcpu_run(&g_vm.vcpu);
         /* Most synchronous exits (MMIO data abort, PSCI, unknown HVC) eret
