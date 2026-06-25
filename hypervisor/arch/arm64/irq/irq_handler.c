@@ -22,7 +22,7 @@ void el2_irq_handler(void)
 
     if (intid == BOARD_VTIMER_IRQ) {
         vgic_dbg("inject HW PPI=%u (timer, ICH_LR0)\n", intid);
-        vgic_inject_hw(&g_vm.vcpu, BOARD_VTIMER_IRQ, BOARD_VTIMER_IRQ, 0xA0);
+        vgic_inject_hw(&g_vm.vcpu[0], BOARD_VTIMER_IRQ, BOARD_VTIMER_IRQ, 0xA0);
         gic_priority_drop(intid);   /* EOIR1 only — leave Active (ADR-0001) */
     } else if (intid == BOARD_PL011_IRQ) {
         vgic_dbg("inject SPI=%u (PL011 RX, ICH_LR1)\n", intid);
@@ -34,7 +34,7 @@ void el2_irq_handler(void)
          * when there is fresh RX data, so this cannot storm. (Unlike the
          * vtimer, there is no HW-forward LR linkage to gate re-pend.)
          */
-        vgic_inject_spi(&g_vm.vcpu, BOARD_PL011_IRQ);
+        vgic_inject_spi(&g_vm.vcpu[0], BOARD_PL011_IRQ);
         gic_priority_drop(intid);   /* leave Active so the level line cannot
                                      * re-pend and storm before the guest's ISR
                                      * reads DR (mirrors the vtimer, ADR-0001) */

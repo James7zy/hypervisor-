@@ -16,8 +16,11 @@
 #include <printk.h>
 #include <board.h>
 #include <percpu.h>
+#include <vm.h>
 #include <asm/sysreg.h>
 #include <gic_v3.h>
+#include "../irq/vgic.h"
+#include "../mmu/stage2.h"
 
 static inline void mmio_write32(unsigned long addr, u32 val)
 {
@@ -89,7 +92,50 @@ void secondary_main(u32 id)
 
     printk("[hv] pCPU%u online\n", (unsigned)id);
 
-    /* Slice 2: park here. Slice 3 replaces this with guest entry. */
+    /*
+     * Slice 3 SMOKE TEST: enter guest (EL1) on this core to prove the per-CPU
+     * guest-entry path works. vCPU1 shares vCPU0's Stage-2 table / VMID / HCR.
+     * It is seeded with a tiny "wfe; b ." stub in guest RAM (TEMPORARY — Slice
+     * 4 replaces this with the register state the guest's PSCI CPU_ON requests).
+     */
+    struct vcpu *v = &g_vm.vcpu[id];
+
+    /* Share vCPU0's Stage-2 translation (same table, VMID, IPA space) and HCR. */
+    v->vttbr_el2 = g_vm.vcpu[0].vttbr_el2;
+    v->hcr_el2   = g_vm.vcpu[0].hcr_el2;
+    vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
+
+    /* Smoke stub: "wfe; b ." at a scratch page high in guest RAM, far past the
+     * kernel Image / DTB / initrd. EL2 writes via the backing PA; the guest
+     * enters at the corresponding IPA (PA - RAM_PA + RAM_IPA). */
+    {
+        const unsigned long stub_pa  = BOARD_LINUX_RAM_PA + 0x0F000000UL;
+        const u64           stub_ipa = BOARD_LINUX_RAM_IPA + 0x0F000000UL;
+        ((volatile u32 *)stub_pa)[0] = 0xD503205FU;   /* wfe       */
+        ((volatile u32 *)stub_pa)[1] = 0x14000000U;   /* b .       */
+        asm volatile("dsb ish; isb");
+
+        v->regs.elr_el2  = stub_ipa;
+        v->regs.spsr_el2 = 0x3C5ULL;   /* EL1h, DAIF masked (same as vCPU0) */
+        v->regs.x[0] = 0;
+        v->regs.x[1] = 0;
+        v->regs.x[2] = 0;
+        v->regs.x[3] = 0;
+    }
+
+    /* Virtual MPIDR for this vCPU: Aff0 = vCPU index (vCPU0->0, vCPU1->1). */
+    SYSREG_WRITE(VMPIDR_EL2, (u64)id);
+    asm volatile("isb");
+
+    /* This core's current vCPU (asm entry path reads it via TPIDR_EL2). */
+    percpu[id].cur_vcpu = v;
+
+    /* Required order: Stage-2 activate BEFORE vGIC restore, then run (vcpu_run
+     * loads HCR_EL2 from v->hcr_el2 and erets to EL1). */
+    stage2_activate(v);
+    vgic_restore(v);
+
+    printk("[hv] pCPU%u entering guest (smoke stub)\n", (unsigned)id);
     for (;;)
-        asm volatile("wfi");
+        vcpu_run(v);
 }

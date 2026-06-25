@@ -33,7 +33,8 @@
 
 #ifndef __ASSEMBLER__
 #include <types.h>
-#include <vm.h>
+
+struct vcpu;   /* forward decl — avoids a vm.h<->percpu.h include cycle */
 
 struct percpu {
     struct vcpu *cur_vcpu;   /* MUST be first — asm reads at PERCPU_CUR_VCPU */

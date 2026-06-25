@@ -5,6 +5,7 @@
 #ifndef __ASSEMBLER__
 #include <types.h>
 #include <board.h>
+#include <percpu.h>   /* NR_CPUS (percpu.h forward-declares struct vcpu) */
 
 struct vcpu_regs {
     u64 x[31];      /* x0–x30   offset 0x000 */
@@ -25,7 +26,7 @@ struct vcpu {
 struct vm_config;
 
 struct vm {
-    struct vcpu            vcpu;
+    struct vcpu            vcpu[NR_CPUS];   /* M3.5: 2 vCPUs, static 1:1 pinned */
     const struct vm_config *config;
 };
 

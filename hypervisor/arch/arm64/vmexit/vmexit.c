@@ -22,7 +22,7 @@ static void handle_hvc(struct vcpu_regs *regs)
 
     switch (func_id) {
     case HC_INJECT_TEST:
-        vgic_inject_sw(&g_vm.vcpu, (u32)regs->x[1], 0xA0);
+        vgic_inject_sw(&g_vm.vcpu[0], (u32)regs->x[1], 0xA0);
         printk("[hv] SVM HVC: inject vINTID=%u\n", (unsigned)regs->x[1]);
         break;
     case HC_GUEST_DONE:

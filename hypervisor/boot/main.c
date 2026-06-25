@@ -67,9 +67,10 @@ void hypervisor_main(uintptr_t dtb_phys)
     gic_init();
     vtimer_init();
 
-    smp_bringup_probe();   /* TEMPORARY (Slice 2): prove pCPU1 EL2 bring-up */
+    vm_init();   /* builds vCPU0 Stage-2 / VMID, which vCPU1 shares (Slice 3) */
 
-    vm_init();
+    smp_bringup_probe();   /* TEMPORARY (Slice 2/3): bring pCPU1 to EL2 + guest */
+
     vm_run();
 
     for (;;)

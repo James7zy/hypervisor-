@@ -23,28 +23,28 @@ void vm_init(void)
      *   x1 = x2 = x3 = 0 (reserved, must be zero)
      *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
      */
-    g_vm.vcpu.regs.x[0] = (u64)cfg->dtb_ipa;
-    g_vm.vcpu.regs.x[1] = 0;
-    g_vm.vcpu.regs.x[2] = 0;
-    g_vm.vcpu.regs.x[3] = 0;
+    g_vm.vcpu[0].regs.x[0] = (u64)cfg->dtb_ipa;
+    g_vm.vcpu[0].regs.x[1] = 0;
+    g_vm.vcpu[0].regs.x[2] = 0;
+    g_vm.vcpu[0].regs.x[3] = 0;
 
     /*
      * SPSR_EL2 = 0x3C5: M[4:0]=00101 (EL1h, SP_EL1), DAIF=1111 (all masked).
      */
-    g_vm.vcpu.regs.elr_el2  = cfg->entry;
-    g_vm.vcpu.regs.spsr_el2 = 0x3C5ULL;
-    g_vm.vcpu.regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
+    g_vm.vcpu[0].regs.elr_el2  = cfg->entry;
+    g_vm.vcpu[0].regs.spsr_el2 = 0x3C5ULL;
+    g_vm.vcpu[0].regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
 
     /*
      * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC).
      * RW=1: EL1 executes in AArch64 state.
      */
-    g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
+    g_vm.vcpu[0].hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
                         (1ULL << 31);
 
-    stage2_init(&g_vm.vcpu, (u32)cfg->vmid, cfg->ram_pa);
+    stage2_init(&g_vm.vcpu[0], (u32)cfg->vmid, cfg->ram_pa);
 
-    vgic_init(&g_vm.vcpu);
+    vgic_init(&g_vm.vcpu[0]);
 
     printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
            (unsigned)cfg->vmid, (unsigned long)cfg->entry,
@@ -62,12 +62,14 @@ void vm_run(void)
      * the address of g_vm (M3.5 Slice 1; supersedes the ADR-0003 trick).
      */
     percpu[0].cpu_id   = 0;
-    percpu[0].cur_vcpu = &g_vm.vcpu;
+    percpu[0].cur_vcpu = &g_vm.vcpu[0];
     __asm__ volatile("msr tpidr_el2, %0" :: "r"(&percpu[0]));
+    /* Virtual MPIDR for vCPU0: Aff0 = 0 (vCPU1 sets Aff0=1 in secondary_main). */
+    __asm__ volatile("msr vmpidr_el2, %0" :: "r"(0ULL));
     __asm__ volatile("isb");
 
-    stage2_activate(&g_vm.vcpu);
-    vgic_restore(&g_vm.vcpu);
+    stage2_activate(&g_vm.vcpu[0]);
+    vgic_restore(&g_vm.vcpu[0]);
 
     for (;;) {
         /*
@@ -76,7 +78,7 @@ void vm_run(void)
          * device emulation to poll. The EL2 virtio device model was removed in
          * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
          */
-        vcpu_run(&g_vm.vcpu);
+        vcpu_run(&g_vm.vcpu[0]);
         /* Most synchronous exits (MMIO data abort, PSCI, unknown HVC) eret
          * straight back to the guest from el1_sync_handler and never return to
          * C. vcpu_run returns here only on the timer IRQ exit; the loop then
