@@ -3,13 +3,15 @@
  * irq_handler_asm.S — EL2 physical-IRQ entry (Lower EL AArch64 IRQ, +0x480).
  *
  * Mirrors el1_sync_handler (vmexit_asm.S): saves the guest register frame to
- * g_vm.vcpu.regs, calls el2_irq_handler(), then restores and erets back to the
+ * the current vCPU's regs (reached via TPIDR_EL2 → percpu[id].cur_vcpu),
+ * calls el2_irq_handler(), then restores and erets back to the
  * guest. Differs only in (a) the C callee and (b) the trailing
  * `msr daifclr, #2` that re-unmasks EL2 IRQs before the eret, so a still-pending
  * physical interrupt is taken again rather than lost.
  */
 
-#include <vm.h>   /* VCPU_* offset macros (active in __ASSEMBLER__) */
+#include <vm.h>       /* VCPU_* offset macros (active in __ASSEMBLER__) */
+#include <percpu.h>   /* PERCPU_CUR_VCPU — current vCPU via TPIDR_EL2 */
 
     .section .text
     .globl el1_irq_handler_asm
@@ -17,9 +19,10 @@ el1_irq_handler_asm:
     /* Save x0 on EL2 stack to free it as pointer */
     str     x0, [sp, #-16]!
 
-    /* Load &g_vm.vcpu.regs (first field of first field = same address as g_vm) */
-    adrp    x0, g_vm
-    add     x0, x0, :lo12:g_vm
+    /* Load this pCPU's current vCPU regs via TPIDR_EL2 (&percpu[id]->cur_vcpu;
+     * cur_vcpu is the first field, so it points at vcpu->regs). */
+    mrs     x0, tpidr_el2
+    ldr     x0, [x0, #PERCPU_CUR_VCPU]
 
     /* Save x1–x30 (genuine guest values, untouched since exception fired) */
     str     x1,       [x0, #0x08]
@@ -53,9 +56,9 @@ el1_irq_handler_asm:
 
     bl      el2_irq_handler
 
-    /* Restore guest state and return */
-    adrp    x0, g_vm
-    add     x0, x0, :lo12:g_vm
+    /* Restore guest state and return (current vCPU via TPIDR_EL2) */
+    mrs     x0, tpidr_el2
+    ldr     x0, [x0, #PERCPU_CUR_VCPU]
     ldr     x1, [x0, #VCPU_ELR]
     msr     elr_el2, x1
     ldr     x1, [x0, #VCPU_SPSR]

@@ -2,6 +2,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
+#include <percpu.h>
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
@@ -54,6 +55,17 @@ void vm_init(void)
 
 void vm_run(void)
 {
+    /*
+     * Make TPIDR_EL2 the single source of truth for "current vCPU on this
+     * core" before the first guest entry. The exception-entry asm reads the
+     * guest frame through &percpu[id]->cur_vcpu (PERCPU_CUR_VCPU) instead of
+     * the address of g_vm (M3.5 Slice 1; supersedes the ADR-0003 trick).
+     */
+    percpu[0].cpu_id   = 0;
+    percpu[0].cur_vcpu = &g_vm.vcpu;
+    __asm__ volatile("msr tpidr_el2, %0" :: "r"(&percpu[0]));
+    __asm__ volatile("isb");
+
     stage2_activate(&g_vm.vcpu);
     vgic_restore(&g_vm.vcpu);
 

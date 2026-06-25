@@ -9,7 +9,8 @@
  * g_hv_ctx is defined here (BSS) — only accessed from this file.
  */
 
-#include <vm.h>   /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */
+#include <vm.h>       /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */
+#include <percpu.h>   /* PERCPU_CUR_VCPU — current vCPU via TPIDR_EL2 */
 
     .section .bss
     .align 3
@@ -87,9 +88,10 @@ el1_sync_handler:
     /* Save x0 on EL2 stack to free it as pointer */
     str     x0, [sp, #-16]!
 
-    /* Load &g_vm.vcpu.regs (first field of first field = same address as g_vm) */
-    adrp    x0, g_vm
-    add     x0, x0, :lo12:g_vm
+    /* Load this pCPU's current vCPU regs via TPIDR_EL2 (&percpu[id]->cur_vcpu;
+     * cur_vcpu is the first field, so it points at vcpu->regs). */
+    mrs     x0, tpidr_el2
+    ldr     x0, [x0, #PERCPU_CUR_VCPU]
 
     /* Save x1–x30 (genuine guest values, untouched since exception fired) */
     str     x1,       [x0, #0x08]
@@ -125,9 +127,9 @@ el1_sync_handler:
     mrs     x1, esr_el2
     bl      handle_exit
 
-    /* Eret-back path (future milestones): restore and return to guest */
-    adrp    x0, g_vm
-    add     x0, x0, :lo12:g_vm
+    /* Eret-back path: restore and return to guest (current vCPU via TPIDR_EL2) */
+    mrs     x0, tpidr_el2
+    ldr     x0, [x0, #PERCPU_CUR_VCPU]
     ldr     x1, [x0, #VCPU_ELR]
     msr     elr_el2, x1
     ldr     x1, [x0, #VCPU_SPSR]

@@ -5,7 +5,8 @@ hv-objs := \
     lib/string.o \
     lib/print.o \
     common/vm/vm.o \
-    common/psci/psci.o
+    common/psci/psci.o \
+    common/percpu.o
 
 hv-includes := \
     -Ihypervisor/include \
