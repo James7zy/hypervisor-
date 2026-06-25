@@ -26,7 +26,6 @@ scheduler. See [the M3.5 SMP design](docs/superpowers/specs/2026-06-23-m3.5-smp-
 | M3.0 — Linux alive | done | Load `Image` + DTB, arm64 boot protocol, PL011 earlycon |
 | M3.1 — MMIO trap framework | done | Stage-2 data-abort decode + trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | done | GICD/GICR trap-and-emulate; timer-PPI injection |
-| M3.3 — virtio-console | done | virtio-mmio transport + console + virtqueue + used-buffer IRQ |
 | M3.4 — Boot to shell | **done** | initramfs → interactive busybox shell |
 | M3.5 — SMP | next | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
 | M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |

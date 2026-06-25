@@ -205,7 +205,6 @@ QEMU → _start (head.S)
 | M3.0 — Linux alive (no interrupts) | **done** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
 | M3.1 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
-| M3.3 — virtio-console | **done** | virtio-mmio transport + virtio-console + virtqueue + used-buffer IRQ |
 | M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
 | M3.5 — SMP | future | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
 | M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |
