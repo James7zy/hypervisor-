@@ -17,6 +17,11 @@
 #define BOARD_VTIMER_IRQ      27U            /* EL1 virtual timer PPI */
 #define BOARD_PL011_IRQ       33U            /* PL011 UART SPI (DTS interrupts=<0 1 4> → 32+1) */
 
+/* M3.5: cross-core "kick" SGI used to force a target pCPU into EL2 to drain
+ * the shared SGI-pending bitmap (INTID 0..15 are SGIs; pick a high one the
+ * guest is unlikely to contend on). */
+#define BOARD_KICK_SGI        15U
+
 /*
  * M3.0: Linux UP guest. Guest RAM is a dedicated PA region that does NOT
  * overlap the hv image (which loads at PA 0x40080000). Stage-2 maps the

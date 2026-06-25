@@ -28,7 +28,10 @@ fi
 
 exec qemu-system-aarch64 \
   -machine virt,virtualization=on,gic-version=3 \
-  -cpu cortex-a72 -smp 1 -m 2G \
+  -cpu cortex-a72 -smp 2 -m 2G \
+  `# -smp 2 (M3.5): QEMU must create pCPU1 for the hypervisor to PSCI CPU_ON it.` \
+  `# The GUEST still sees 1 CPU until its DTB gains a cpu@1 node (Slice 4); this` \
+  `# only provisions the physical core the secondary bring-up path wakes.` \
   `# -m 2G is REQUIRED: guest RAM is backed at PA 0x80000000 (1 GB-aligned so the` \
   `# Stage-2 L1 1 GB block can map it). QEMU virt RAM starts at 0x40000000, so` \
   `# 0x80000000 falls inside DRAM only when >1 GB is present; -m 1G ends RAM` \

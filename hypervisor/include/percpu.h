@@ -25,6 +25,12 @@
  */
 #define PERCPU_CUR_VCPU 0
 
+/*
+ * sizeof(struct percpu), used by secondary_entry asm to index percpu[id]
+ * (base + id * PERCPU_SIZE). Pinned by a _Static_assert below.
+ */
+#define PERCPU_SIZE 16
+
 #ifndef __ASSEMBLER__
 #include <types.h>
 #include <vm.h>
@@ -37,6 +43,8 @@ struct percpu {
 
 _Static_assert(__builtin_offsetof(struct percpu, cur_vcpu) == PERCPU_CUR_VCPU,
                "asm reads cur_vcpu at PERCPU_CUR_VCPU; keep it the first field");
+_Static_assert(sizeof(struct percpu) == PERCPU_SIZE,
+               "secondary_entry asm indexes percpu[id] using PERCPU_SIZE");
 
 extern struct percpu percpu[NR_CPUS];
 

@@ -25,4 +25,9 @@
  * power-down calls (CPU_OFF/SYSTEM_OFF/SYSTEM_RESET) do not return. */
 void psci_handle(struct vcpu_regs *regs);
 
+/* Issue a physical PSCI CPU_ON (smc) to QEMU firmware to power on a secondary
+ * pCPU at `entry` (an EL2 PA, since EL2 runs MMU-off) with x0 = ctx_id.
+ * `target_mpidr` is the affinity of the target pCPU. Returns the PSCI status. */
+s64 psci_cpu_on(u64 target_mpidr, u64 entry, u64 ctx_id);
+
 #endif /* HV_PSCI_H */
