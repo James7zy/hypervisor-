@@ -104,7 +104,7 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | ADR | Title | Status |
 | --- | --- | --- |
 | [0001](0001-vtimer-hardware-forwarding.md) | Forward the virtual-timer PPI with `ICH_LR.HW=1` | Accepted (M2.5) |
-| [0002](0002-single-global-vm-single-vcpu.md) | Model the guest as a single global VM with a single vCPU | Accepted (M1; until M3.5) |
+| [0002](0002-single-global-vm-single-vcpu.md) | Model the guest as a single global VM with a single vCPU | Superseded by [0013](0013-smp-per-cpu-tpidr-guest-driven-bringup.md) (M3.5) |
 | [0003](0003-asm-c-vcpu-offset-coupling.md) | Couple assembly to the vCPU layout via hand-maintained offset macros | Accepted (M1) |
 | [0004](0004-stage2-static-1gb-block-mapping.md) | Map guest Stage-2 with two static 1 GB block descriptors | Accepted (M1; refined M3.x) |
 | [0005](0005-device-passthrough-vs-emulation.md) | Split devices into passthrough (PL011) vs trap-and-emulate (GIC, virtio) | Accepted (M3.0–M3.3) |
@@ -115,3 +115,4 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | [0010](0010-vgic-scope-cpu0-lr0-group1.md) | Scope the vGICv3 to one cpu0 redistributor, one list register, Group 1 | Accepted (M2/M3.2) |
 | [0011](0011-virtio-mmio-v2-modern-only.md) | Implement virtio-mmio as modern (VERSION 2) only, no legacy | Accepted (M3.3) |
 | [0012](0012-physical-gicv3-ownership.md) | Let the hypervisor own the physical GICv3; the guest sees only a virtual GIC | Accepted (M2.5; extended M3.0/M3.2) |
+| [0013](0013-smp-per-cpu-tpidr-guest-driven-bringup.md) | Make EL2 per-CPU via `TPIDR_EL2`, bring secondaries up guest-driven, route IPIs through a kick-SGI | Accepted (M3.5) |

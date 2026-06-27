@@ -1,6 +1,9 @@
 # Model the guest as a single global VM with a single vCPU
 
-> **Status:** Accepted. **Milestone:** M1 (introduced); in force through M3.4.
+> **Status:** Superseded by ADR-0013. **Milestone:** M1 (introduced); in force
+> through M3.4. Superseded by [[0013-smp-per-cpu-tpidr-guest-driven-bringup]] at
+> M3.5 (SMP): the guest is now `struct vcpu vcpu[NR_CPUS]`, reached per-CPU via
+> `TPIDR_EL2` rather than the `g_vm` symbol.
 
 The milestones up to M3.4 boot exactly one guest — an unmodified UP Linux on
 QEMU `virt` with `-smp 1`. A general multi-VM / multi-vCPU object model

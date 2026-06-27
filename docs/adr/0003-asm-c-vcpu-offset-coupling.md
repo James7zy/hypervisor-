@@ -63,9 +63,21 @@ flowchart TB
   offsets in `vmexit_asm.S`. There is no test that will catch a mistake — see the
   repo's verification policy (build + `readelf` + observe `make run`).
 - `struct vcpu_regs` is deliberately the **first** member of `struct vcpu`, so
-  `&vcpu == &vcpu.regs`; `el1_sync_handler` relies on this when it loads the
-  guest frame via the `g_vm` symbol (see
-  [[0002-single-global-vm-single-vcpu]]).
+  `&vcpu == &vcpu.regs`. **Through M3.4** `el1_sync_handler` relied on this *and*
+  on the single-global model to load the guest frame via the `g_vm` symbol
+  (`adrp x0, g_vm`; see [[0002-single-global-vm-single-vcpu]]).
+- **M3.5 (SMP) upgrades this coupling.** The asm no longer names `g_vm` (which is
+  wrong on a second core). Each pCPU's `TPIDR_EL2` holds `&percpu[id]`, and the
+  four entry sites (`el1_sync_handler` and `el1_irq_handler_asm`, save + restore)
+  now do `mrs x0, tpidr_el2 ; ldr x0, [x0, #PERCPU_CUR_VCPU]`. This adds a
+  **second** hand-maintained offset, `PERCPU_CUR_VCPU` (the byte offset of
+  `cur_vcpu` within `struct percpu`), defined in `hypervisor/include/percpu.h`.
+  Unlike the `vm.h` GPR offsets, this one **is** enforced: a `_Static_assert`
+  pins `offsetof(struct percpu, cur_vcpu) == PERCPU_CUR_VCPU`, so a struct-field
+  reorder is a build error, not a silent footgun. The zero-offset
+  `&vcpu == &vcpu.regs` property is still relied on (the loaded `cur_vcpu` is used
+  directly as the regs base). See
+  [[0013-smp-per-cpu-tpidr-guest-driven-bringup]].
 - If the layout begins to change often, prefer migrating to a generated
   `asm-offsets` mechanism and supersede this ADR rather than continuing to widen
   the hand-maintained surface.

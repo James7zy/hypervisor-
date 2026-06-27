@@ -74,3 +74,12 @@ flowchart LR
 - The cpu0-only redistributor is one of the load-bearing single-vCPU assumptions
   flagged in [[0002-single-global-vm-single-vcpu]]; generalising it is a
   prerequisite for SGI/IPI virtualization.
+- **M3.5 (SMP) partially overtakes this** (see
+  [[0013-smp-per-cpu-tpidr-guest-driven-bringup]]): the redistributor is now
+  emulated **per vCPU** (`g_vgicr[NR_CPUS]`, with a correct 64-bit `GICR_TYPER`
+  affinity so a secondary matches its own redistributor), and injection now uses
+  **LR0 (vtimer), LR1 (PL011 SPI) and LR2 (SGIs)** rather than LR0 alone. What is
+  **still** scoped per this ADR: only Group 1, and there is still no general LR
+  allocation/overflow handling (the three sources have fixed LRs and a fourth
+  simultaneous pending interrupt would be lost). Status stays `Accepted` for that
+  remaining scope.
