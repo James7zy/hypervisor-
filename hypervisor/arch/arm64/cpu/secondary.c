@@ -83,45 +83,14 @@ void secondary_main(u32 id)
     SYSREG_WRITE(CNTHCTL_EL2, 0x3ULL);
     asm volatile("isb");
 
-    /* 6. Publish online. The barrier orders cpu_id before the online flag so
-     *    CPU0's handshake sees a consistent slot. */
-    percpu[id].cpu_id = id;
-    asm volatile("dmb ish" ::: "memory");
-    percpu[id].online = 1;
-    asm volatile("dsb ish" ::: "memory");
-
-    printk("[hv] pCPU%u online\n", (unsigned)id);
-
     /*
-     * Slice 3 SMOKE TEST: enter guest (EL1) on this core to prove the per-CPU
-     * guest-entry path works. vCPU1 shares vCPU0's Stage-2 table / VMID / HCR.
-     * It is seeded with a tiny "wfe; b ." stub in guest RAM (TEMPORARY — Slice
-     * 4 replaces this with the register state the guest's PSCI CPU_ON requests).
+     * Enter guest (EL1) on this core. This vCPU's register state (elr/x0/spsr)
+     * and its shared Stage-2 (vttbr) / HCR were authored by the guest-driven
+     * PSCI CPU_ON handler (psci_cpu_on_guest) before this pCPU was powered on.
+     * We only set up the per-vCPU virtual GIC interface here.
      */
     struct vcpu *v = &g_vm.vcpu[id];
-
-    /* Share vCPU0's Stage-2 translation (same table, VMID, IPA space) and HCR. */
-    v->vttbr_el2 = g_vm.vcpu[0].vttbr_el2;
-    v->hcr_el2   = g_vm.vcpu[0].hcr_el2;
     vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
-
-    /* Smoke stub: "wfe; b ." at a scratch page high in guest RAM, far past the
-     * kernel Image / DTB / initrd. EL2 writes via the backing PA; the guest
-     * enters at the corresponding IPA (PA - RAM_PA + RAM_IPA). */
-    {
-        const unsigned long stub_pa  = BOARD_LINUX_RAM_PA + 0x0F000000UL;
-        const u64           stub_ipa = BOARD_LINUX_RAM_IPA + 0x0F000000UL;
-        ((volatile u32 *)stub_pa)[0] = 0xD503205FU;   /* wfe       */
-        ((volatile u32 *)stub_pa)[1] = 0x14000000U;   /* b .       */
-        asm volatile("dsb ish; isb");
-
-        v->regs.elr_el2  = stub_ipa;
-        v->regs.spsr_el2 = 0x3C5ULL;   /* EL1h, DAIF masked (same as vCPU0) */
-        v->regs.x[0] = 0;
-        v->regs.x[1] = 0;
-        v->regs.x[2] = 0;
-        v->regs.x[3] = 0;
-    }
 
     /* Virtual MPIDR for this vCPU: Aff0 = vCPU index (vCPU0->0, vCPU1->1). */
     SYSREG_WRITE(VMPIDR_EL2, (u64)id);
@@ -130,12 +99,20 @@ void secondary_main(u32 id)
     /* This core's current vCPU (asm entry path reads it via TPIDR_EL2). */
     percpu[id].cur_vcpu = v;
 
+    /* Publish online AFTER the vCPU is fully prepared: the PSCI handler waits
+     * on this before returning SUCCESS to the guest. */
+    asm volatile("dmb ish" ::: "memory");
+    percpu[id].cpu_id = id;
+    percpu[id].online = 1;
+    asm volatile("dsb ish" ::: "memory");
+
+    printk("[hv] pCPU%u online, entering guest\n", (unsigned)id);
+
     /* Required order: Stage-2 activate BEFORE vGIC restore, then run (vcpu_run
      * loads HCR_EL2 from v->hcr_el2 and erets to EL1). */
     stage2_activate(v);
     vgic_restore(v);
 
-    printk("[hv] pCPU%u entering guest (smoke stub)\n", (unsigned)id);
     for (;;)
         vcpu_run(v);
 }

@@ -24,11 +24,11 @@ struct spinlock {
 
 static inline void spin_lock(struct spinlock *lock)
 {
-    u32 my, cur, tmp, ok;
+    u32 my, tmp, ok;
 
-    /* Atomically take the next ticket: my = next++; (LDAXR/STXR retry loop). */
+    /* Atomically take the next ticket: my = next++; (LDXR/STXR retry loop). */
     __asm__ volatile(
-        "1: ldaxr   %w0, [%3]\n"        /* my = next                  */
+        "1: ldxr    %w0, [%3]\n"        /* my = next                  */
         "   add     %w1, %w0, #1\n"     /* tmp = my + 1               */
         "   stxr    %w2, %w1, [%3]\n"   /* try next = tmp; ok==0 wins */
         "   cbnz    %w2, 1b\n"
@@ -36,23 +36,18 @@ static inline void spin_lock(struct spinlock *lock)
         : "r"(&lock->next)
         : "memory");
 
-    /* Spin (with acquire ordering) until our ticket is the one being served. */
-    do {
-        __asm__ volatile("ldaxr %w0, [%1]"
-                         : "=r"(cur) : "r"(&lock->owner) : "memory");
-        if (cur == my)
-            break;
-        __asm__ volatile("wfe");
-    } while (1);
+    /* Busy-wait until our ticket is served. Plain spin (no WFE/SEV): critical
+     * sections are tiny and there are only 2 cores, so a simple, provably
+     * correct spin beats the WFE/event-register race. */
+    while (__atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE) != my)
+        __asm__ volatile("yield");
 }
 
 static inline void spin_unlock(struct spinlock *lock)
 {
-    /* Release barrier, then advance owner so the next ticket is served. */
-    __asm__ volatile("dmb ish" ::: "memory");
-    lock->owner = lock->owner + 1U;
-    __asm__ volatile("dsb ish" ::: "memory");
-    __asm__ volatile("sev");   /* wake any WFE waiters */
+    /* Release: publish the owner advance with release ordering so the critical
+     * section's writes are visible to the next holder. */
+    __atomic_store_n(&lock->owner, lock->owner + 1U, __ATOMIC_RELEASE);
 }
 
 #endif /* HV_SPINLOCK_H */

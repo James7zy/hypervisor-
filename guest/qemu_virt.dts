@@ -44,6 +44,16 @@
             reg = <0x0>;
             enable-method = "psci";
         };
+
+        /* M3.5: symmetric secondary. reg = Aff0 = 1 matches VMPIDR_EL2 for
+         * vCPU1; enable-method psci → CPU_ON traps to EL2 via the hvc method
+         * above and our psci_handle authors vCPU1 and powers on pCPU1. */
+        cpu@1 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a72";
+            reg = <0x1>;
+            enable-method = "psci";
+        };
     };
 
     timer {
@@ -89,6 +99,6 @@
          * M3.0 finish line; M3.1/M3.2 back these with trap-and-emulate.
          */
         reg = <0x00000000 0x08000000 0x00000000 0x00010000>,
-              <0x00000000 0x080a0000 0x00000000 0x00020000>;
+              <0x00000000 0x080a0000 0x00000000 0x00040000>;  /* GICR: 2 RDs (M3.5) */
     };
 };

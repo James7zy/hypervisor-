@@ -9,8 +9,9 @@
 #define ICC_SRE_EL2_SRE     (1ULL << 0)
 #define ICC_SRE_EL2_ENABLE  (1ULL << 3)
 
-/* ICH_HCR_EL2: virtual CPU interface enable. */
+/* ICH_HCR_EL2: virtual CPU interface enable + SGI trap control. */
 #define ICH_HCR_EL2_EN      (1ULL << 0)
+#define ICH_HCR_EL2_TC      (1ULL << 10)   /* trap guest ICC_SGI*R_EL1 to EL2 */
 
 /* ICH_LR<n>_EL2 fields (GICv3, 64-bit list register). */
 #define ICH_LR_STATE_PENDING (1ULL << 62)   /* State[63:62] = 0b01 (Pending) */
@@ -37,6 +38,10 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
  * devices (M3.3 virtio-console: SPI 48) that have no physical GIC line. Thin
  * wrapper over vgic_inject_sw with a device-class priority. */
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
+
+/* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).
+ * Software (HW=0) Group-1, used by the cross-core IPI path (vgic_sgi.c). */
+void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid);
 
 /* Save/restore the virtual interface state to/from struct vcpu. */
 void vgic_save(struct vcpu *vcpu);

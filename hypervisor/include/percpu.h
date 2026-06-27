@@ -56,6 +56,14 @@ static inline struct vcpu *current_vcpu(void)
     __asm__ volatile("mrs %0, tpidr_el2" : "=r"(pc));
     return pc->cur_vcpu;
 }
+
+/* This pCPU's id (== vCPU index under static 1:1 pinning). */
+static inline u32 current_vcpu_id(void)
+{
+    struct percpu *pc;
+    __asm__ volatile("mrs %0, tpidr_el2" : "=r"(pc));
+    return pc->cpu_id;
+}
 #endif /* !__ASSEMBLER__ */
 
 #endif /* HV_PERCPU_H */

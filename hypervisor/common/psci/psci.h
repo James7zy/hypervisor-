@@ -16,9 +16,12 @@
 /* Version word: major 1 (bits 31:16), minor 1 (bits 15:0) => PSCI v1.1. */
 #define PSCI_VERSION_1_1   0x00010001U
 
-/* Return codes. NOT_SUPPORTED is -1, sign-extended into the 64-bit reg. */
-#define PSCI_RET_SUCCESS        0ULL
-#define PSCI_RET_NOT_SUPPORTED  (~0ULL)
+/* Return codes (Arm DEN0022). Negative values sign-extend into the 64-bit reg. */
+#define PSCI_RET_SUCCESS              0ULL
+#define PSCI_RET_NOT_SUPPORTED       (~0ULL)        /* -1 */
+#define PSCI_RET_INVALID_PARAMETERS  (~1ULL)        /* -2 */
+#define PSCI_RET_INTERNAL_FAILURE    (~5ULL)        /* -6 */
+#define PSCI_RET_ALREADY_ON          (~3ULL)        /* -4 */
 
 /* Dispatch a PSCI call. regs->x[0] holds the function ID on entry; the
  * result (for calls that return) is written back into regs->x[0]. The

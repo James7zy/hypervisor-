@@ -2,8 +2,13 @@
 #include <types.h>
 #include <printk.h>
 #include <uart.h>
+#include <spinlock.h>
 
 #include <stdarg.h>
+
+/* Serialize printk across pCPUs so concurrent EL2 output is not interleaved
+ * character-by-character (M3.5). The only shared sink is the PL011. */
+static struct spinlock print_lock = SPINLOCK_INIT;
 
 static int emit_char(char c)
 {
@@ -74,6 +79,7 @@ int printk(const char *fmt, ...)
     va_list ap;
     int n = 0;
 
+    spin_lock(&print_lock);
     va_start(ap, fmt);
     while (*fmt) {
         if (*fmt != '%') {
@@ -105,5 +111,6 @@ int printk(const char *fmt, ...)
     }
 done:
     va_end(ap);
+    spin_unlock(&print_lock);
     return n;
 }
