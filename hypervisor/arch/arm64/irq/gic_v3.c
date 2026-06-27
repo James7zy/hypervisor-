@@ -56,6 +56,17 @@ void gic_init(void)
     mmio_write8(sgi + GICR_IPRIORITYR + ppi, 0xA0);
     mmio_write32(sgi + GICR_ISENABLER0, (1U << ppi));
 
+    /* 3a. Cross-core kick-SGI (M3.5) on CPU0's GICR: Group 1 NS, prio 0xA0,
+     *     enabled. Lets another pCPU force CPU0 into EL2 to drain its pending
+     *     SGI bitmap. (secondary_main enables the same INTID on its own GICR.) */
+    {
+        const u32 kick = BOARD_KICK_SGI;
+        mmio_write32(sgi + GICR_IGROUPR0,
+                     mmio_read32(sgi + GICR_IGROUPR0) | (1U << kick));
+        mmio_write8(sgi + GICR_IPRIORITYR + kick, 0xA0);
+        mmio_write32(sgi + GICR_ISENABLER0, (1U << kick));
+    }
+
     /* 3b. PL011 UART SPI (INTID 33) in the distributor: Group 1 NS, priority
      *     0xA0, routed to CPU0 (Aff=0), enabled. The guest's ttyAMA0 driver is
      *     interrupt-driven; this physical SPI is taken to EL2 (HCR_EL2.IMO) and
@@ -98,4 +109,14 @@ void gic_priority_drop(u32 intid)
 void gic_deactivate(u32 intid)
 {
     SYSREG_WRITE(ICC_DIR_EL1, intid);
+}
+
+void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable)
+{
+    const unsigned long sgi = BOARD_GIC_RDIST_BASE
+                              + (unsigned long)cpu * 0x20000UL   /* GICR stride */
+                              + GICR_SGI_OFFSET;
+    const unsigned long reg = sgi + (enable ? GICR_ISENABLER0 : 0x0180U /*ICENABLER0*/);
+    mmio_write32(reg, (1U << (intid & 0x1FU)));
+    asm volatile("dsb sy; isb");
 }

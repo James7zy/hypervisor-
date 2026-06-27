@@ -12,9 +12,14 @@
 #include <printk.h>
 #include <board.h>
 #include <vm.h>
+#include <gic_v3.h>              /* GICR_SGI_OFFSET, GICR_ISENABLER0 (physical) */
 #include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
 #include "vgic_debug.h"
+
+/* Physical GICR SGI-frame enable registers (relative to RD_base + SGI frame). */
+#define GICR_PHYS_ISENABLER0  0x0100U
+#define GICR_PHYS_ICENABLER0  0x0180U
 
 /* ── GICD shadow state (1024 INTIDs => 32 words of 1 bit/INTID) ── */
 struct vgicv3_dist {
@@ -192,90 +197,108 @@ struct vgicv3_redist {
     u32 icfgr1;           /* PPIs (ICFGR0 = SGIs, RO edge) */
 };
 
-static struct vgicv3_redist g_vgicr = {
-    .waker = VGICR_WAKER_PROCESSOR_SLEEP | VGICR_WAKER_CHILDREN_ASLEEP,
-    .icfgr1 = 0,
+static struct vgicv3_redist g_vgicr[NR_CPUS] = {
+    [0 ... NR_CPUS - 1] = {
+        .waker = VGICR_WAKER_PROCESSOR_SLEEP | VGICR_WAKER_CHILDREN_ASLEEP,
+        .icfgr1 = 0,
+    },
 };
 
-/* GICR_TYPER for the single cpu0 redistributor:
- *   Aff0 (Processor affinity) at bits [39:32] = 0
- *   Processor_Number [23:8]   = 0
- *   Last (bit 4)              = 1  (cpu0 is the only/last redistributor)
+/* GICR_TYPER for redistributor `cpu` (M3.5: one per vCPU, Aff0 = cpu):
+ *   Aff (affinity value)     at bits [63:32] = cpu  (matches VMPIDR_EL2 Aff0)
+ *   Processor_Number [23:8]  = cpu
+ *   Last (bit 4)             = 1 only on the final redistributor in the range
  */
-static u64 vgicr_typer(void)
+static u64 vgicr_typer(u32 cpu)
 {
-    return (1ULL << 4);
+    u64 t = ((u64)cpu << 32) | ((u64)cpu << 8);
+    if (cpu == (u32)(NR_CPUS - 1))
+        t |= (1ULL << 4);   /* Last */
+    return t;
 }
 
-static u32 vgicr_read_rd(u64 off, u8 size)
+static u64 vgicr_read_rd(struct vgicv3_redist *r, u32 cpu, u64 off, u8 size)
 {
     switch (off) {
-    case VGICR_CTLR:    return g_vgicr.ctlr;
+    case VGICR_CTLR:    return r->ctlr;
     case VGICR_IIDR:    return 0x0000043BU;
-    case VGICR_TYPER:   return (size == 8U) ? (u32)vgicr_typer()
-                                            : (u32)(vgicr_typer() & 0xFFFFFFFFU);
-    case VGICR_TYPER + 4: return (u32)(vgicr_typer() >> 32);  /* high half */
+    /* GICR_TYPER is 64-bit; the Affinity_Value is in bits [63:32]. A 64-bit
+     * read MUST return the full value (Linux's gic_populate_rdist matches the
+     * cpu's MPIDR affinity against the high word; truncating to 32 bits drops
+     * it and a secondary with Aff0 != 0 fails to find its redistributor). */
+    case VGICR_TYPER:   return (size == 8U) ? vgicr_typer(cpu)
+                                            : (vgicr_typer(cpu) & 0xFFFFFFFFULL);
+    case VGICR_TYPER + 4: return (vgicr_typer(cpu) >> 32);  /* high half (32-bit) */
     case VGICR_STATUSR: return 0U;
-    case VGICR_WAKER:   return g_vgicr.waker;
+    case VGICR_WAKER:   return r->waker;
     case VGICR_PIDR2:   return VGIC_PIDR2_GICV3;
     default:            return 0U;   /* RAZ */
     }
 }
 
-static void vgicr_write_rd(u64 off, u32 val)
+static void vgicr_write_rd(struct vgicv3_redist *r, u64 off, u32 val)
 {
     switch (off) {
     case VGICR_CTLR:
-        g_vgicr.ctlr = val;
+        r->ctlr = val;
         break;
     case VGICR_WAKER:
         /* Handshake: guest clears ProcessorSleep, then polls ChildrenAsleep
          * until it reads 0. Clearing ProcessorSleep clears ChildrenAsleep. */
         if ((val & VGICR_WAKER_PROCESSOR_SLEEP) == 0U)
-            g_vgicr.waker = 0U;
+            r->waker = 0U;
         else
-            g_vgicr.waker = VGICR_WAKER_PROCESSOR_SLEEP |
-                            VGICR_WAKER_CHILDREN_ASLEEP;
+            r->waker = VGICR_WAKER_PROCESSOR_SLEEP |
+                       VGICR_WAKER_CHILDREN_ASLEEP;
         break;
     default:
         break;   /* WI */
     }
 }
 
-static u32 vgicr_read_sgi(u64 off)
+static u32 vgicr_read_sgi(struct vgicv3_redist *r, u64 off)
 {
     switch (off) {
-    case VGICR_IGROUPR0:   return g_vgicr.igroupr0;
-    case VGICR_ISENABLER0: return g_vgicr.isenabler0;
-    case VGICR_ICENABLER0: return g_vgicr.isenabler0;
-    case VGICR_ISPENDR0:   return g_vgicr.ispendr0;
-    case VGICR_ICPENDR0:   return g_vgicr.ispendr0;
-    case VGICR_ISACTIVER0: return g_vgicr.isactiver0;
-    case VGICR_ICACTIVER0: return g_vgicr.isactiver0;
+    case VGICR_IGROUPR0:   return r->igroupr0;
+    case VGICR_ISENABLER0: return r->isenabler0;
+    case VGICR_ICENABLER0: return r->isenabler0;
+    case VGICR_ISPENDR0:   return r->ispendr0;
+    case VGICR_ICPENDR0:   return r->ispendr0;
+    case VGICR_ISACTIVER0: return r->isactiver0;
+    case VGICR_ICACTIVER0: return r->isactiver0;
     case VGICR_ICFGR0:     return 0xAAAAAAAAU;   /* SGIs edge-triggered, RO */
-    case VGICR_ICFGR1:     return g_vgicr.icfgr1;
+    case VGICR_ICFGR1:     return r->icfgr1;
     default:
         if (off >= VGICR_IPRIORITYR_BASE && off <= VGICR_IPRIORITYR_END)
-            return g_vgicr.ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)];
+            return r->ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)];
         return 0U;
     }
 }
 
-static void vgicr_write_sgi(u64 off, u32 val)
+static void vgicr_write_sgi(u32 cpu, struct vgicv3_redist *r, u64 off, u32 val)
 {
     switch (off) {
-    case VGICR_IGROUPR0:   g_vgicr.igroupr0   = val;  break;
-    case VGICR_ISENABLER0: g_vgicr.isenabler0 |= val; break;   /* set */
-    case VGICR_ICENABLER0: g_vgicr.isenabler0 &= ~val; break;  /* clear */
-    case VGICR_ISPENDR0:   g_vgicr.ispendr0   |= val; break;
-    case VGICR_ICPENDR0:   g_vgicr.ispendr0   &= ~val; break;
-    case VGICR_ISACTIVER0: g_vgicr.isactiver0 |= val; break;
-    case VGICR_ICACTIVER0: g_vgicr.isactiver0 &= ~val; break;
+    case VGICR_IGROUPR0:   r->igroupr0   = val;  break;
+    case VGICR_ISENABLER0:
+        r->isenabler0 |= val;
+        /* When the guest enables its vtimer PPI (27), (re-)enable the physical
+         * PPI on this cpu's redistributor. This is the re-arm half of the M3.5
+         * secondary vtimer gating: el2_irq_handler masks the physical PPI if it
+         * fires before the guest's vGIC is up; here the guest's own enable
+         * brings it back, by which point VENG1 is set. Idempotent on cpu0. */
+        if (val & (1U << BOARD_VTIMER_IRQ))
+            gic_ppi_set_enable(cpu, BOARD_VTIMER_IRQ, true);
+        break;
+    case VGICR_ICENABLER0: r->isenabler0 &= ~val; break;  /* clear */
+    case VGICR_ISPENDR0:   r->ispendr0   |= val; break;
+    case VGICR_ICPENDR0:   r->ispendr0   &= ~val; break;
+    case VGICR_ISACTIVER0: r->isactiver0 |= val; break;
+    case VGICR_ICACTIVER0: r->isactiver0 &= ~val; break;
     case VGICR_ICFGR0:     break;   /* SGIs RO */
-    case VGICR_ICFGR1:     g_vgicr.icfgr1 = val; break;
+    case VGICR_ICFGR1:     r->icfgr1 = val; break;
     default:
         if (off >= VGICR_IPRIORITYR_BASE && off <= VGICR_IPRIORITYR_END)
-            g_vgicr.ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)] = val;
+            r->ipriorityr[(u32)((off - VGICR_IPRIORITYR_BASE) / 4U)] = val;
         break;   /* else WI */
     }
 }
@@ -288,16 +311,27 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
              acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
              (int)acc->size, (unsigned long)acc->data);
 
-    bool sgi = (acc->offset >= VGICR_SGI_OFFSET);
-    u64  off = sgi ? (acc->offset - VGICR_SGI_OFFSET) : acc->offset;
+    /* Which redistributor frame: cpu = offset / VGICR_STRIDE. */
+    u32 cpu = (u32)(acc->offset / VGICR_STRIDE);
+    if (cpu >= (u32)NR_CPUS) {
+        if (!acc->is_write)
+            acc->data = 0;
+        return 0;
+    }
+    struct vgicv3_redist *r = &g_vgicr[cpu];
+    u64 foff = acc->offset - (u64)cpu * VGICR_STRIDE;   /* within this frame */
+
+    bool sgi = (foff >= VGICR_SGI_OFFSET);
+    u64  off = sgi ? (foff - VGICR_SGI_OFFSET) : foff;
 
     if (acc->is_write) {
         if (sgi)
-            vgicr_write_sgi(off, (u32)acc->data);
+            vgicr_write_sgi(cpu, r, off, (u32)acc->data);
         else
-            vgicr_write_rd(off, (u32)acc->data);
+            vgicr_write_rd(r, off, (u32)acc->data);
     } else {
-        acc->data = sgi ? vgicr_read_sgi(off) : vgicr_read_rd(off, acc->size);
+        acc->data = sgi ? vgicr_read_sgi(r, off)
+                        : vgicr_read_rd(r, cpu, off, acc->size);
     }
     return 0;
 }

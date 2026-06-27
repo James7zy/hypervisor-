@@ -42,4 +42,10 @@ void gic_priority_drop(u32 intid);
 /* Deactivate (ICC_DIR_EL1) — valid only with EOImode=1. */
 void gic_deactivate(u32 intid);
 
+/* Enable/disable a private INTID (SGI/PPI, 0..31) at cpu `cpu`'s physical
+ * redistributor SGI frame. Used by the M3.5 secondary vtimer gating: the
+ * vtimer PPI is masked here if it fires before the guest's vGIC is ready, and
+ * re-enabled when the guest enables its virtual PPI. */
+void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable);
+
 #endif /* HV_GIC_V3_H */

@@ -3,11 +3,13 @@
 #define HV_VGIC_V3_MMIO_H
 
 #include <types.h>
+#include <percpu.h>   /* NR_CPUS */
 
 /* Frame sizes (QEMU virt GICv3). */
 #define VGICD_SIZE        0x00010000ULL   /* 64 KB distributor frame      */
-#define VGICR_SIZE        0x00020000ULL   /* RD frame + SGI frame (cpu0)  */
-#define VGICR_SGI_OFFSET  0x00010000ULL   /* SGI frame within the GICR    */
+#define VGICR_STRIDE      0x00020000ULL   /* one redistributor (RD+SGI)   */
+#define VGICR_SIZE        (VGICR_STRIDE * NR_CPUS)  /* all GICR frames     */
+#define VGICR_SGI_OFFSET  0x00010000ULL   /* SGI frame within a GICR      */
 
 /* ── GICD register offsets ── */
 #define VGICD_CTLR              0x0000U
