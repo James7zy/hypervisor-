@@ -10,14 +10,16 @@ relationships between modules, all represented using Mermaid. A picture is worth
 A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, bao-hypervisor. The directory layout
 mirrors ACRN's `hypervisor/` structure.
 
-Next: **M3.5 (SMP)** then **M4 (RK3588 port)**.
+**M3.5 (SMP)** is complete: an unmodified Linux guest boots with two vCPUs
+statically pinned 1:1 to two pCPUs. Next: **M4 (RK3588 port)**.
 
 ## Build Commands
 
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make run                # invoke scripts/run-qemu.sh (QEMU)
+make test               # offset checks + M1/M2/M2.5 QEMU SVM scenarios
+LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 make clean              # remove build/
 ```
 
@@ -40,14 +42,19 @@ Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-l
 - `qemu-system-aarch64` ≥ 6.0
 - `dtc` (device-tree-compiler) — Debian/Ubuntu: `sudo apt-get install device-tree-compiler`
 
-Exit QEMU with `Ctrl-A x`. GDB attach: `QEMU_EXTRA_ARGS="-s -S" make run`, then `aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
+Exit QEMU with `Ctrl-A x`. GDB attach:
+`LINUX_IMAGE=/path/to/Image QEMU_EXTRA_ARGS="-s -S" make run`, then
+`aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'`.
 
-## Verification (no CI, no test framework)
+## Verification (no CI; local automated integration tests)
 
-There is no automated test suite. Verification is:
-1. **Build check**: `make` must succeed with zero warnings (`-Werror` is on).
-2. **Static inspection**: `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf` — entry point must be `0x40080000`; `.text` section must start at `0x40080000`.
-3. **Run + observe**: `make run` must print `[hv] Hello from EL2, CurrentEL=0x8` within 3 seconds.
+1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
+   `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M2, and
+   M2.5 QEMU integration scenarios.
+2. **Build check**: `make` must succeed with zero warnings (`-Werror` is on).
+3. **Linux SMP run**: boot with `LINUX_IMAGE` and optionally `LINUX_INITRD`, then
+   verify CPU1 boots, `/sys/devices/system/cpu/online` reports `0-1`, and both CPU
+   columns in `/proc/interrupts` have timer and IPI activity.
 
 ## Architecture
 ```
@@ -206,8 +213,8 @@ QEMU → _start (head.S)
 | M3.1 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
-| M3.5 — SMP | future | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
-| M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |
+| M3.5 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
+| M4 — RK3588 port | next | Real hardware, DT/ACPI discovery, boot from storage |
 
 Each milestone gets its own spec in `docs/superpowers/specs/` and plan in `docs/superpowers/plans/`.
 
@@ -232,4 +239,3 @@ Import Reference
 - [ARM Architecture Reference Manual (ARMv8-A)](https://developer.arm.com/documentation/ddi0487/latest)
 - [ARM GIC Architecture Specification](https://developer.arm.com/documentation/ihi0069/latest)
 - [pKVM (Protected KVM)](https://source.android.com/docs/core/virtualization)
-

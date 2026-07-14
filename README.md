@@ -6,13 +6,15 @@ layout mirrors ACRN's `hypervisor/` structure.
 
 ## Status
 
-**M3.4 — Boot to shell** is done (boot-verified 2026-06-19). An unmodified Linux
-6.12 kernel boots under the hypervisor on QEMU `virt`, reaches an interactive
-busybox shell (`~ #`), and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011
-passthrough.
+**M3.5 — SMP** is done (boot-verified 2026-06-27; reverified 2026-07-13). An
+unmodified Linux 6.12 guest boots on QEMU `virt` with two vCPUs statically pinned
+1:1 to two pCPUs, reaches an interactive busybox shell (`~ #`), and reports CPUs
+`0-1` online. PSCI `CPU_ON`, per-CPU vGICv3/timer state, and cross-core SGI/IPI
+delivery are working. M3.5 deliberately has no scheduler or vCPU overcommit.
 
-Next: **M3.5 (SMP)** — PSCI `CPU_ON`, per-pCPU vCPUs, SGI virtualization, and a
-scheduler. See [the M3.5 SMP design](docs/superpowers/specs/2026-06-23-m3.5-smp-design.md).
+Next: **M4 (RK3588 port)** — move from the QEMU `virt` board to real hardware.
+See [the M3.5 SMP design](docs/superpowers/specs/2026-06-23-m3.5-smp-design.md)
+for the completed QEMU architecture.
 
 ### Milestones
 
@@ -27,15 +29,15 @@ scheduler. See [the M3.5 SMP design](docs/superpowers/specs/2026-06-23-m3.5-smp-
 | M3.1 — MMIO trap framework | done | Stage-2 data-abort decode + trap-and-emulate dispatch |
 | M3.2 — vGICv3 emulation | done | GICD/GICR trap-and-emulate; timer-PPI injection |
 | M3.4 — Boot to shell | **done** | initramfs → interactive busybox shell |
-| M3.5 — SMP | next | PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, scheduler |
-| M4 — RK3588 port | future | Real hardware, DT/ACPI discovery, boot from storage |
+| M3.5 — SMP | **done** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization |
+| M4 — RK3588 port | next | Real hardware, DT/ACPI discovery, boot from storage |
 
 ## Quickstart
 
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make run                # boot under QEMU virt
+LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 ```
 
 Earliest banner (within ~3 s):
@@ -44,13 +46,13 @@ Earliest banner (within ~3 s):
 [hv] Hello from EL2 on qemu_virt, CurrentEL=0x8
 ```
 
-With a kernel `Image` + initramfs configured, the boot continues through Linux
-to a busybox shell prompt (`~ #`). Exit QEMU with `Ctrl-A x`.
+`LINUX_INITRD` is optional. With an initramfs configured, boot continues through
+Linux to a busybox shell prompt (`~ #`). Exit QEMU with `Ctrl-A x`.
 
 GDB attach:
 
 ```sh
-QEMU_EXTRA_ARGS="-s -S" make run
+LINUX_IMAGE=/path/to/Image QEMU_EXTRA_ARGS="-s -S" make run
 aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 ```
 
@@ -63,12 +65,14 @@ aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 
 ## Verification
 
-There is no automated test suite. Verification is:
-
-1. **Build**: `make` succeeds with zero warnings (`-Werror` is on).
-2. **Static inspection**: `aarch64-none-linux-gnu-readelf -h build/hypervisor.elf`
-   — entry point and `.text` start at `0x40080000`.
-3. **Run + observe**: `make run` prints the EL2 banner within 3 seconds.
+1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
+   `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M2, and M2.5
+   QEMU integration scenarios.
+2. **Linux SMP boot**: run with `LINUX_IMAGE` (and optionally `LINUX_INITRD`) and
+   verify `CPU1: Booted secondary processor`, `smp: Brought up 1 node, 2 CPUs`,
+   and `0-1` in `/sys/devices/system/cpu/online`.
+3. **IPI/timer check**: inspect `/proc/interrupts`; both CPU columns should show
+   timer interrupts and increasing IPI counts.
 
 ## Documentation
 

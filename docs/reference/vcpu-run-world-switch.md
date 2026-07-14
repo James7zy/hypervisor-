@@ -167,35 +167,28 @@ sequenceDiagram
 
 ### 4.2 这个 for 会退出吗？CPU 会被抢走吗？
 
-**当前（UP，单 VM，无调度器，ADR-0002）：`for` 不会退出，CPU 不会被抢走。**
+**当前（M3.5，单 VM、双 vCPU 静态 1:1 绑定、无调度器）：每个 pCPU 上的 `for`
+都不会退出，vCPU 也不会被抢走或迁移。**
 
 - 路径 A 全程在汇编里 `eret` 回 guest，根本不碰 `for`。
 - 路径 B / C 都落回 `for` 体内，循环立刻再进 guest。
-- 没有抢占、没有时间片、没有别的 vCPU 来抢 CPU——CPU 永远在「guest 跑(EL1)」⇄
-  「EL2 处理一次 exit 再回 guest」之间围着这唯一的 guest 转。
+- 没有抢占、没有时间片；vCPU0 固定在 pCPU0、vCPU1 固定在 pCPU1。每个 pCPU
+  永远在「自己的 guest vCPU 跑(EL1)」⇄「EL2 处理一次 exit 再回 guest」之间循环。
 - `main.c:36` 的 `for(;;) cpu_wfi()` 只是 `vm_run` 万一返回时的兜底，**当前永不触达**。
 
-⚠️ **两处与代码现状的偏差，留作 M3.5 清理**：
-
-1. `vm.c` 注释说 `hv_restore`「longjmps past this loop and out of vm_run」——**与实现
-   不符**。`hv_restore` 恢复的 `g_hv_ctx` 每次 `vcpu_run` 入口都被覆盖，存的就是 for
-   体内那次调用的 SP/LR，所以 `ret` 落点在 for 体内，并不真的跳出 `vm_run`。
-2. 路径 C 的 `HC_GUEST_DONE` 是 M2 的调试 HVC 钩子，**真实 Linux guest 不会发它**
-   （见 [handle-exit-dispatch.md](handle-exit-dispatch.md) §4），所以这条路径跑 Linux
-   时压根不触发。
-
-「退出 `vm_run` 去切到别的 vCPU」要等 **M3.5（SMP + 调度器）** 才成为真实路径。
+路径 C 的 `HC_GUEST_DONE` 是 M2 的调试 HVC 钩子，**真实 Linux guest 不会发它**
+（见 [handle-exit-dispatch.md](handle-exit-dispatch.md) §4），所以这条路径跑 Linux
+时不会触发。M3.5 没有 scheduler；若未来加入 vCPU overcommit/迁移，才需要让这个
+固定循环把控制权交给调度器。
 
 ---
 
 ## 5. 一个值得注意的设计细节（UP → SMP）
 
-`el1_sync_handler` 保存现场用的是 `g_vm`（全局单 VM 结构），而 `vcpu_run` 入口接收的
-是 `x0 = vcpu*` 参数。当前 M3 是单核单 guest（UP），`g_vm.vcpu` 就是那唯一的 vcpu，
-两者指向同一份数据，能闭合。
-
-等到 **M3.5（SMP / 多 vCPU）** 时，这个对 `g_vm` 的硬编码就需要改成 per-pCPU 的
-current-vcpu 指针，否则多 vCPU 会互相踩。
+M3.5 已去掉异常入口对 `g_vm.vcpu` 的硬编码。每个 pCPU 把 `&percpu[id]` 写入
+`TPIDR_EL2`，汇编入口通过 `PERCPU_CUR_VCPU` 取本核的 current-vCPU 指针，因此
+vCPU0/vCPU1 的寄存器帧不会互相覆盖。`vcpu_run(vcpu*)` 的入口参数和异常入口取到的
+current-vCPU 现在指向同一份 per-vCPU 状态。
 
 ---
 

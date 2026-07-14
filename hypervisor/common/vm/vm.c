@@ -13,7 +13,11 @@ struct vm g_vm;
 
 void vm_init(void)
 {
+#ifdef CONFIG_GUEST_SVM
+    g_vm.config = &svm_config;
+#else
     g_vm.config = &linux_config;
+#endif
 
     const struct vm_config *cfg = g_vm.config;
 
@@ -46,9 +50,15 @@ void vm_init(void)
 
     vgic_init(&g_vm.vcpu[0]);
 
+#ifdef CONFIG_GUEST_SVM
+    printk("SVM: launching VMID=%u entry=0x%lx ram_pa=0x%lx\n",
+           (unsigned)cfg->vmid, (unsigned long)cfg->entry,
+           (unsigned long)cfg->ram_pa);
+#else
     printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
            (unsigned)cfg->vmid, (unsigned long)cfg->entry,
            (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
+#endif
 
     vgicv3_mmio_init();
 }

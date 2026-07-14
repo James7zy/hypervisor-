@@ -143,8 +143,9 @@ flowchart TD
 
 `vgic_save` / `vgic_restore` 把 `ICH_HCR_EL2 / ICH_VMCR_EL2 / ICH_LR0..3` 在 vCPU
 结构和实时寄存器间整体搬运。M2 单 vCPU 不重调度，第一个真实用户是 M2.5 的定时器
-上下文切换。M3.5（SMP）多 vCPU 调度时，每次 vCPU 切换都要走这对函数，否则 LR 里的
-待处理中断会跨 vCPU 串台。
+上下文切换。M3.5 没有 scheduler：vCPU0/vCPU1 静态 1:1 绑定到各自 pCPU，每个核心
+只保存/恢复自己的 vGIC 状态。若未来加入 vCPU 迁移或 overcommit，每次切换仍必须走
+这对函数，否则 LR 里的待处理中断会跨 vCPU 串台。
 
 ---
 

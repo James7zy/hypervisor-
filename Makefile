@@ -12,10 +12,12 @@ CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
 
-BUILD_DIR := build
+BUILD_DIR ?= build
 OBJ_DIR   := $(BUILD_DIR)/obj
 ELF       := $(BUILD_DIR)/hypervisor.elf
 BIN       := $(BUILD_DIR)/hypervisor.bin
+
+HV_GUEST ?= linux
 
 CFLAGS := \
     -ffreestanding -nostdlib -nostartfiles \
@@ -23,6 +25,12 @@ CFLAGS := \
     -fno-strict-aliasing \
     -mgeneral-regs-only -mstrict-align \
     -Wall -Wextra -Werror -O2 -g
+
+ifeq ($(HV_GUEST),svm)
+CFLAGS += -DCONFIG_GUEST_SVM=1
+else ifneq ($(HV_GUEST),linux)
+$(error HV_GUEST must be 'linux' or 'svm')
+endif
 
 ASFLAGS := -g
 
@@ -57,7 +65,10 @@ SVM3_BIN   := $(BUILD_DIR)/svm3/svm3.bin
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets test-qemu test-qemu-svm2 test-qemu-svm3 test guest
+.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets \
+	test-svm-build test-qemu test-qemu-svm2 test-qemu-svm3 test guest
+
+.NOTPARALLEL: test
 
 all: $(ELF) $(BIN)
 
@@ -95,9 +106,6 @@ $(SVM2_BIN): $(SVM2_ELF)
 
 svm2: $(SVM2_BIN)
 
-test-qemu-svm2: all svm2
-	SVM_BIN=$(SVM2_BIN) sh tests/run_svm2_test.sh
-
 $(SVM3_ELF): tests/svm3/svm3_main.c tests/svm3/svm3_vectors.S tests/svm3/svm3.lds
 	@mkdir -p $(dir $@)
 	$(CC) $(SVM_CFLAGS) -T tests/svm3/svm3.lds -o $@ \
@@ -122,9 +130,6 @@ $(GUEST_DTB): $(GUEST_DTS)
 
 guest: $(GUEST_DTB)
 
-test-qemu-svm3: all svm3
-	SVM_BIN=$(SVM3_BIN) sh tests/run_svm3_test.sh
-
 $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 	@mkdir -p $(BUILD_DIR)
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -o $@ $<
@@ -139,8 +144,22 @@ $(BUILD_DIR)/check_offsets_target.o: tests/check_offsets_target.c
 check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 	@echo "PASS: cross-compiled struct offsets match assembly macros"
 
-test-qemu: all svm
-	SVM_BIN=$(SVM_BIN) sh tests/run_svm_test.sh
+TEST_BUILD_DIR := build/test-svm
+
+test-svm-build:
+	$(MAKE) BUILD_DIR=$(TEST_BUILD_DIR) HV_GUEST=svm all svm svm2 svm3
+
+test-qemu: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm.bin sh tests/run_svm_test.sh
+
+test-qemu-svm2: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm2/svm2.bin sh tests/run_svm2_test.sh
+
+test-qemu-svm3: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm3/svm3.bin sh tests/run_svm3_test.sh
 
 test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3
 
