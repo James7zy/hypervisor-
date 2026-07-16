@@ -11,7 +11,10 @@ A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then R
 mirrors ACRN's `hypervisor/` structure.
 
 **M3.5 (SMP)** is complete: an unmodified Linux guest boots with two vCPUs
-statically pinned 1:1 to two pCPUs. Next: **M4 (RK3588 port)**.
+statically pinned 1:1 to two pCPUs. Next: **M5 (multi-VM foundation)** — the
+long-term target form is the **full ACRN model** (Service VM + userspace Device
+Model); see the roadmap below. The RK3588 port moved to M10, after the ACRN-model
+core chain is proven on QEMU.
 
 ## Build Commands
 
@@ -214,7 +217,30 @@ QEMU → _start (head.S)
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
 | M3.5 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
-| M4 — RK3588 port | next | Real hardware, DT/ACPI discovery, boot from storage |
+| M5 — Multi-VM foundation | next | VM objectification: per-VM Stage-2, per-VM vGIC, static memory/CPU partitioning; vuart emulation (physical UART owned by VM0, VM1 gets vuart). Deliverable: two Linux guests coexist on 4 QEMU pCPUs, each reaching a shell |
+| M6 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
+| M7 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
+| M8 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
+| M9 — vCPU scheduler | planned | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: 3 VMs / 6 vCPUs on 4 pCPUs |
+| M10 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
+| Deferred | — | SMMU/DMA isolation and the device-passthrough framework: not needed while all User VM devices are DM-emulated on QEMU; schedule when RK3588 passthrough demands it |
+
+### ACRN-model strategy (decided 2026-07-14)
+
+The end state is the full ACRN architecture: a privileged Service VM running a
+userspace Device Model that serves virtio backends to User VMs. Four standing
+decisions shape the roadmap ordering:
+
+1. **QEMU-first**: the entire ACRN-model core chain (multi-VM → hypercall →
+   HSM → DM) is developed and verified on QEMU `virt`; the RK3588 port comes last.
+2. **Static pinning first, scheduler later**: multi-VM milestones keep 1:1
+   vCPU:pCPU pinning (ACRN "partitioned" mode). The scheduler is its own
+   milestone (M9) because vCPU sharing forces full FP/SIMD context switching.
+3. **No interim in-hypervisor virtio backends**: virtio backends are written
+   once, in the userspace DM (M8). Until then User VMs use vuart console +
+   initramfs (no disk). Avoids writing/maintaining the backend logic twice.
+4. **FDT parsing deferred to M10**: QEMU milestones keep static board config
+   (ADR-0008) and prebuilt guest DTB templates.
 
 Each milestone gets its own spec in `docs/superpowers/specs/` and plan in `docs/superpowers/plans/`.
 
