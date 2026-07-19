@@ -217,30 +217,47 @@ QEMU → _start (head.S)
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
 | M3.5 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
-| M5 — Multi-VM foundation | next | VM objectification: per-VM Stage-2, per-VM vGIC, static memory/CPU partitioning; vuart emulation (physical UART owned by VM0, VM1 gets vuart). Deliverable: two Linux guests coexist on 4 QEMU pCPUs, each reaching a shell |
-| M6 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
-| M7 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
-| M8 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
-| M9 — vCPU scheduler | planned | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: 3 VMs / 6 vCPUs on 4 pCPUs |
+| M5 — Multi-VM foundation | next | VM objectification (`g_vm` → `vm[]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M3), so one DTB template and one load-address scheme serve both VMs. Console: EL2 takes back the physical PL011 (revokes the M3 passthrough), both VMs get trap-and-emulate vuarts, an escape key switches RX focus. Three slices: (1) pure objectification refactor, (2) UART takeover + VM0 on vuart, (3) VM1 online. Deliverable: two Linux guests coexist on 4 QEMU pCPUs, each reaching an interactive shell |
+| M6 — vCPU scheduler | planned (moved up from M9, 2026-07-19) | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: M5's 2 VMs × 2 vCPUs time-sliced on 2 pCPUs (the other 2 pCPUs left idle for later Service VM work); both guests reach shells and concurrent FP workloads in both VMs run uncorrupted |
+| M7 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
+| M8 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
+| M9 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
 | M10 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
 | Deferred | — | SMMU/DMA isolation and the device-passthrough framework: not needed while all User VM devices are DM-emulated on QEMU; schedule when RK3588 passthrough demands it |
 
-### ACRN-model strategy (decided 2026-07-14)
+### ACRN-model strategy (decided 2026-07-14, revised 2026-07-19)
 
 The end state is the full ACRN architecture: a privileged Service VM running a
-userspace Device Model that serves virtio backends to User VMs. Four standing
-decisions shape the roadmap ordering:
+userspace Device Model that serves virtio backends to User VMs. Standing
+decisions shaping the roadmap ordering:
 
 1. **QEMU-first**: the entire ACRN-model core chain (multi-VM → hypercall →
    HSM → DM) is developed and verified on QEMU `virt`; the RK3588 port comes last.
-2. **Static pinning first, scheduler later**: multi-VM milestones keep 1:1
-   vCPU:pCPU pinning (ACRN "partitioned" mode). The scheduler is its own
-   milestone (M9) because vCPU sharing forces full FP/SIMD context switching.
+2. **Scheduler right after multi-VM** (revised 2026-07-19; was "scheduler
+   last"): the primary project goal is learning EL2 core technology, and the
+   scheduler is the densest remaining piece — it forces per-vCPU state
+   (FP/SIMD, system registers, vGIC LR save/restore) to be complete. Doing it
+   at M6, before the hypercall→HSM→DM chain, means M7–M9 build on a finished
+   state-switching foundation instead of accumulating "no-save" assumptions.
+   M5 itself still keeps 1:1 vCPU:pCPU pinning (ACRN "partitioned" mode).
 3. **No interim in-hypervisor virtio backends**: virtio backends are written
-   once, in the userspace DM (M8). Until then User VMs use vuart console +
+   once, in the userspace DM (M9). Until then User VMs use vuart console +
    initramfs (no disk). Avoids writing/maintaining the backend logic twice.
 4. **FDT parsing deferred to M10**: QEMU milestones keep static board config
    (ADR-0008) and prebuilt guest DTB templates.
+5. **EL2 owns the console from M5 on** (2026-07-19): the M3 PL011 passthrough
+   is revoked; the physical UART belongs to EL2 and every VM sees a
+   trap-and-emulate vuart, with an escape key switching input focus. This is
+   the only design that gives every VM an interactive shell over one physical
+   UART, and it pre-builds the Service VM console path.
+6. **One guest address map for all VMs** (2026-07-19): every VM sees RAM at
+   IPA `0x40000000` regardless of the backing PA. This is not new mechanism —
+   `vm_config` already separates `mem_base` (IPA) from `ram_pa`, and VM0 has
+   mapped IPA `0x40000000` → PA `0x80000000` since M3 — so VM1 is just a
+   second config with `ram_pa = 0xC0000000`. One DTB template, one set of
+   load-offset constants, and the guest-visible machine is identical across
+   VMs. (An identity-mapped VM1 was considered and rejected: it would need a
+   second DTB template and a second address-constant set for zero gain.)
 
 Each milestone gets its own spec in `docs/superpowers/specs/` and plan in `docs/superpowers/plans/`.
 
