@@ -33,7 +33,9 @@ struct vgicv3_dist {
     u64 irouter[988];     /* SPIs 32..1019 */
 };
 
-static struct vgicv3_dist g_vgicd;
+/* One distributor shadow per VM, keyed by vm->id (resolved at trap time via
+ * current_vcpu()->owner; the MMIO bus registration itself stays global). */
+static struct vgicv3_dist g_vgicd[NR_VMS];
 
 /* GICD_TYPER for a single-cpu, 1024-INTID, GICv3 distributor.
  *   ITLinesNumber[4:0] = 31  -> (31+1)*32 = 1024 INTIDs
@@ -52,20 +54,20 @@ static u32 reg_index(u64 off, u32 base)
     return (u32)((off - base) / 4U);
 }
 
-static u32 vgicd_read(u64 off, u8 size)
+static u32 vgicd_read(struct vgicv3_dist *d, u64 off, u8 size)
 {
     /* IROUTER is 64-bit; Linux may also read it as two 32-bit halves. */
     if (off >= VGICD_IROUTER_BASE && off <= VGICD_IROUTER_END) {
         u64 aligned = off & ~0x7ULL;
         u32 idx = (u32)((aligned - VGICD_IROUTER_BASE) / 8U);
-        u64 full = (idx < 988U) ? g_vgicd.irouter[idx] : 0ULL;
+        u64 full = (idx < 988U) ? d->irouter[idx] : 0ULL;
         if (size == 8U)
             return (u32)full;                 /* low half; caller width=8 */
         return (off & 0x4ULL) ? (u32)(full >> 32) : (u32)full;
     }
 
     switch (off) {
-    case VGICD_CTLR:  return g_vgicd.ctlr | VGICD_CTLR_ARE_NS; /* ARE_NS RA1 */
+    case VGICD_CTLR:  return d->ctlr | VGICD_CTLR_ARE_NS; /* ARE_NS RA1 */
     case VGICD_TYPER: return vgicd_typer();
     case VGICD_IIDR:  return 0x0000043BU;                       /* ARM */
     case VGICD_PIDR2: return VGIC_PIDR2_GICV3;
@@ -73,28 +75,28 @@ static u32 vgicd_read(u64 off, u8 size)
     }
 
     if (off >= VGICD_IGROUPR_BASE && off <= VGICD_IGROUPR_END)
-        return g_vgicd.igroupr[reg_index(off, VGICD_IGROUPR_BASE)];
+        return d->igroupr[reg_index(off, VGICD_IGROUPR_BASE)];
     if (off >= VGICD_ISENABLER_BASE && off <= VGICD_ISENABLER_END)
-        return g_vgicd.enabled[reg_index(off, VGICD_ISENABLER_BASE)];
+        return d->enabled[reg_index(off, VGICD_ISENABLER_BASE)];
     if (off >= VGICD_ICENABLER_BASE && off <= VGICD_ICENABLER_END)
-        return g_vgicd.enabled[reg_index(off, VGICD_ICENABLER_BASE)];
+        return d->enabled[reg_index(off, VGICD_ICENABLER_BASE)];
     if (off >= VGICD_ISPENDR_BASE && off <= VGICD_ISPENDR_END)
-        return g_vgicd.ispend[reg_index(off, VGICD_ISPENDR_BASE)];
+        return d->ispend[reg_index(off, VGICD_ISPENDR_BASE)];
     if (off >= VGICD_ICPENDR_BASE && off <= VGICD_ICPENDR_END)
-        return g_vgicd.ispend[reg_index(off, VGICD_ICPENDR_BASE)];
+        return d->ispend[reg_index(off, VGICD_ICPENDR_BASE)];
     if (off >= VGICD_ISACTIVER_BASE && off <= VGICD_ISACTIVER_END)
-        return g_vgicd.isactive[reg_index(off, VGICD_ISACTIVER_BASE)];
+        return d->isactive[reg_index(off, VGICD_ISACTIVER_BASE)];
     if (off >= VGICD_ICACTIVER_BASE && off <= VGICD_ICACTIVER_END)
-        return g_vgicd.isactive[reg_index(off, VGICD_ICACTIVER_BASE)];
+        return d->isactive[reg_index(off, VGICD_ICACTIVER_BASE)];
     if (off >= VGICD_IPRIORITYR_BASE && off <= VGICD_IPRIORITYR_END)
-        return g_vgicd.ipriorityr[reg_index(off, VGICD_IPRIORITYR_BASE)];
+        return d->ipriorityr[reg_index(off, VGICD_IPRIORITYR_BASE)];
     if (off >= VGICD_ICFGR_BASE && off <= VGICD_ICFGR_END)
-        return g_vgicd.icfgr[reg_index(off, VGICD_ICFGR_BASE)];
+        return d->icfgr[reg_index(off, VGICD_ICFGR_BASE)];
 
     return 0U;   /* RAZ */
 }
 
-static void vgicd_write(u64 off, u32 val, u8 size)
+static void vgicd_write(struct vgicv3_dist *d, u64 off, u32 val, u8 size)
 {
     if (off >= VGICD_IROUTER_BASE && off <= VGICD_IROUTER_END) {
         u64 aligned = off & ~0x7ULL;
@@ -106,16 +108,16 @@ static void vgicd_write(u64 off, u32 val, u8 size)
             return;   /* handled in the 8-byte branch of the handler */
         }
         if (off & 0x4ULL)
-            g_vgicd.irouter[idx] =
-                (g_vgicd.irouter[idx] & 0x00000000FFFFFFFFULL) | ((u64)val << 32);
+            d->irouter[idx] =
+                (d->irouter[idx] & 0x00000000FFFFFFFFULL) | ((u64)val << 32);
         else
-            g_vgicd.irouter[idx] =
-                (g_vgicd.irouter[idx] & 0xFFFFFFFF00000000ULL) | (u64)val;
+            d->irouter[idx] =
+                (d->irouter[idx] & 0xFFFFFFFF00000000ULL) | (u64)val;
         return;
     }
 
     switch (off) {
-    case VGICD_CTLR:  g_vgicd.ctlr = val | VGICD_CTLR_ARE_NS; return; /* force ARE_NS */
+    case VGICD_CTLR:  d->ctlr = val | VGICD_CTLR_ARE_NS; return; /* force ARE_NS */
     case VGICD_TYPER: /* fallthrough */
     case VGICD_IIDR:  /* fallthrough */
     case VGICD_PIDR2: return;   /* RO */
@@ -123,31 +125,31 @@ static void vgicd_write(u64 off, u32 val, u8 size)
     }
 
     if (off >= VGICD_IGROUPR_BASE && off <= VGICD_IGROUPR_END) {
-        g_vgicd.igroupr[reg_index(off, VGICD_IGROUPR_BASE)] = val; return;
+        d->igroupr[reg_index(off, VGICD_IGROUPR_BASE)] = val; return;
     }
     if (off >= VGICD_ISENABLER_BASE && off <= VGICD_ISENABLER_END) {
-        g_vgicd.enabled[reg_index(off, VGICD_ISENABLER_BASE)] |= val; return;
+        d->enabled[reg_index(off, VGICD_ISENABLER_BASE)] |= val; return;
     }
     if (off >= VGICD_ICENABLER_BASE && off <= VGICD_ICENABLER_END) {
-        g_vgicd.enabled[reg_index(off, VGICD_ICENABLER_BASE)] &= ~val; return;
+        d->enabled[reg_index(off, VGICD_ICENABLER_BASE)] &= ~val; return;
     }
     if (off >= VGICD_ISPENDR_BASE && off <= VGICD_ISPENDR_END) {
-        g_vgicd.ispend[reg_index(off, VGICD_ISPENDR_BASE)] |= val; return;
+        d->ispend[reg_index(off, VGICD_ISPENDR_BASE)] |= val; return;
     }
     if (off >= VGICD_ICPENDR_BASE && off <= VGICD_ICPENDR_END) {
-        g_vgicd.ispend[reg_index(off, VGICD_ICPENDR_BASE)] &= ~val; return;
+        d->ispend[reg_index(off, VGICD_ICPENDR_BASE)] &= ~val; return;
     }
     if (off >= VGICD_ISACTIVER_BASE && off <= VGICD_ISACTIVER_END) {
-        g_vgicd.isactive[reg_index(off, VGICD_ISACTIVER_BASE)] |= val; return;
+        d->isactive[reg_index(off, VGICD_ISACTIVER_BASE)] |= val; return;
     }
     if (off >= VGICD_ICACTIVER_BASE && off <= VGICD_ICACTIVER_END) {
-        g_vgicd.isactive[reg_index(off, VGICD_ICACTIVER_BASE)] &= ~val; return;
+        d->isactive[reg_index(off, VGICD_ICACTIVER_BASE)] &= ~val; return;
     }
     if (off >= VGICD_IPRIORITYR_BASE && off <= VGICD_IPRIORITYR_END) {
-        g_vgicd.ipriorityr[reg_index(off, VGICD_IPRIORITYR_BASE)] = val; return;
+        d->ipriorityr[reg_index(off, VGICD_IPRIORITYR_BASE)] = val; return;
     }
     if (off >= VGICD_ICFGR_BASE && off <= VGICD_ICFGR_END) {
-        g_vgicd.icfgr[reg_index(off, VGICD_ICFGR_BASE)] = val; return;
+        d->icfgr[reg_index(off, VGICD_ICFGR_BASE)] = val; return;
     }
     /* else WI */
 }
@@ -155,6 +157,10 @@ static void vgicd_write(u64 off, u32 val, u8 size)
 static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
 {
     (void)ctx;
+
+    /* Which VM faulted: the current vCPU's owner. */
+    struct vm *m = current_vcpu()->owner;
+    struct vgicv3_dist *d = &g_vgicd[m->id];
 
     vgic_dbg("GICD %s off=0x%lx size=%d data=0x%lx\n",
              acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
@@ -166,9 +172,9 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
         u32 idx = (u32)(((acc->offset & ~0x7ULL) - VGICD_IROUTER_BASE) / 8U);
         if (idx < 988U) {
             if (acc->is_write)
-                g_vgicd.irouter[idx] = acc->data;
+                d->irouter[idx] = acc->data;
             else
-                acc->data = g_vgicd.irouter[idx];
+                acc->data = d->irouter[idx];
         } else if (!acc->is_write) {
             acc->data = 0;
         }
@@ -176,9 +182,9 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
     }
 
     if (acc->is_write)
-        vgicd_write(acc->offset, (u32)acc->data, acc->size);
+        vgicd_write(d, acc->offset, (u32)acc->data, acc->size);
     else
-        acc->data = vgicd_read(acc->offset, acc->size);
+        acc->data = vgicd_read(d, acc->offset, acc->size);
 
     return 0;
 }
@@ -197,10 +203,13 @@ struct vgicv3_redist {
     u32 icfgr1;           /* PPIs (ICFGR0 = SGIs, RO edge) */
 };
 
-static struct vgicv3_redist g_vgicr[NR_CPUS] = {
-    [0 ... NR_CPUS - 1] = {
-        .waker = VGICR_WAKER_PROCESSOR_SLEEP | VGICR_WAKER_CHILDREN_ASLEEP,
-        .icfgr1 = 0,
+/* Per-VM redistributor shadows: one per vCPU of each VM. */
+static struct vgicv3_redist g_vgicr[NR_VMS][VCPUS_PER_VM] = {
+    [0 ... NR_VMS - 1] = {
+        [0 ... VCPUS_PER_VM - 1] = {
+            .waker = VGICR_WAKER_PROCESSOR_SLEEP | VGICR_WAKER_CHILDREN_ASLEEP,
+            .icfgr1 = 0,
+        },
     },
 };
 
@@ -212,7 +221,7 @@ static struct vgicv3_redist g_vgicr[NR_CPUS] = {
 static u64 vgicr_typer(u32 cpu)
 {
     u64 t = ((u64)cpu << 32) | ((u64)cpu << 8);
-    if (cpu == (u32)(NR_CPUS - 1))
+    if (cpu == (u32)(VCPUS_PER_VM - 1))
         t |= (1ULL << 4);   /* Last */
     return t;
 }
@@ -311,14 +320,17 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
              acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
              (int)acc->size, (unsigned long)acc->data);
 
-    /* Which redistributor frame: cpu = offset / VGICR_STRIDE. */
+    /* Which VM faulted: the current vCPU's owner. */
+    struct vm *m = current_vcpu()->owner;
+
+    /* Which redistributor frame (VM-local vCPU index): offset / VGICR_STRIDE. */
     u32 cpu = (u32)(acc->offset / VGICR_STRIDE);
-    if (cpu >= (u32)NR_CPUS) {
+    if (cpu >= (u32)VCPUS_PER_VM) {
         if (!acc->is_write)
             acc->data = 0;
         return 0;
     }
-    struct vgicv3_redist *r = &g_vgicr[cpu];
+    struct vgicv3_redist *r = &g_vgicr[m->id][cpu];
     u64 foff = acc->offset - (u64)cpu * VGICR_STRIDE;   /* within this frame */
 
     bool sgi = (foff >= VGICR_SGI_OFFSET);

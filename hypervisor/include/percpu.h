@@ -8,7 +8,7 @@
  * TPIDR_EL2 is the single source of truth for "which vCPU is current on this
  * physical core". Each pCPU writes &percpu[id] into TPIDR_EL2; the exception
  * -entry asm reads the current vCPU through it (mrs tpidr_el2 ; ldr [#offset])
- * instead of taking the address of the single global g_vm. This is the
+ * instead of taking the address of a single global VM. This is the
  * controlled offset coupling that supersedes the "first field of first field"
  * trick (see ADR-0003); the _Static_assert below makes a drift a build error.
  *

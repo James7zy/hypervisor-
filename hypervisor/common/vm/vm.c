@@ -8,58 +8,68 @@
 #include <vgic.h>
 #include "../../arch/arm64/irq/vgic_v3_mmio.h"
 
-/* Non-static: vmexit_asm.S references g_vm by symbol */
-struct vm g_vm;
+struct vm vm[NR_VMS];
 
 void vm_init(void)
 {
+    for (u32 vmi = 0; vmi < (u32)NR_VMS; vmi++) {
+        struct vm *m = &vm[vmi];
+
+        m->id     = vmi;
+        m->config = &vm_configs[vmi];
+
+        const struct vm_config *cfg = m->config;
+
+        /* Every vCPU knows its VM and its VM-local index; vcpu[1+]'s regs are
+         * authored later by the guest-driven PSCI CPU_ON. */
+        for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
+            m->vcpu[i].owner    = m;
+            m->vcpu[i].vcpu_idx = i;
+        }
+
+        struct vcpu *v = &m->vcpu[0];
+
+        /*
+         * arm64 Linux boot protocol (Documentation/arm64/booting.rst):
+         *   x0 = physical address of the DTB (here: guest IPA of the DTB)
+         *   x1 = x2 = x3 = 0 (reserved, must be zero)
+         *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
+         */
+        v->regs.x[0] = (u64)cfg->dtb_ipa;
+        v->regs.x[1] = 0;
+        v->regs.x[2] = 0;
+        v->regs.x[3] = 0;
+
+        /*
+         * SPSR_EL2 = 0x3C5: M[4:0]=00101 (EL1h, SP_EL1), DAIF=1111 (all masked).
+         */
+        v->regs.elr_el2  = cfg->entry;
+        v->regs.spsr_el2 = 0x3C5ULL;
+        v->regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
+
+        /*
+         * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC).
+         * RW=1: EL1 executes in AArch64 state.
+         */
+        v->hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
+                     (1ULL << 31);
+
+        stage2_init(m);
+
+        vgic_init(v);
+
 #ifdef CONFIG_GUEST_SVM
-    g_vm.config = &svm_config;
+        printk("SVM: launching VMID=%u entry=0x%lx ram_pa=0x%lx\n",
+               (unsigned)cfg->vmid, (unsigned long)cfg->entry,
+               (unsigned long)cfg->ram_pa);
 #else
-    g_vm.config = &linux_config;
+        printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
+               (unsigned)cfg->vmid, (unsigned long)cfg->entry,
+               (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
 #endif
+    }
 
-    const struct vm_config *cfg = g_vm.config;
-
-    /*
-     * arm64 Linux boot protocol (Documentation/arm64/booting.rst):
-     *   x0 = physical address of the DTB (here: guest IPA of the DTB)
-     *   x1 = x2 = x3 = 0 (reserved, must be zero)
-     *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
-     */
-    g_vm.vcpu[0].regs.x[0] = (u64)cfg->dtb_ipa;
-    g_vm.vcpu[0].regs.x[1] = 0;
-    g_vm.vcpu[0].regs.x[2] = 0;
-    g_vm.vcpu[0].regs.x[3] = 0;
-
-    /*
-     * SPSR_EL2 = 0x3C5: M[4:0]=00101 (EL1h, SP_EL1), DAIF=1111 (all masked).
-     */
-    g_vm.vcpu[0].regs.elr_el2  = cfg->entry;
-    g_vm.vcpu[0].regs.spsr_el2 = 0x3C5ULL;
-    g_vm.vcpu[0].regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
-
-    /*
-     * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC).
-     * RW=1: EL1 executes in AArch64 state.
-     */
-    g_vm.vcpu[0].hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
-                        (1ULL << 31);
-
-    stage2_init(&g_vm.vcpu[0], (u32)cfg->vmid, cfg->ram_pa);
-
-    vgic_init(&g_vm.vcpu[0]);
-
-#ifdef CONFIG_GUEST_SVM
-    printk("SVM: launching VMID=%u entry=0x%lx ram_pa=0x%lx\n",
-           (unsigned)cfg->vmid, (unsigned long)cfg->entry,
-           (unsigned long)cfg->ram_pa);
-#else
-    printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
-           (unsigned)cfg->vmid, (unsigned long)cfg->entry,
-           (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
-#endif
-
+    /* Global MMIO bus registration: once total, not per VM. */
     vgicv3_mmio_init();
 }
 
@@ -69,17 +79,18 @@ void vm_run(void)
      * Make TPIDR_EL2 the single source of truth for "current vCPU on this
      * core" before the first guest entry. The exception-entry asm reads the
      * guest frame through &percpu[id]->cur_vcpu (PERCPU_CUR_VCPU) instead of
-     * the address of g_vm (M3.5 Slice 1; supersedes the ADR-0003 trick).
+     * the address of a single global VM (M3.5 Slice 1; supersedes the
+     * ADR-0003 trick). CPU0 is always VM0 vCPU0.
      */
     percpu[0].cpu_id   = 0;
-    percpu[0].cur_vcpu = &g_vm.vcpu[0];
+    percpu[0].cur_vcpu = &vm[0].vcpu[0];
     __asm__ volatile("msr tpidr_el2, %0" :: "r"(&percpu[0]));
     /* Virtual MPIDR for vCPU0: Aff0 = 0 (vCPU1 sets Aff0=1 in secondary_main). */
     __asm__ volatile("msr vmpidr_el2, %0" :: "r"(0ULL));
     __asm__ volatile("isb");
 
-    stage2_activate(&g_vm.vcpu[0]);
-    vgic_restore(&g_vm.vcpu[0]);
+    stage2_activate(&vm[0].vcpu[0]);
+    vgic_restore(&vm[0].vcpu[0]);
 
     for (;;) {
         /*
@@ -88,7 +99,7 @@ void vm_run(void)
          * device emulation to poll. The EL2 virtio device model was removed in
          * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
          */
-        vcpu_run(&g_vm.vcpu[0]);
+        vcpu_run(&vm[0].vcpu[0]);
         /* Most synchronous exits (MMIO data abort, PSCI, unknown HVC) eret
          * straight back to the guest from el1_sync_handler and never return to
          * C. vcpu_run returns here only on the timer IRQ exit; the loop then

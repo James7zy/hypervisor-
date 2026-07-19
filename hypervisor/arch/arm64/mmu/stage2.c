@@ -3,6 +3,7 @@
 #include <vm.h>
 #include <board.h>
 #include <printk.h>
+#include "vm_config.h"   /* struct vm_config (vmid / ram_pa) */
 #include "stage2.h"
 
 /*
@@ -32,18 +33,24 @@
 #define S2_XN           (1ULL   << 54)  /* Execute-never */
 #define S2_TABLE        0x3ULL          /* Table descriptor: bits[1:0]=0b11 (vs block 0b01) */
 
-/* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero. */
-static u64 l1_table[512] __attribute__((aligned(4096)));
+/* Must be 4 KB-aligned: VTTBR_EL2[11:0] are reserved and must be zero.
+ * One table per VM, keyed by vm->id. */
+static u64 l1_table[NR_VMS][512] __attribute__((aligned(4096)));
 
 /*
- * L2 table backing l1_table[0] (IPA 0x00000000–0x3FFFFFFF). 512 × 2 MB blocks,
- * identity Device-nGnRE, EXCEPT the one entry covering GICD (0x08000000) +
- * GICR (0x080A0000): left invalid so guest accesses fault → vgic_v3_mmio shadow.
+ * L2 table backing l1_table[vm][0] (IPA 0x00000000–0x3FFFFFFF). 512 × 2 MB
+ * blocks, identity Device-nGnRE, EXCEPT the one entry covering GICD
+ * (0x08000000) + GICR (0x080A0000): left invalid so guest accesses fault →
+ * vgic_v3_mmio shadow.
  */
-static u64 l2_dev[512] __attribute__((aligned(4096)));
+static u64 l2_dev[NR_VMS][512] __attribute__((aligned(4096)));
 
-void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
+void stage2_init(struct vm *vm)
 {
+    u64 *l1 = l1_table[vm->id];
+    u64 *l2 = l2_dev[vm->id];
+    u64  ram_pa = (u64)vm->config->ram_pa;
+
     /*
      * IPA 0x00000000–0x3FFFFFFF: split the old 1 GB Device block into an L2
      * table so GICD/GICR can be punched out. Each L2 entry is 2 MB; fill all
@@ -52,17 +59,17 @@ void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
      * vgic_v3_mmio shadow emulation (ADR-0012).
      */
     for (u32 i = 0; i < 512U; i++)
-        l2_dev[i] = ((u64)i << 21) |
-                    S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
+        l2[i] = ((u64)i << 21) |
+                S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
 
     u32 gic_l2_idx = (u32)(BOARD_GIC_DIST_BASE >> 21);
     if ((u32)(BOARD_GIC_RDIST_BASE >> 21) != gic_l2_idx)
         printk("[hv] stage2: WARN GICD/GICR span >1 L2 entry "
                "(D=%u R=%u); punch-hole only covers D's entry\n",
                gic_l2_idx, (u32)(BOARD_GIC_RDIST_BASE >> 21));
-    l2_dev[gic_l2_idx] = 0;   /* invalid → fault */
+    l2[gic_l2_idx] = 0;   /* invalid → fault */
 
-    l1_table[0] = (u64)(uintptr_t)l2_dev | S2_TABLE;
+    l1[0] = (u64)(uintptr_t)l2 | S2_TABLE;
 
     /*
      * IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM).
@@ -73,10 +80,13 @@ void stage2_init(struct vcpu *vcpu, u32 vmid, u64 ram_pa)
      * invariant, not a rounding step — if ram_pa were not 1 GB-aligned the
      * masked-away low bits would silently mis-map the guest.
      */
-    l1_table[1] = (ram_pa & 0xFFFFC0000000UL) |
-                  S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
+    l1[1] = (ram_pa & 0xFFFFC0000000UL) |
+            S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
 
-    vcpu->vttbr_el2 = ((u64)vmid << 48) | (u64)(uintptr_t)l1_table;
+    /* Every vCPU of the VM shares the same Stage-2 table / VMID. */
+    u64 vttbr = ((u64)vm->config->vmid << 48) | (u64)(uintptr_t)l1;
+    for (u32 i = 0; i < VCPUS_PER_VM; i++)
+        vm->vcpu[i].vttbr_el2 = vttbr;
 }
 
 void stage2_activate(const struct vcpu *vcpu)

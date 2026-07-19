@@ -20,6 +20,7 @@
 #include <board.h>
 #include <printk.h>
 #include <vm.h>
+#include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include <percpu.h>
 #include <spinlock.h>
 #include <asm/sysreg.h>
@@ -49,33 +50,38 @@ static void kick_pcpu(u32 cpu)
 
 /*
  * Trap path (sender pCPU): decode the guest's ICC_SGI1R_EL1 value, mark the
- * target vCPUs' pending bitmaps, and kick each target pCPU. With static 1:1
- * pinning vCPU index == pCPU index.
+ * target vCPUs' pending bitmaps, and kick each target pCPU. Targets are
+ * VM-local vCPU indices; the pCPU slot is pcpu_base + idx (static 1:1
+ * pinning, no scheduler).
  */
 void vgic_sgi_trap(u64 sgi1r)
 {
     u32 vintid = (u32)((sgi1r >> SGI1R_INTID_SHIFT) & SGI1R_INTID_MASK);
-    u32 self   = current_vcpu_id();
+    struct vcpu *sender = current_vcpu();
+    struct vm   *m     = sender->owner;
+    u32 self   = sender->vcpu_idx;
     u32 targets;
 
     if (sgi1r & SGI1R_IRM)
-        targets = ((1U << NR_CPUS) - 1U) & ~(1U << self);   /* all but self */
+        targets = ((1U << VCPUS_PER_VM) - 1U) & ~(1U << self); /* all but self */
     else
         targets = (u32)(sgi1r & SGI1R_TARGETLIST);
 
-    for (u32 cpu = 0; cpu < (u32)NR_CPUS; cpu++) {
-        if (!(targets & (1U << cpu)))
+    for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
+        if (!(targets & (1U << idx)))
             continue;
 
+        u32 pcpu = m->config->pcpu_base + idx;   /* physical slot */
+
         spin_lock(&sgi_lock);
-        sgi_pending[cpu] |= (u16)(1U << vintid);
+        sgi_pending[pcpu] |= (u16)(1U << vintid);
         spin_unlock(&sgi_lock);
 
-        if (cpu == self) {
+        if (idx == self) {
             /* Self-IPI: inject directly, no physical kick needed. */
-            vgic_sgi_drain(cpu);
+            vgic_sgi_drain(pcpu);
         } else {
-            kick_pcpu(cpu);
+            kick_pcpu(pcpu);
         }
     }
 }
@@ -93,7 +99,8 @@ void vgic_sgi_drain(u32 cpu)
     sgi_pending[cpu] = 0;
     spin_unlock(&sgi_lock);
 
-    struct vcpu *v = &g_vm.vcpu[cpu];
+    /* Drain always runs ON pCPU `cpu`; its pinned vCPU is cur_vcpu. */
+    struct vcpu *v = percpu[cpu].cur_vcpu;
     for (u32 intid = 0; intid < 16U; intid++) {
         if (pend & (1U << intid))
             vgic_inject_sgi(v, intid);

@@ -89,11 +89,12 @@ void secondary_main(u32 id)
      * PSCI CPU_ON handler (psci_cpu_on_guest) before this pCPU was powered on.
      * We only set up the per-vCPU virtual GIC interface here.
      */
-    struct vcpu *v = &g_vm.vcpu[id];
+    struct vm   *m = &vm[id / VCPUS_PER_VM];
+    struct vcpu *v = &m->vcpu[id % VCPUS_PER_VM];
     vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
 
-    /* Virtual MPIDR for this vCPU: Aff0 = vCPU index (vCPU0->0, vCPU1->1). */
-    SYSREG_WRITE(VMPIDR_EL2, (u64)id);
+    /* Virtual MPIDR for this vCPU: Aff0 = VM-local vCPU index. */
+    SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
     asm volatile("isb");
 
     /* This core's current vCPU (asm entry path reads it via TPIDR_EL2). */

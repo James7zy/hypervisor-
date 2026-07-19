@@ -2,6 +2,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
+#include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include <percpu.h>
 #include <psci.h>
 
@@ -16,44 +17,47 @@ extern char secondary_entry[];
  */
 static u64 psci_cpu_on_guest(struct vcpu_regs *regs)
 {
+    struct vm *m = current_vcpu()->owner;
+
     u64 target_aff = regs->x[1];   /* MPIDR affinity of the target vCPU      */
     u64 entry      = regs->x[2];   /* guest IPA entry point                  */
     u64 ctx_id     = regs->x[3];   /* opaque context id, returned in x0      */
 
-    /* VMPIDR_EL2 gives vCPU N affinity Aff0=N; only {0,1} exist (NR_CPUS=2). */
+    /* VMPIDR_EL2 gives vCPU N affinity Aff0=N within its VM. */
     u64 aff = target_aff & 0xFFULL;   /* Aff0 */
-    if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)NR_CPUS)
+    if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)VCPUS_PER_VM)
         return PSCI_RET_INVALID_PARAMETERS;
 
-    u32 idx = (u32)aff;
-    if (percpu[idx].online)
+    u32 idx  = (u32)aff;                    /* VM-local vCPU index */
+    u32 pcpu = m->config->pcpu_base + idx;  /* physical target     */
+    if (percpu[pcpu].online)
         return PSCI_RET_ALREADY_ON;
 
     /*
      * Author the secondary's arm64 boot state (Documentation/arm64/booting.rst
      * secondary path): EL1h, DAIF masked, x0 = context_id (NOT the DTB), PC =
-     * entry. Shares vCPU0's Stage-2 / VMID / HCR (set up in vm_init).
+     * entry. Shares vCPU0's Stage-2 / VMID / HCR (Stage-2 vttbr was already
+     * set on every vCPU by stage2_init).
      */
-    struct vcpu *v = &g_vm.vcpu[idx];
+    struct vcpu *v = &m->vcpu[idx];
     v->regs.elr_el2  = entry;
     v->regs.x[0]     = ctx_id;
     v->regs.x[1]     = 0;
     v->regs.x[2]     = 0;
     v->regs.x[3]     = 0;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
-    v->hcr_el2       = g_vm.vcpu[0].hcr_el2;      /* mirror vCPU0              */
-    v->vttbr_el2     = g_vm.vcpu[0].vttbr_el2;    /* same Stage-2 table/VMID   */
+    v->hcr_el2       = m->vcpu[0].hcr_el2;       /* mirror vCPU0              */
 
-    /* Power on the matching pCPU at our EL2 secondary_entry, ctx = vCPU index.
-     * Target the physical affinity (== index for QEMU virt GICv3, <16 cores). */
-    s64 ret = psci_cpu_on(aff, (u64)(uintptr_t)secondary_entry, (u64)idx);
+    /* Power on the matching pCPU at our EL2 secondary_entry, ctx = pCPU id.
+     * Target the physical affinity (== pcpu for QEMU virt GICv3, <16 cores). */
+    s64 ret = psci_cpu_on((u64)pcpu, (u64)(uintptr_t)secondary_entry, (u64)pcpu);
     if (ret != (s64)PSCI_RET_SUCCESS)
         return PSCI_RET_INVALID_PARAMETERS;
 
     /* Wait (bounded) for the secondary to publish online before returning
      * SUCCESS, so the guest's CPU_ON contract (CPU running on return) holds. */
     for (u64 i = 0; i < 100000000ULL; i++) {
-        if (percpu[idx].online)
+        if (percpu[pcpu].online)
             return PSCI_RET_SUCCESS;
         asm volatile("dmb ish" ::: "memory");
     }

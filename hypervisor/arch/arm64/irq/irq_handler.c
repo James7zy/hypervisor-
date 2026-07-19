@@ -75,7 +75,7 @@ void el2_irq_handler(void)
          * when there is fresh RX data, so this cannot storm. (Unlike the
          * vtimer, there is no HW-forward LR linkage to gate re-pend.)
          */
-        vgic_inject_spi(&g_vm.vcpu[0], BOARD_PL011_IRQ);
+        vgic_inject_spi(&vm[0].vcpu[0], BOARD_PL011_IRQ);
         gic_priority_drop(intid);   /* leave Active so the level line cannot
                                      * re-pend and storm before the guest's ISR
                                      * reads DR (mirrors the vtimer, ADR-0001) */
