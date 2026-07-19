@@ -265,7 +265,8 @@ Cross-VM isolation invariants (the point of the milestone):
 | `hypervisor/arch/arm64/mmu/stage2.c` | per-VM root tables + VMIDs; VM1 1 GB block; drop PL011 passthrough mapping (slice 2) |
 | `hypervisor/arch/arm64/irq/vgic.c/.h` | dist state global → `vm->vgic`; SGI routing VM-scoped |
 | `hypervisor/arch/arm64/irq/irq_handler.c` | SPI 33 branch: guest-inject → EL2 vuart RX + focus switch |
-| **new** `hypervisor/dm/vuart.c/.h` (or `common/`) | PL011 vuart model on the MMIO trap bus; RX ring; focus |
+| **new** `hypervisor/dm/vuart.c/.h` | PL011 vuart model on the MMIO trap bus; RX ring; focus. New `dm/` directory, aligned with ACRN's `hypervisor/dm/vuart.c` layout |
+| **new** dual-SVM test scenario | fourth SVM guest variant + `tests/run_svm4_test.sh`: two bare-metal guests, one per VM, each prints an identifying banner via its vuart; the script asserts both banners appear and neither VM's output corrupts the other's |
 | `hypervisor/arch/arm64/boot/head.S` / `percpu` | `NR_CPUS=4`, 4 stacks; `secondary_entry` ctx carries pcpu id (existing mechanism) |
 | `hypervisor/arch/arm64/include/board.h` (qemu_virt) | `BOARD_LINUX2_RAM_PA 0xC0000000` (+ derived Image/DTB/initrd PAs); `NR_VMS` |
 | `scripts/run-qemu.sh` | `-smp 4 -m 4G`; VM1 loader entries |
@@ -286,12 +287,16 @@ Linux SMP boot to shell (the M3.5 headline) unbroken.
    Unmap PL011 from Stage-2, add vuart on the MMIO bus, SPI 33 → EL2 handler,
    RX ring + injection; focus fixed to VM0.
    **Verify: interactive shell over the vuart; EL2 printk and guest output
-   don't corrupt each other; `/proc/interrupts` shows UART IRQs rising.**
+   don't corrupt each other; `/proc/interrupts` shows UART IRQs rising.
+   The existing SVM scenarios now exercise the vuart trap path for free
+   (their UART writes trap instead of passing through) and must stay green.**
 3. **VM1 online + focus switching.**
    `NR_VMS=2`, `NR_CPUS=4`, second config, VM1 Stage-2 block, hypervisor-driven
    pCPU2 start, VM-scoped PSCI, Ctrl-T focus cycle, run-qemu VM1 loader lines.
    **Verify: headline DoD — both VMs to interactive shells, `online: 0-1` in
-   each, Ctrl-T switches input; VM1 `poweroff` leaves VM0's shell alive.**
+   each, Ctrl-T switches input; VM1 `poweroff` leaves VM0's shell alive.
+   The dual-SVM scenario (`run_svm4_test.sh`) joins `make test` in this slice
+   as the permanent automated regression for the multi-VM mechanism.**
 
 ---
 
@@ -301,6 +306,9 @@ Linux SMP boot to shell (the M3.5 headline) unbroken.
 - `make` zero warnings; `make test` (offset checks + M1/M2/M2.5 SVM
   scenarios) green after every slice — the SVM test guest also runs through
   the new `vm[]` path.
+- From slice 3, `make test` additionally runs the dual-SVM scenario: two
+  bare-metal guests, one per VM, whose interleaved vuart banners must both
+  appear intact — the automated cross-VM isolation regression.
 - `_Static_assert`s for the unchanged asm offsets still compile (ADR-0003).
 
 **Headline run (gates the milestone):**
