@@ -85,9 +85,14 @@ void secondary_main(u32 id)
 
     /*
      * Enter guest (EL1) on this core. This vCPU's register state (elr/x0/spsr)
-     * and its shared Stage-2 (vttbr) / HCR were authored by the guest-driven
-     * PSCI CPU_ON handler (psci_cpu_on_guest) before this pCPU was powered on.
-     * We only set up the per-vCPU virtual GIC interface here.
+     * was authored by the guest-driven PSCI CPU_ON handler (psci_cpu_on_guest)
+     * before this pCPU was powered on. Its Stage-2 vttbr was authored earlier
+     * still and independently of PSCI: stage2_init() (called once per VM from
+     * vm_init(), at hypervisor boot) fills in vttbr_el2 for every vCPU slot of
+     * the VM up front, since all vCPUs of a VM share one Stage-2 table/VMID.
+     * HCR is the one PSCI CPU_ON actually mirrors, copying vcpu[0]'s hcr_el2
+     * into this vCPU's slot. We only set up the per-vCPU virtual GIC interface
+     * here.
      */
     struct vm   *m = &vm[id / VCPUS_PER_VM];
     struct vcpu *v = &m->vcpu[id % VCPUS_PER_VM];

@@ -20,6 +20,24 @@ void vm_init(void)
 
         const struct vm_config *cfg = m->config;
 
+        /*
+         * secondary_main derives (VM, vCPU) for a woken pCPU structurally as
+         * (id / VCPUS_PER_VM, id % VCPUS_PER_VM), while psci.c/vgic_sgi.c
+         * derive the pCPU for a given (VM, vCPU) as config->pcpu_base + idx.
+         * These two derivations only agree if pcpu_base == vmi * VCPUS_PER_VM
+         * for every configured VM. Nothing else checks that at compile time
+         * (pcpu_base is data, not derived), so verify it here before any
+         * vCPU of this VM can be powered on.
+         */
+        if (cfg->pcpu_base != (u8)(vmi * (u32)VCPUS_PER_VM)) {
+            printk("[hv] BUG: vm[%u].config->pcpu_base=%u != %u "
+                   "(vmi*VCPUS_PER_VM); static pCPU mapping violated\n",
+                   (unsigned)vmi, (unsigned)cfg->pcpu_base,
+                   (unsigned)(vmi * (u32)VCPUS_PER_VM));
+            for (;;)
+                asm volatile("wfi");
+        }
+
         /* Every vCPU knows its VM and its VM-local index; vcpu[1+]'s regs are
          * authored later by the guest-driven PSCI CPU_ON. */
         for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {

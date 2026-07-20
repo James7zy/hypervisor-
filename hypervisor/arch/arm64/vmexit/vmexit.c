@@ -2,6 +2,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
+#include <percpu.h>
 #include <hypercall.h>
 #include <psci.h>
 #include <vgic.h>
@@ -23,7 +24,10 @@ static void handle_hvc(struct vcpu_regs *regs)
 
     switch (func_id) {
     case HC_INJECT_TEST:
-        vgic_inject_sw(&vm[0].vcpu[0], (u32)regs->x[1], 0xA0);
+        /* Inject into the vCPU that issued the HVC, not a hardcoded VM0
+         * vCPU0 -- under NR_VMS>1 a VM1 guest must not be able to reach
+         * into VM0 through this test hook. */
+        vgic_inject_sw(current_vcpu(), (u32)regs->x[1], 0xA0);
         printk("[hv] SVM HVC: inject vINTID=%u\n", (unsigned)regs->x[1]);
         break;
     case HC_GUEST_DONE:

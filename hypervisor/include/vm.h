@@ -5,7 +5,8 @@
 #ifndef __ASSEMBLER__
 #include <types.h>
 #include <board.h>
-#include <percpu.h>   /* NR_CPUS (percpu.h forward-declares struct vcpu) */
+#include <percpu.h>   /* NR_CPUS, for the NR_VMS/VCPUS_PER_VM static_assert
+                         below (percpu.h forward-declares struct vcpu) */
 
 struct vcpu_regs {
     u64 x[31];      /* x0–x30   offset 0x000 */
@@ -21,6 +22,18 @@ struct vcpu_regs {
 #endif
 #define NR_VMS       CONFIG_NR_VMS
 #define VCPUS_PER_VM 2   /* static 2-vCPU VMs; NR_CPUS = NR_VMS * VCPUS_PER_VM */
+
+/*
+ * secondary_main derives a woken pCPU's (VM, vCPU) purely from its pCPU id
+ * (id / VCPUS_PER_VM, id % VCPUS_PER_VM); vm_configs[]/pcpu_base must agree
+ * with that structural mapping (see vm_init's boot-time check in vm.c). Both
+ * only make sense if every physical CPU is accounted for by exactly one VM's
+ * static slot, i.e. NR_CPUS == NR_VMS * VCPUS_PER_VM. Catch a mismatch (e.g.
+ * a future CONFIG_NR_VMS bump without a matching NR_CPUS bump) at compile
+ * time instead of silently indexing percpu[]/sgi_pending[] out of bounds.
+ */
+_Static_assert(NR_VMS * VCPUS_PER_VM == NR_CPUS,
+               "NR_CPUS must equal NR_VMS * VCPUS_PER_VM");
 
 struct vm;
 

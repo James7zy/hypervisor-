@@ -57,7 +57,9 @@ static inline struct vcpu *current_vcpu(void)
     return pc->cur_vcpu;
 }
 
-/* This pCPU's id (== vCPU index under static 1:1 pinning). */
+/* Returns this PHYSICAL pCPU's id. This is NOT the VM-local vCPU index --
+ * once a VM's pcpu_base is nonzero its vCPU N runs on pCPU pcpu_base + N,
+ * not pCPU N. For the VM-local index use current_vcpu()->vcpu_idx instead. */
 static inline u32 current_vcpu_id(void)
 {
     struct percpu *pc;

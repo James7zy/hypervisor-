@@ -45,11 +45,11 @@ static u64 l1_table[NR_VMS][512] __attribute__((aligned(4096)));
  */
 static u64 l2_dev[NR_VMS][512] __attribute__((aligned(4096)));
 
-void stage2_init(struct vm *vm)
+void stage2_init(struct vm *m)
 {
-    u64 *l1 = l1_table[vm->id];
-    u64 *l2 = l2_dev[vm->id];
-    u64  ram_pa = (u64)vm->config->ram_pa;
+    u64 *l1 = l1_table[m->id];
+    u64 *l2 = l2_dev[m->id];
+    u64  ram_pa = (u64)m->config->ram_pa;
 
     /*
      * IPA 0x00000000–0x3FFFFFFF: split the old 1 GB Device block into an L2
@@ -84,9 +84,9 @@ void stage2_init(struct vm *vm)
             S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
 
     /* Every vCPU of the VM shares the same Stage-2 table / VMID. */
-    u64 vttbr = ((u64)vm->config->vmid << 48) | (u64)(uintptr_t)l1;
+    u64 vttbr = ((u64)m->config->vmid << 48) | (u64)(uintptr_t)l1;
     for (u32 i = 0; i < VCPUS_PER_VM; i++)
-        vm->vcpu[i].vttbr_el2 = vttbr;
+        m->vcpu[i].vttbr_el2 = vttbr;
 }
 
 void stage2_activate(const struct vcpu *vcpu)
