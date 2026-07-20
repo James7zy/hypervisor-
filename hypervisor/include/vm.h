@@ -57,6 +57,16 @@ struct vcpu {
     struct vm *owner;        /* back-pointer: trap handlers navigate via
                                 current_vcpu()->owner instead of globals */
     u32        vcpu_idx;     /* affinity inside the VM (VMPIDR Aff0) */
+    /* M5 slice 3 fix: set by vgic_set_spi_shadow() right before kicking the
+     * owning pCPU, test-and-cleared by vgic_reload_spi_lr() on that pCPU.
+     * Distinguishes "this kick-SGI carries a freshly-shadowed PL011 SPI" from
+     * "this kick-SGI is an ordinary cross-core IPI/park-check with nothing
+     * new in ich_lr[1]" -- without it, vgic_reload_spi_lr() would blindly
+     * replay a stale shadow (already consumed by the guest) back into the
+     * live ICH_LR1_EL2 on every unrelated kick. Mirrors sgi_pending[]'s role
+     * for the SGI/IPI case (vgic_sgi.c) but is per-vcpu, separate state --
+     * does not interact with sgi_pending[]. */
+    volatile bool spi_shadow_pending;
 };
 
 struct vm_config;

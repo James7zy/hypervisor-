@@ -59,7 +59,15 @@ static inline struct vcpu *current_vcpu(void)
 
 /* Returns this PHYSICAL pCPU's id. This is NOT the VM-local vCPU index --
  * once a VM's pcpu_base is nonzero its vCPU N runs on pCPU pcpu_base + N,
- * not pCPU N. For the VM-local index use current_vcpu()->vcpu_idx instead. */
+ * not pCPU N. For the VM-local index use current_vcpu()->vcpu_idx instead.
+ *
+ * Cross-reference: the hv_ctx_slot macro in
+ * hypervisor/arch/arm64/vmexit/vmexit_asm.S derives this same fact --
+ * "pCPU id for the currently executing core" -- independently, via
+ * (TPIDR_EL2 - &percpu[0]) / PERCPU_SIZE pointer arithmetic instead of
+ * reading cpu_id. No _Static_assert ties the two together (arithmetic in an
+ * asm macro can't be checked at C compile time), so if you change this
+ * derivation, check hv_ctx_slot still agrees, and vice versa. */
 static inline u32 current_vcpu_id(void)
 {
     struct percpu *pc;

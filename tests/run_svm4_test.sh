@@ -30,6 +30,7 @@ check() {
 
 check "Hello from EL2"
 check "SVM: launching VMID="
+check "SVM HVC: done (x1=0x10001)"
 check "SVM4: hello from VM1"
 
 if [ "${FAILURES}" -gt 0 ]; then

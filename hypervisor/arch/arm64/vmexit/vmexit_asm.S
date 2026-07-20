@@ -34,6 +34,15 @@ g_hv_ctx:
  * so callers can compute this before or after loading x0..x8 with anything
  * live). id = (TPIDR_EL2 - &percpu[0]) / PERCPU_SIZE, matching the C-side
  * current_vcpu_id() derivation exactly.
+ *
+ * Cross-reference: current_vcpu_id() in hypervisor/include/percpu.h derives
+ * "pCPU id for the currently executing core" independently, by reading the
+ * stored percpu[id].cpu_id field instead of doing this pointer-difference
+ * arithmetic. A _Static_assert can't span this asm macro's arithmetic vs that
+ * C helper (unlike PERCPU_CUR_VCPU/PERCPU_SIZE below, which DO have
+ * _Static_assert guards in percpu.h), so there is nothing enforcing these two
+ * derivations agree except this comment: if you change either one, check the
+ * other still computes the same pCPU id for the same core.
  */
     .macro hv_ctx_slot
     mrs     x9, tpidr_el2               /* &percpu[id] */

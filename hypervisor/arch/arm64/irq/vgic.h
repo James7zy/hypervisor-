@@ -47,17 +47,21 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
- * pCPU from its own current vCPU's shadow ich_lr[1]. Called by the kicked
- * target pCPU (el2_irq_handler's kick-SGI branch) after another pCPU wrote
- * the shadow LR1 for a vCPU it does not itself own. Idempotent / harmless
- * when ich_lr[1] has nothing pending. */
+ * pCPU from its own current vCPU's shadow ich_lr[1]. Called unconditionally by
+ * the kicked target pCPU (el2_irq_handler's kick-SGI branch) on EVERY kick,
+ * including ones that are ordinary SGI/IPI traffic -- it test-and-clears
+ * vcpu->spi_shadow_pending and only actually reloads the live register when
+ * that flag was set (i.e. vgic_set_spi_shadow ran since the last reload/
+ * inject). This prevents replaying a stale, already-consumed shadow LR1 on an
+ * unrelated later kick. */
 void vgic_reload_spi_lr(struct vcpu *vcpu);
 
 /* Write only the SHADOW ich_lr[1] for `vcpu` (same encoding as
- * vgic_inject_spi) WITHOUT touching any live system register. Safe to call
- * from any pCPU regardless of which vCPU it currently owns. The pCPU that
- * owns `vcpu` must be kicked (vgic_kick_pcpu) so it calls vgic_reload_spi_lr
- * on itself and actually presents the interrupt. */
+ * vgic_inject_spi) WITHOUT touching any live system register, and arm
+ * vcpu->spi_shadow_pending. Safe to call from any pCPU regardless of which
+ * vCPU it currently owns. The pCPU that owns `vcpu` must be kicked
+ * (vgic_kick_pcpu) so it calls vgic_reload_spi_lr on itself, sees the pending
+ * flag set, and actually presents the interrupt. */
 void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid);
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).

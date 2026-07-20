@@ -72,8 +72,17 @@ void el2_irq_handler(void)
          * vgic_kick_pcpu, hypervisor/dm/vuart.c): the pCPU servicing the
          * physical UART IRQ cannot write another pCPU's LIVE list register,
          * so it only updates the shadow and kicks the owner here to do the
-         * live reload itself. Idempotent / harmless when ich_lr[1] has
-         * nothing newly pending (re-writes the same value, or 0).
+         * live reload itself.
+         *
+         * Called unconditionally on EVERY kick-SGI, including ordinary
+         * SGI/IPI traffic that has nothing to do with the console -- safe
+         * because vgic_reload_spi_lr() internally test-and-clears
+         * vcpu->spi_shadow_pending and only actually reloads the live
+         * register when vgic_set_spi_shadow() armed it since the last
+         * reload/inject. Without that gate this call would blindly replay a
+         * stale (possibly already-consumed-by-the-guest) shadow LR1 on any
+         * later, unrelated kick. Separate from and does not touch
+         * sgi_pending[] above.
          */
         vgic_reload_spi_lr(current_vcpu());
     } else if (intid == BOARD_VTIMER_IRQ) {
