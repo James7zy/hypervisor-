@@ -1,5 +1,14 @@
 # 架构鸟瞰 / Architecture Zoom-Out（2026-06-21）
 
+> **M5 更新提示（2026-07-20）：** 本文写于 M3.x 时代，仍以"单 VM、单 vCPU"为整体框架
+> （见下方 §0、§5 模块表中的 `g_vm`）。M5 之后 `g_vm` 已重构为 `vm[NR_VMS]`（每 VM 独立
+> Stage-2/vGIC/vuart），且 §4 的键盘输入 trace 已不完整：它只覆盖 `vm[0]` 单目标注入，
+> 未描述 M5 新增的 `console_focus` 切换键与跨核 vGIC shadow/kick/reload 注入路径（VM 的
+> 控制台 vCPU 可能运行在与拥有物理 UART 的 pCPU0 不同的核上）。完整现状见
+> [[../adr/0014-multi-vm-static-partition-el2-console]] 及其 Mermaid 图；本文其余章节
+> （GIC 子系统本体、Stage-2 机制）在单 VM 视角下仍然准确，只是需要按"每 VM 一份"重新
+> 理解。全文按 M5 现状重写留作后续任务。
+
 本文是一次「拉高一层」的整体梳理：从顶层调用链 → GIC 子系统 → 一次键盘输入端到端
 trace，三层逐步放大，用项目术语把各模块和调用者串成一张图。面向「不熟悉某块代码、想
 先看清它在大局里的位置」的读者。

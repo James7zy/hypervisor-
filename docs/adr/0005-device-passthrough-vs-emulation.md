@@ -1,6 +1,8 @@
 # Split devices into passthrough (PL011) vs trap-and-emulate (GIC, virtio)
 
-> **Status:** Accepted. **Milestone:** M3.0–M3.3.
+> **Status:** Accepted for M3.0–M3.3; **the PL011 half is superseded by
+> [[0014-multi-vm-static-partition-el2-console]] as of M5.** **Milestone:**
+> M3.0–M3.3.
 
 The guest touches three classes of MMIO device on QEMU `virt`: the PL011 UART,
 the GICv3 (distributor + redistributor), and virtio-mmio frames. Each needs a
@@ -73,6 +75,13 @@ flowchart TD
 - **PL011 is shared between hypervisor and guest.** Both write the same FIFO;
   output can interleave. Acceptable for a single learning guest, but it is the
   first thing a multi-VM design must revisit.
+- **Superseded by M5.** With two VMs there is no longer one guest to share the
+  UART with cooperatively: [[0014-multi-vm-static-partition-el2-console]]
+  revokes the PL011 passthrough entirely, gives EL2 exclusive ownership, and
+  emulates a PL011 per VM (trap-and-emulate, matching how the GIC was always
+  handled). The "Emulate everything, including the UART" option this ADR
+  rejected for M3.0 is exactly what M5 adopts, once the reason for rejecting
+  it (extra code with no exerciser) no longer holds.
 - Adding a new device requires an explicit decision here: passthrough means an
   identity Stage-2 mapping to a real PA; emulation means an `mmio_bus_register`
   and a handler, and *not* mapping a real device behind it. There is no default —

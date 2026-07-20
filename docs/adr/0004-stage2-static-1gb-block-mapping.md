@@ -103,3 +103,13 @@ flowchart LR
   be reconciled with this ADR.
 - Single L1 table ↔ single VMID ↔ single guest; this is one of the load-bearing
   consequences of [[0002-single-global-vm-single-vcpu]].
+- **M5 (multi-VM) generalizes this to one L1/L2 table pair per VM**, indexed
+  by `vm->id` (`l1_table[NR_VMS][512]`, `l2_dev[NR_VMS][512]`), each with its
+  own VMID in `VTTBR_EL2[63:48]` — see
+  [[0014-multi-vm-static-partition-el2-console]]. The two-block design itself
+  is unchanged per VM; VM1 simply gets its own pair of blocks, with its 1 GB
+  RAM block backed by a second 1 GB-aligned PA (`0xC000_0000`, requiring
+  `-m 4G`). M5 also punches a third hole in `l2_dev` — the PL011's 2 MB
+  entry — using the exact mechanism this ADR's "GIC/virtio IPAs are
+  identity-mapped Device, yet still trap" note describes, now applied to a
+  device that used to be genuine passthrough (see ADR-0005/ADR-0014).

@@ -112,3 +112,12 @@ sequenceDiagram
 - The single-redistributor vGIC of [[0010-vgic-scope-cpu0-lr0-group1]] is
   generalized to one redistributor per vCPU (with a correct 64-bit `GICR_TYPER`
   so a secondary can match its redistributor by affinity).
+- **M5 (multi-VM) re-scopes guest-driven bring-up per-VM** (see
+  [[0014-multi-vm-static-partition-el2-console]]): `psci_cpu_on_guest` resolves
+  the target vCPU and physical pCPU via `current_vcpu()->owner` and that VM's
+  `config->pcpu_base`, so each VM's own PSCI `CPU_ON` only ever targets that
+  VM's own pCPU slot. A VM's *first* vCPU is the one exception to "guest-driven
+  bring-up": since no guest exists yet for a VM before its boot vCPU is
+  running, that one boot vCPU is powered on by the hypervisor itself (a
+  fire-and-forget physical `PSCI_CPU_ON` issued by CPU0 at hv-init time) —
+  guest-driven `CPU_ON` remains how every VM's *second* vCPU comes up.

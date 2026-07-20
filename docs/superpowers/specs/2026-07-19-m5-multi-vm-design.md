@@ -1,7 +1,14 @@
 # M5 — Multi-VM Foundation (2 static Linux guests) Design
 
-> **Status:** Draft — decisions accepted in the 2026-07-19 grilling session; not
-> yet implemented.
+> **Status:** Implemented and gate-verified (2026-07-20): three slices merged
+> (`m5-slice1-vm-objectification`, `m5-slice2-vuart`, `m5-slice3-vm1-online`),
+> each with independent spec-compliance and code-quality review plus a final
+> whole-milestone review. Two Linux guests coexist on 4 QEMU pCPUs, each
+> reaching an interactive shell; Ctrl-T switches console input focus; VM1
+> `SYSTEM_OFF` leaves VM0 running (demonstrated with 1777 consecutive
+> heartbeats spanning the shutdown). See ADR-0014 for the as-built decision
+> record and `docs/superpowers/plans/2026-07-19-m5-multi-vm.md` for the
+> execution history.
 > **Milestone:** M5. First milestone of the revised roadmap (scheduler moved to
 > M6, hypercall→HSM→DM chain renumbered M7–M9; see CLAUDE.md "ACRN-model
 > strategy", revision 2026-07-19).

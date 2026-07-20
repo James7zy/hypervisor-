@@ -116,3 +116,4 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | [0011](0011-virtio-mmio-v2-modern-only.md) | Implement virtio-mmio as modern (VERSION 2) only, no legacy | Accepted (M3.3) |
 | [0012](0012-physical-gicv3-ownership.md) | Let the hypervisor own the physical GICv3; the guest sees only a virtual GIC | Accepted (M2.5; extended M3.0/M3.2) |
 | [0013](0013-smp-per-cpu-tpidr-guest-driven-bringup.md) | Make EL2 per-CPU via `TPIDR_EL2`, bring secondaries up guest-driven, route IPIs through a kick-SGI | Accepted (M3.5) |
+| [0014](0014-multi-vm-static-partition-el2-console.md) | Objectify the VM, statically partition 2 VMs across 4 pCPUs, move the console under EL2 | Accepted (M5) |

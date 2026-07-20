@@ -109,3 +109,10 @@ interface（系统寄存器）**。
   ADR-0005（PL011 直通 vs GIC 模拟）共同构成完整的中断虚拟化模型。
 - **M3.5（SMP）将重访本决策**：多 PE 时每个物理 redistributor 都需唤醒，SGI/IPI 需要
   在物理与虚拟两侧建立映射，`IROUTER` 的目标亲和性也不再恒为 CPU0。
+- **M5（多 VM）在此基础上再加一维**（见
+  [[0014-multi-vm-static-partition-el2-console]]）：物理 GIC 仍由 EL2 独占（本 ADR
+  不变），但影子模拟状态（`vgic_v3_mmio.c`）从"每 pCPU 一份"变为"每 VM 一份"，
+  按 `current_vcpu()->owner->id` 索引。新增的 PL011 SPI（33）不再走客户机直通
+  （ADR-0005 的 PL011 段被 ADR-0014 取代），而是由 EL2 完整收发物理 FIFO 后，
+  经与 SGI 相同的 shadow/kick/reload 模式跨核注入到当前拥有控制台输入焦点的
+  VM——因为该 VM 的 vCPU0 可能运行在与拥有物理 UART 的 pCPU0 不同的核上。

@@ -30,6 +30,10 @@
  *
  * QEMU `-device loader,addr=` takes PHYSICAL addresses; the .dts /memory
  * node and the boot-protocol register state use the IPA values.
+ *
+ * M5: PL011 (0x09000000) is NO LONGER identity-mapped passthrough — EL2 owns
+ * the physical UART exclusively and punches this IPA out of Stage-2 so guest
+ * accesses trap to the emulated vuart (hypervisor/dm/vuart.c). See ADR-0014.
  */
 #define BOARD_LINUX_RAM_IPA   0x40000000UL  /* guest sees RAM base here     */
 #define BOARD_LINUX_RAM_PA    0x80000000UL  /* backing physical RAM (1GB-aligned: a Stage-2 L1 1GB block requires a 1GB-aligned output PA) */

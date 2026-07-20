@@ -83,3 +83,12 @@ flowchart LR
   allocation/overflow handling (the three sources have fixed LRs and a fourth
   simultaneous pending interrupt would be lost). Status stays `Accepted` for that
   remaining scope.
+- **M5 (multi-VM) generalizes the redistributor array one dimension further**
+  (see [[0014-multi-vm-static-partition-el2-console]]): both `g_vgicd` and
+  `g_vgicr` become per-VM (`g_vgicd[NR_VMS]`, `g_vgicr[NR_VMS][VCPUS_PER_VM]`),
+  keyed by `current_vcpu()->owner->id`. M5 also exposed that same-core LR1
+  writes are insufficient once a VM's console-owning vCPU can run on a pCPU
+  other than the one draining the physical UART: PL011 SPI injection
+  (`vgic_inject_spi`) gained a shadow/kick/reload cross-core path alongside
+  the existing SGI mechanism. LR0/LR1/LR2/Group-1-only scoping is otherwise
+  unchanged by M5.
