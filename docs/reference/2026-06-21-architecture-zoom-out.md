@@ -23,7 +23,7 @@ trace，三层逐步放大，用项目术语把各模块和调用者串成一张
 ```mermaid
 flowchart TD
     HEAD["head.S _start (EL2)"] --> MAIN["hypervisor_main(dtb)<br/>boot/main.c"]
-    MAIN --> UART["uart_init()<br/>debug/uart_pl011.c（PL011 直通/earlycon）"]
+    MAIN --> UART["uart_init()<br/>debug/uart_pl011.c（EL2 物理 UART 驱动/earlycon，<br/>M5 slice 2 起 EL2 独占，guest 侧走 vuart 模拟）"]
     MAIN --> GIC["gic_init()<br/>irq/gic_v3.c（物理 GICv3）"]
     MAIN --> VT["vtimer_init()<br/>timer/vtimer.c"]
     MAIN --> VINIT["vm_init()<br/>common/vm/vm.c（构建 g_vm）"]
@@ -98,21 +98,27 @@ GIC 工作拆成**三个互不混淆**的关注点：
 | 函数 | LR | HW 位 | 调用者 | 为什么 |
 | --- | --- | --- | --- | --- |
 | `vgic_inject_hw(vintid, pintid)` | **LR0** | HW=1 | `el2_irq_handler`（vtimer 27） | guest deactivate vIRQ 经 LR 链路释放物理定时器线（ADR-0001） |
-| `vgic_inject_spi(intid)` | **LR1** | HW=1 | `el2_irq_handler`（PL011 33）、virtio-console | LR1 避免被 LR0 每 tick 的 vtimer 覆盖 |
+| `vgic_inject_spi(intid)` | **LR1** | HW=0（M5 slice 2 起） | `vuart_rx`（`irq_handler.c` 的 PL011 33 分支经由 vuart 模型调用）、virtio-console | LR1 避免被 LR0 每 tick 的 vtimer 覆盖；HW=0 是因为 EL2 现在自己 drop+deactivate 物理 PL011 中断，没有 Active 状态留给 HW 链接去释放 |
 | `vgic_inject_sw(vintid, prio)` | LR0 | HW=0 | `handle_hvc`（M2 调试钩子） | 纯软件注入，无物理线 |
 
-> 文档/代码漂移记录：`vgic.h` 注释把 `vgic_inject_spi` 描述为 `vgic_inject_sw` 的薄封装，
-> 但实现是独立的 HW=1/LR1 路径。该头注释已过时。
+> `vgic.h` 把 `vgic_inject_spi` 描述为 `vgic_inject_sw` 的薄封装——M5 slice 2 起这与
+> 实现（`vgic.c`）一致：HW=0/LR1。（M3.3–M5 slice 1 期间它曾是 HW=1/LR1，服务于当时
+> PL011 直通设计下的 LR 释放链接；该阶段已结束，见下方 §4。）
 
 ---
 
 ## 4. 端到端 trace：一次 `ttyAMA0` 键盘输入
 
-前提：guest 控制台是 `console=ttyAMA0`——**直通**的物理 PL011（`0x09000000`）。hypervisor
-**不**模拟该 UART；它在 Stage-2 把 UART 以 Device-nGnRE 恒等映射，guest 的读写直接命中真实
-设备。hypervisor 只截获**中断**以路由进 guest 的 vGIC。三个地址锚点：PL011 基址
-`0x09000000`；PL011 RX 是 **SPI 33**（DTS `<0 1 4>` → 32+1）；SPI 33 已在 `gic_init` 时
-登记进物理 GICD（Group 1、prio 0xA0、路由 Aff=0、enable）。
+前提（M5 slice 2 起，取代此前的直通设计）：guest 控制台仍是 `console=ttyAMA0`，但物理
+PL011（`0x09000000`）现在由 **EL2 独占**——hypervisor 在 Stage-2 把 UART 所在的 2 MB 窗口
+标记为 invalid（`stage2.c` 的 `stage2_init`），guest 对 DR/FR/IMSC 等寄存器的每一次访问都
+不再直达硬件，而是触发 Stage-2 data abort，陷入 MMIO 总线，命中 `dm/vuart.c` 注册的
+`vuart_mmio_handler` trap-and-emulate 模型。数据面因此拆成两段：guest **TX** 一个字符是
+对 vuart `DR` 的 MMIO store，处理函数在 printk 锁下调用 `console_putc()` 把字节转发到真实
+UART；guest **RX** 一个字符要先由物理中断把字节交到 EL2，再由 EL2 注入虚拟中断通知 guest
+去 vuart 的影子 FIFO 里取。三个地址/中断锚点不变：PL011 基址 `0x09000000`；PL011 RX 是
+**SPI 33**（DTS `<0 1 4>` → 32+1）；SPI 33 已在 `gic_init` 时登记进物理 GICD（Group 1、
+prio 0xA0、路由 Aff=0、enable）——变的是这条 SPI 落地guest的路径，不再是硬件直通。
 
 参与者前缀标注了运行的特权级：`〔HW〕`=硬件、`〔EL2〕`=hypervisor、`〔EL1〕`=客户机。
 **注意 `el1_irq_handler_asm` / `el2_irq_handler` 都运行在 EL2**——函数名里的 `el1` 指
@@ -128,34 +134,46 @@ sequenceDiagram
     participant GICp as 〔HW〕物理 GICv3
     participant ASM as 〔EL2〕el1_irq_handler_asm
     participant HND as 〔EL2〕el2_irq_handler
+    participant VU as 〔EL2〕vuart_rx / vuart model
     participant VG as 〔EL2〕vgic_inject_spi
     participant G as 〔EL1〕Guest pl011 ISR
 
     K->>GICp: 按键 → 字节入物理 RX FIFO, 拉高 SPI 33
     Note over GICp: HCR_EL2.IMO=1 → 物理 IRQ 路由到 EL2，不进 EL1
     GICp->>ASM: 陷入 EL2，跳 VBAR_EL2+0x480 Lower-EL IRQ 向量
-    ASM->>ASM: 保存 guest 帧 → g_vm.vcpu.regs
+    ASM->>ASM: 保存 guest 帧 → vm[cpu].vcpu.regs
     ASM->>HND: bl el2_irq_handler
     HND->>GICp: gic_ack_irq → ICC_IAR1_EL1 = 33
-    HND->>VG: vgic_inject_spi(33)
-    VG->>VG: 写 ICH_LR1_EL2，PENDING HW G1, vINTID=pINTID=33
-    HND->>GICp: gic_priority_drop(33) → ICC_EOIR1_EL1，只 drop 留 Active
-    HND-->>ASM: 返回, 恢复帧, eret，eret 前不解 EL2 IRQ 屏蔽
+    loop vuart_rx_has_room(&vm[0])
+        HND->>K: uart_getc() 排干物理 FIFO 一个字节
+        HND->>VU: vuart_rx(&vm[0], c) 推入 vuart 影子 RX ring
+        VU->>VG: 若 IMSC 未屏蔽：vgic_inject_spi(33)
+        VG->>VG: 写 ICH_LR1_EL2，PENDING G1 HW=0, vINTID=33
+    end
+    HND->>GICp: gic_priority_drop(33) → ICC_EOIR1_EL1
+    HND->>GICp: gic_deactivate(33) → 物理侧当场释放
+    Note over HND,GICp: HW=0：EL2 自己 drop+deactivate，不留 Active 状态给 guest 释放
+    HND-->>ASM: 返回, 恢复帧, eret
     ASM->>G: eret 回 EL1，虚拟 SPI 33 经 ICV_* 呈现
-    Note over ASM,G: 此后 guest 收到的是【虚拟】SPI 33，物理中断全程未触达 EL1
-    G->>K: 读 DR@0x09000000，Stage-2 恒等不陷入 → 取走字节, 线 de-assert
-    G->>GICp: ICV_EOIR1/DIR deactivate vIRQ
-    Note over G,GICp: HW=1 LR 链路 → 硬件自动 deactivate 物理 SPI 33，线释放无风暴
+    Note over ASM,G: guest 收到的是【虚拟】SPI 33，物理中断已在 EL2 结束生命周期
+    G->>VU: 读 DR@0x09000000 → Stage-2 fault → MMIO 总线 → vuart_mmio_handler
+    VU->>G: 从 vuart 影子 RX ring 弹出字节返回给 guest（不碰物理 FIFO）
+    G->>GICp: ICV_EOIR1/DIR deactivate 虚拟 SPI 33（纯虚拟记账，无物理线联动）
 ```
 
-**值得记住的非对称性：** **输出**（guest 打印字符）是对直通 `DR` 的普通 MMIO store——
-从不陷入、与 hypervisor 无关。**输入**（本 trace）是 hypervisor 唯一介入的方向，且只为
-**中断**——数据本身仍在设备↔guest 间直连流动。hypervisor 在这里是纯中断路由器，这正是
-ADR-0005 对控制台 UART 选直通而非模拟的原因。
+**值得记住的对称性变化：** 此前的直通设计里，**输出**是对直通 `DR` 的普通 MMIO
+store（从不陷入），**输入**才是 hypervisor 唯一介入的方向（只为中断，数据直连）。
+M5 slice 2 起两个方向都会陷入：TX 陷入 vuart 后同步转发给 `console_putc()`；RX 由
+物理中断异步灌入 vuart 的影子 FIFO，guest 再通过 trap-and-emulate 的 `DR` 读取取走。
+hypervisor 从「纯中断路由器 + 恒等映射直通」变成了「完整的 trap-and-emulate 控制台
+设备模型」，换取了 EL2 对物理 UART 的独占（为多 VM 场景下的控制台复用打基础，
+M5 slice 3+）。ADR-0005 记录的是旧的直通决策，已被本 slice 的独占+模拟设计取代。
 
-`gic_priority_drop` 但**不** deactivate（EOImode=1 拆分）是为防止 level-sensitive RX 线
-立即 re-pend 风暴 EL2（与 vtimer 同理，ADR-0001）；HW=1 的 LR 链路保证 guest 处理完后物理
-线被干净释放。
+PL011 RX 分支在 EL2 里 `gic_priority_drop` **且** `gic_deactivate`（不再是 EOImode=1
+拆分留 Active）：因为 guest 不再有驱动直接触达物理寄存器，没有「等 guest 处理完才能
+释放物理线」的时序需求，EL2 排干 FIFO 后立刻可以让物理侧完全清零。这与 vtimer PPI 27
+的处理（仍然 HW=1、只 drop 不 deactivate，ADR-0001）不同——vtimer 依然是唯一保留硬件
+转发+留 Active 语义的中断源。
 
 ---
 
@@ -175,7 +193,8 @@ ADR-0005 对控制台 UART 选直通而非模拟的原因。
 | `common/psci/psci.c` | PSCI 电源管理 | `handle_hvc` |
 | `dm/virtio_mmio.c`+`virtqueue.c`+`virtio_console.c` | 设备模型：virtio-mmio v2、virtqueue、console | `vm_init`、MMIO 总线；ADR-0011 |
 | `dm/gpa.c` | GPA（guest-physical）访问器 | virtio 缓冲区 |
-| `debug/uart_pl011.c` | PL011 驱动（直通 earlycon） | `main.c`；ADR-0005 |
+| `debug/uart_pl011.c` | PL011 物理驱动，EL2 独占（M5 slice 2 起） | `main.c`；ADR-0005（旧决策，已被 vuart 取代） |
+| `dm/vuart.c` | VM0 guest 控制台 trap-and-emulate 模型 | 注册到 MMIO 总线；`irq_handler.c` 的 PL011 RX 分支 |
 
 ---
 

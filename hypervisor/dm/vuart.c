@@ -156,14 +156,14 @@ void vuart_bus_init(void)
                (unsigned long)BOARD_UART_BASE);
 }
 
-bool vuart_rx_has_room(const struct vm *vm)
+bool vuart_rx_has_room(const struct vm *m)
 {
-    return !vuart_rx_full(&vm->vuart);
+    return !vuart_rx_full(&m->vuart);
 }
 
-void vuart_rx(struct vm *vm, u8 ch)
+void vuart_rx(struct vm *m, u8 ch)
 {
-    struct vuart *u = &vm->vuart;
+    struct vuart *u = &m->vuart;
 
     if (!vuart_rx_full(u)) {
         u->rx_buf[u->rx_head] = ch;
@@ -177,5 +177,5 @@ void vuart_rx(struct vm *vm, u8 ch)
 
     u->ris |= VUART_RIS_RX_MASK;
     if (u->imsc & VUART_RIS_RX_MASK)
-        vgic_inject_spi(&vm->vcpu[0], BOARD_PL011_IRQ);
+        vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
 }

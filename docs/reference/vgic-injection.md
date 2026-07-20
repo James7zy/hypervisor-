@@ -77,9 +77,8 @@ u64 lr = ... | ICH_LR_HW | (pintid << ICH_LR_PINTID_SHIFT) | vintid;
 ### 2.3 `vgic_inject_spi` —— SPI 注入，固定用 LR1
 
 ```c
-u64 lr = ICH_LR_STATE_PENDING | ICH_LR_HW | ICH_LR_GROUP1 |
-         (0xA0 << ICH_LR_PRIO_SHIFT) |
-         (intid << ICH_LR_PINTID_SHIFT) | (intid & ICH_LR_VINTID_MASK);
+u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
+         (0xA0 << ICH_LR_PRIO_SHIFT) | (intid & ICH_LR_VINTID_MASK);
 vcpu->ich_lr[1] = lr;
 SYSREG_WRITE(ICH_LR1_EL2, lr);
 ```
@@ -88,10 +87,14 @@ SYSREG_WRITE(ICH_LR1_EL2, lr);
 注入、独占 LR0，如果 SPI 也用 LR0，会在 guest 取走前被 vtimer 覆盖掉。两类中断分占
 LR0 / LR1 互不踩。
 
-> 注意一个文档/实现的细节张力：`vgic.h` 把 `vgic_inject_spi` 注释成「software (HW=0)
-> 的瘦封装」，但 `vgic.c` 的实现实际带了 `ICH_LR_HW`（HW=1）并用 LR1——给了
-> PL011 RX 这类电平直通线一个真实的 HW 链接。以**实现为准**：当前是 HW=1 / LR1。
-> 头注释是早期 M3.3 纯模拟 virtio 时代的说法，已被 PL011 直通的需求覆盖。
+纯软件注入（HW=0），与 `vgic_inject_sw` 同形状，只是固定用 LR1、优先级固定 0xA0。
+M5 slice 2 之前，PL011 RX 曾经用 HW=1/LR1（guest 直通物理 UART，deactivate 虚拟中断
+经 LR 链接顺带释放物理线）。现在 EL2 独占物理 PL011（`irq_handler.c` 的
+`BOARD_PL011_IRQ` 分支）：EL2 自己排干物理 FIFO 并调用 `gic_priority_drop` **和**
+`gic_deactivate`，物理侧不再留 Active 状态给 LR 链接去释放——继续用 HW=1 会造成
+物理/虚拟状态不一致（几次注入后卡死）。因此改为纯软件注入：HW=0、Group1、Pending。
+`vgic.h` 把它注释成「software (HW=0) 的瘦封装」这一点，现在与实现一致，不再是文档
+漂移。
 
 ---
 
@@ -104,20 +107,28 @@ LR0 / LR1 互不踩。
 u32 intid = gic_ack_irq();               /* 读 ICC_IAR1_EL1 */
 
 if (intid == BOARD_VTIMER_IRQ) {         /* PPI 27 虚拟定时器 */
-    vgic_inject_hw(&g_vm.vcpu, 27, 27, 0xA0);
+    vgic_inject_hw(current_vcpu(), 27, 27, 0xA0);
     gic_priority_drop(intid);            /* 只 EOIR1，保留 Active（ADR-0001） */
-} else if (intid == BOARD_PL011_IRQ) {   /* SPI，ttyAMA0 直通 */
-    vgic_inject_spi(&g_vm.vcpu, intid);
-    gic_priority_drop(intid);            /* 同样保留 Active，靠 guest 释放 */
+} else if (intid == BOARD_PL011_IRQ) {   /* SPI，EL2 独占物理 UART（M5 slice 2） */
+    while (vuart_rx_has_room(&vm[0])) {
+        int c = uart_getc();
+        if (c < 0) break;
+        vuart_rx(&vm[0], (u8)c);         /* 内部按需调 vgic_inject_spi（HW=0） */
+    }
+    gic_priority_drop(intid);
+    gic_deactivate(intid);               /* 物理侧当场释放，没有 guest 驱动直读硬件 */
 } else {
     gic_priority_drop(intid);            /* 未预期 / 1023 伪中断 */
     gic_deactivate(intid);              /* 直接 drop + deactivate */
 }
 ```
 
-要点：**HW 转发的中断在 EL2 只 `gic_priority_drop`（EOIR1）、绝不 `gic_deactivate`**。
-deactivate 留给 guest 在 EL1 完成，通过 LR 的 HW 链接传导到物理侧——这正是 2.2 节
-说的电平线防风暴机制。只有「未预期中断」才在 EL2 直接 drop + deactivate。
+要点：**只有 HW=1 转发的中断（当前仅 vtimer PPI 27）在 EL2 只 `gic_priority_drop`
+（EOIR1）、绝不 `gic_deactivate`**，deactivate 留给 guest 在 EL1 完成，通过 LR 的 HW
+链接传导到物理侧——这正是 2.2 节说的电平线防风暴机制。PL011 RX 不再走这条路：EL2
+在这里把物理 FIFO 排空、灌进 vuart 模型后，直接 `gic_priority_drop` **加**
+`gic_deactivate`，因为 guest 已经没有直接读物理寄存器的驱动了，不存在「guest 处理完
+才能释放」的时序需求。「未预期中断」同样直接 drop + deactivate。
 
 此外，**纯模拟设备**（无物理 GIC 线）也会注入：M3.3 的 virtio-mmio 在
 `dm/virtio_mmio.c:58` 用 used-buffer 事件直接调 `vgic_inject_spi`，路径不经过物理
@@ -128,13 +139,13 @@ flowchart TD
     P["物理 IRQ → EL2<br/>el2_irq_handler"] --> A["gic_ack_irq()"]
     A --> B{INTID?}
     B -->|"vtimer PPI 27"| C["vgic_inject_hw（HW=1, LR0）<br/>+ priority_drop（保留 Active）"]
-    B -->|"PL011 SPI"| D["vgic_inject_spi（HW=1, LR1）<br/>+ priority_drop（保留 Active）"]
+    B -->|"PL011 SPI"| D["排干物理 FIFO → vuart_rx()<br/>→ vgic_inject_spi（HW=0, LR1）<br/>+ priority_drop + deactivate（当场释放）"]
     B -->|"其它/1023"| E["drop + deactivate"]
-    V["virtio 设备 used 事件<br/>（无物理线）"] --> F["vgic_inject_spi"]
+    V["virtio 设备 used 事件<br/>（无物理线）"] --> F["vgic_inject_spi（HW=0）"]
     C --> G["eret 回 EL1<br/>guest 取 ICC_IAR1，处理，写 ICC_DIR"]
     D --> G
     F --> G
-    G --> H["guest deactivate vIRQ<br/>→ HW 链接释放物理中断"]
+    C --> H["guest deactivate vIRQ<br/>→ HW 链接释放物理中断（仅 vtimer）"]
 ```
 
 ---

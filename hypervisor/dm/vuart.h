@@ -33,7 +33,7 @@ void vuart_bus_init(void);
  * physical UART with uart_getc() -- a physical read is destructive, so
  * dropping room-checking to inside vuart_rx would be too late to avoid
  * losing the byte. */
-void vuart_rx(struct vm *vm, u8 ch);
+void vuart_rx(struct vm *m, u8 ch);
 /* True if the virtual RX ring has space for at least one more byte. */
-bool vuart_rx_has_room(const struct vm *vm);
+bool vuart_rx_has_room(const struct vm *m);
 #endif
