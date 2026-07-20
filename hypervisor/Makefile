@@ -6,9 +6,11 @@ hv-objs := \
     lib/print.o \
     common/vm/vm.o \
     common/psci/psci.o \
-    common/percpu.o
+    common/percpu.o \
+    dm/vuart.o
 
 hv-includes := \
     -Ihypervisor/include \
     -Ihypervisor/common/vm \
-    -Ihypervisor/common/psci
+    -Ihypervisor/common/psci \
+    -Ihypervisor/dm

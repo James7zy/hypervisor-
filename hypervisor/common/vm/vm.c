@@ -3,6 +3,8 @@
 #include <printk.h>
 #include <vm.h>
 #include <percpu.h>
+#include <uart.h>
+#include <vuart.h>
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
@@ -89,6 +91,7 @@ void vm_init(void)
 
     /* Global MMIO bus registration: once total, not per VM. */
     vgicv3_mmio_init();
+    vuart_bus_init();
 }
 
 void vm_run(void)
@@ -110,10 +113,19 @@ void vm_run(void)
     stage2_activate(&vm[0].vcpu[0]);
     vgic_restore(&vm[0].vcpu[0]);
 
+    /*
+     * CPU0 owns the physical PL011 RX SPI (BOARD_PL011_IRQ), matching the
+     * existing routing. Enable RX + receive-timeout interrupts once, before
+     * the guest-entry loop: from here EL2 drains the physical FIFO itself on
+     * every RX IRQ and feeds bytes to the vuart model (M5 slice 2).
+     */
+    uart_rx_irq_enable();
+
     for (;;) {
         /*
-         * The guest's interactive console is console=ttyAMA0 (the PL011
-         * passthrough); it reads the PL011 RX FIFO directly, so this loop has no
+         * The guest's interactive console is the emulated vuart (M5 slice 2):
+         * Stage-2 traps its PL011 IPA window and irq_handler.c's PL011 branch
+         * drains the physical FIFO on EL2's behalf, so this loop still has no
          * device emulation to poll. The EL2 virtio device model was removed in
          * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
          */

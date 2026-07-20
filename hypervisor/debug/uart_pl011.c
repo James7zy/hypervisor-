@@ -58,3 +58,13 @@ int uart_getc(void)
         return -1;                                   /* RX FIFO empty */
     return (int)(mmio_read32(uart_base_addr + UART_DR) & 0xFFU);
 }
+
+/* UARTIMSC RXIM (bit 4) + RTIM (bit 6): receive and receive-timeout interrupt
+ * mask, so RX under the FIFO trigger level still interrupts promptly. */
+#define IMSC_RXIM (1U << 4)
+#define IMSC_RTIM (1U << 6)
+
+void uart_rx_irq_enable(void)
+{
+    mmio_write32(uart_base_addr + UART_IMSC, IMSC_RXIM | IMSC_RTIM);
+}

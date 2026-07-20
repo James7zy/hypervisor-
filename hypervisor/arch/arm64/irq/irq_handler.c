@@ -16,6 +16,8 @@
 #include <percpu.h>
 #include <vgic.h>
 #include <gic_v3.h>
+#include <uart.h>
+#include <vuart.h>
 #include "vgic_debug.h"
 #include "vgic_sgi.h"
 
@@ -66,19 +68,31 @@ void el2_irq_handler(void)
             gic_ppi_set_enable(current_vcpu_id(), BOARD_VTIMER_IRQ, false);
         }
     } else if (intid == BOARD_PL011_IRQ) {
-        vgic_dbg("inject SPI=%u (PL011 RX, ICH_LR1)\n", intid);
         /*
-         * PL011 RX (ttyAMA0 passthrough). Software-inject the SPI into the
-         * guest vGIC so its UART ISR runs and reads the RX byte from the
-         * passed-through DR. Drop AND deactivate the physical SPI: the byte is
-         * already latched in the PL011 FIFO, and QEMU only re-asserts the line
-         * when there is fresh RX data, so this cannot storm. (Unlike the
-         * vtimer, there is no HW-forward LR linkage to gate re-pend.)
+         * PL011 RX: EL2 owns the physical UART exclusively (M5 slice 2). Drain
+         * the physical FIFO here and hand each byte to the vuart model, which
+         * buffers it and re-injects a SOFTWARE SPI into the guest's vGIC
+         * (vuart_rx -> vgic_inject_spi) if its virtual IMSC is unmasked.
+         * Unlike the old passthrough design, the physical SPI is fully
+         * deactivated below: there is no guest driver left to read DR
+         * directly, so nothing needs the line held Active to avoid a storm --
+         * that rationale only applied when the guest read hardware itself.
+         *
+         * Check vuart_rx_has_room() BEFORE uart_getc(): a physical DR read is
+         * destructive (pops the hardware FIFO), so once the virtual ring is
+         * full this loop must stop WITHOUT consuming the next physical byte --
+         * QEMU's pl011 model backpressures its chardev on the physical FIFO
+         * having room, so an un-popped byte simply waits for a later RX IRQ
+         * once the guest drains the virtual ring, instead of being lost.
          */
-        vgic_inject_spi(&vm[0].vcpu[0], BOARD_PL011_IRQ);
-        gic_priority_drop(intid);   /* leave Active so the level line cannot
-                                     * re-pend and storm before the guest's ISR
-                                     * reads DR (mirrors the vtimer, ADR-0001) */
+        while (vuart_rx_has_room(&vm[0])) {
+            int c = uart_getc();
+            if (c < 0)
+                break;
+            vuart_rx(&vm[0], (u8)c);
+        }
+        gic_priority_drop(intid);
+        gic_deactivate(intid);
     } else {
         /* Unexpected (incl. spurious 1023): drop AND deactivate. */
         gic_priority_drop(intid);

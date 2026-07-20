@@ -10,10 +10,23 @@
  * character-by-character (M3.5). The only shared sink is the PL011. */
 static struct spinlock print_lock = SPINLOCK_INIT;
 
-static int emit_char(char c)
+/* Raw emit, no locking -- caller must already hold print_lock. */
+static int emit_char_locked(char c)
 {
     uart_putc(c);
     return 1;
+}
+
+static int emit_char(char c)
+{
+    return emit_char_locked(c);
+}
+
+void console_putc(char c)
+{
+    spin_lock(&print_lock);
+    emit_char_locked(c);
+    spin_unlock(&print_lock);
 }
 
 static int emit_string(const char *s)

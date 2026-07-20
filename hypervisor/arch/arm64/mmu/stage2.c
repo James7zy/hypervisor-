@@ -53,10 +53,10 @@ void stage2_init(struct vm *m)
 
     /*
      * IPA 0x00000000–0x3FFFFFFF: split the old 1 GB Device block into an L2
-     * table so GICD/GICR can be punched out. Each L2 entry is 2 MB; fill all
-     * as identity Device-nGnRE (covers PL011 @ 0x09000000), then invalidate the
-     * single 2 MB entry holding GICD+GICR → guest access faults → MMIO trap →
-     * vgic_v3_mmio shadow emulation (ADR-0012).
+     * table so GICD/GICR (and now PL011) can be punched out. Each L2 entry is
+     * 2 MB; fill all as identity Device-nGnRE, then invalidate the entries
+     * holding GICD+GICR and PL011 → guest access faults → MMIO trap →
+     * vgic_v3_mmio / vuart shadow emulation (ADR-0012; M5 slice 2 for UART).
      */
     for (u32 i = 0; i < 512U; i++)
         l2[i] = ((u64)i << 21) |
@@ -68,6 +68,17 @@ void stage2_init(struct vm *m)
                "(D=%u R=%u); punch-hole only covers D's entry\n",
                gic_l2_idx, (u32)(BOARD_GIC_RDIST_BASE >> 21));
     l2[gic_l2_idx] = 0;   /* invalid → fault */
+
+    /*
+     * PL011 (0x09000000, 0x09000000 >> 21 = 72): EL2 now owns the physical
+     * UART exclusively (M5 slice 2). The guest's DR/FR/etc. accesses must
+     * fault into the vuart trap-and-emulate model instead of reaching
+     * hardware directly. guest/qemu_virt.dts declares only pl011@9000000 in
+     * this 2 MB window (checked against the DTS before this change) -- no
+     * other device shares it.
+     */
+    u32 uart_l2_idx = (u32)(BOARD_UART_BASE >> 21);
+    l2[uart_l2_idx] = 0;   /* invalid → fault → MMIO trap → vuart */
 
     l1[0] = (u64)(uintptr_t)l2 | S2_TABLE;
 

@@ -45,17 +45,22 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
 
-/* Hardware-forwarded SPI injection into LR1 (the vtimer owns LR0 and is
- * re-injected every tick, so sharing LR0 would clobber this before the guest
- * takes it). HW=1 with the physical INTID means the guest's deactivate of the
- * virtual IRQ releases the physical one through the LR linkage — required for a
- * level-sensitive passthrough line (e.g. PL011 RX) so it does not stay Active
- * after the first byte. LR1 is saved/restored by vgic_{save,restore}. */
+/* Software SPI injection into LR1 (the vtimer owns LR0 and is re-injected
+ * every tick, so sharing LR0 would clobber this before the guest takes it).
+ *
+ * HW=0: as of M5 slice 2, EL2 owns and fully drains+deactivates the physical
+ * PL011 IRQ itself (irq_handler.c) before this is ever called, so there is no
+ * physical Active state left for an HW=1 LR to release via the deactivate
+ * linkage -- using HW=1 here (as the old passthrough design did, when the
+ * physical line was deliberately left Active for exactly that linkage) mints
+ * a virtual/physical mismatch that wedges after the first couple of
+ * injections. Purely-software Group-1 injection, same shape as
+ * vgic_inject_sw/vgic_inject_sgi. LR1 is saved/restored by
+ * vgic_{save,restore}. */
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
 {
-    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_HW | ICH_LR_GROUP1 |
+    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
              ((u64)0xA0 << ICH_LR_PRIO_SHIFT) |
-             ((u64)intid << ICH_LR_PINTID_SHIFT) |
              ((u64)intid & ICH_LR_VINTID_MASK);
 
     vcpu->ich_lr[1] = lr;

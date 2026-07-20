@@ -14,4 +14,9 @@ void uart_putc(char c);
  * FIFO is empty. Polls PL011 FR.RXFE; no interrupts. */
 int uart_getc(void);
 
+/* Enable the physical RX + receive-timeout interrupts (IMSC RXIM|RTIM) so EL2
+ * takes BOARD_PL011_IRQ promptly once it owns the UART exclusively (M5 slice
+ * 2). Call once, after uart_init(), on the pCPU that owns the physical SPI. */
+void uart_rx_irq_enable(void);
+
 #endif /* HV_UART_H */

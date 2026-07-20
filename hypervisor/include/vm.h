@@ -7,6 +7,7 @@
 #include <board.h>
 #include <percpu.h>   /* NR_CPUS, for the NR_VMS/VCPUS_PER_VM static_assert
                          below (percpu.h forward-declares struct vcpu) */
+#include <vuart.h>    /* struct vuart, embedded by value in struct vm below */
 
 struct vcpu_regs {
     u64 x[31];      /* x0–x30   offset 0x000 */
@@ -58,6 +59,7 @@ struct vm {
                                          file-static state in stage2.c /
                                          vgic_v3_mmio.c */
     const struct vm_config *config;
+    struct vuart            vuart;    /* emulated PL011; see hypervisor/dm/vuart.c */
 };
 
 struct hv_ctx {
