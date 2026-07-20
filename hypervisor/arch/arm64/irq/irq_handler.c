@@ -35,12 +35,47 @@ void el2_irq_handler(void)
     u32 intid = gic_ack_irq();
 
     if (intid == BOARD_KICK_SGI) {
-        /* Cross-core IPI: drain this pCPU's pending SGI bitmap, inject each as
-         * a virtual SGI, then priority-drop AND deactivate the kick (no LR
-         * linkage gates it). */
-        vgic_sgi_drain(current_vcpu_id());
+        /* Cross-core IPI. Priority-drop + deactivate the physical kick first
+         * (no LR linkage gates it) so it can't storm regardless of which path
+         * below we take. */
         gic_priority_drop(intid);
         gic_deactivate(intid);
+
+        /*
+         * M5 slice 3: VM-scoped PSCI power-down. If this pCPU's VM has been
+         * marked off (psci_power_down, kicked via vgic_kick_vm_other_pcpus),
+         * do NOT drain the SGI bitmap or return to the guest loop -- the only
+         * re-entry point back to the guest from this handler is the trailing
+         * eret in irq_handler_asm.S, so parking HERE, before returning, is
+         * the only place that can prevent this vCPU from ever running again.
+         * This is scoped to the CURRENT vCPU's owner only: the shared
+         * sgi_pending[]/spinlock bitmap is keyed by pCPU, not VM, so a kick
+         * meant for THIS pCPU because ITS VM is off never touches another
+         * VM's legitimate SGI/IPI traffic (each pCPU belongs to exactly one
+         * VM under static partitioning).
+         */
+        if (current_vcpu()->owner->off) {
+            printk("[hv] pCPU%u: VM off, parking\n",
+                   (unsigned)current_vcpu_id());
+            for (;;)
+                asm volatile("wfi");
+        }
+
+        /* Drain this pCPU's pending SGI bitmap, inject each as a virtual
+         * SGI. */
+        vgic_sgi_drain(current_vcpu_id());
+
+        /*
+         * M5 slice 3: reload ICH_LR1_EL2 (the PL011 vSPI LR) from this
+         * pCPU's own current vCPU shadow state. Covers the cross-core
+         * console-focus injection path (vuart_rx -> vgic_set_spi_shadow +
+         * vgic_kick_pcpu, hypervisor/dm/vuart.c): the pCPU servicing the
+         * physical UART IRQ cannot write another pCPU's LIVE list register,
+         * so it only updates the shadow and kicks the owner here to do the
+         * live reload itself. Idempotent / harmless when ich_lr[1] has
+         * nothing newly pending (re-writes the same value, or 0).
+         */
+        vgic_reload_spi_lr(current_vcpu());
     } else if (intid == BOARD_VTIMER_IRQ) {
         /* vtimer PPI is per-CPU: inject into THIS core's current vCPU. */
         if (guest_veng1()) {
@@ -84,12 +119,23 @@ void el2_irq_handler(void)
          * QEMU's pl011 model backpressures its chardev on the physical FIFO
          * having room, so an un-popped byte simply waits for a later RX IRQ
          * once the guest drains the virtual ring, instead of being lost.
+         *
+         * M5 slice 3: RX is routed to whichever VM currently holds console
+         * focus (console_focus); Ctrl-T (0x14) cycles focus instead of ever
+         * being delivered to a guest. TX (vuart_write's DR case) has no focus
+         * check anywhere -- every VM's output always reaches the physical
+         * wire, only keyboard input is focus-gated.
          */
-        while (vuart_rx_has_room(&vm[0])) {
+        while (vuart_rx_has_room(&vm[console_focus])) {
             int c = uart_getc();
             if (c < 0)
                 break;
-            vuart_rx(&vm[0], (u8)c);
+            if (c == 0x14) {
+                console_focus = (console_focus + 1U) % (u32)NR_VMS;
+                printk("[hv] console: VM%u\n", (unsigned)console_focus);
+                continue;
+            }
+            vuart_rx(&vm[console_focus], (u8)c);
         }
         gic_priority_drop(intid);
         gic_deactivate(intid);

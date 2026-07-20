@@ -5,10 +5,14 @@
 #include <percpu.h>
 #include <uart.h>
 #include <vuart.h>
+#include <psci.h>
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
 #include "../../arch/arm64/irq/vgic_v3_mmio.h"
+
+/* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
+extern char secondary_entry[];
 
 struct vm vm[NR_VMS];
 
@@ -120,6 +124,26 @@ void vm_run(void)
      * every RX IRQ and feeds bytes to the vuart model (M5 slice 2).
      */
     uart_rx_irq_enable();
+
+    /*
+     * Hypervisor-driven boot of every other VM's boot vCPU (M5 slice 3).
+     * VM0's vCPU0 is entered directly below (CPU0 IS VM0's boot pCPU); every
+     * other VM's vCPU0 has no guest asking for it via PSCI (there is no guest
+     * running yet), so the hypervisor itself issues the physical CPU_ON here,
+     * once, before dropping into VM0's guest loop. Unlike psci_cpu_on_guest's
+     * guest-driven path (which synchronously waits for `online` because it
+     * must honor the guest's CPU_ON return-value contract), this is
+     * fire-and-forget: nothing here needs to observe the target pCPU up
+     * before proceeding, and secondary_main() publishes `online` on its own
+     * for debugging/monitoring only.
+     */
+    for (u32 i = 1; i < (u32)NR_VMS; i++) {
+        u32 p = vm[i].config->pcpu_base;
+        s64 r = psci_cpu_on((u64)p, (u64)(uintptr_t)secondary_entry, (u64)p);
+        if (r != (s64)PSCI_RET_SUCCESS)
+            printk("[hv] VM%u boot pCPU%u CPU_ON failed (%d)\n",
+                   (unsigned)i, (unsigned)p, (int)r);
+    }
 
     for (;;) {
         /*

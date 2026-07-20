@@ -38,6 +38,23 @@
 #define BOARD_LINUX_DTB_IPA   0x42000000UL  /* guest sees DTB here          */
 #define BOARD_LINUX_DTB_PA    0x82000000UL  /* RAM_PA + 0x02000000          */
 
+/*
+ * M5 slice 3: VM1's backing PA. Same unified guest address map as VM0 (guest
+ * IPA BOARD_LINUX_RAM_IPA / BOARD_LINUX_DTB_IPA are shared by both VMs — one
+ * guest DTB compiled once, loaded twice); only the *_PA (Stage-2 output / QEMU
+ * loader) addresses differ, at the next 1 GB-aligned block above VM0's.
+ */
+#define BOARD_LINUX2_RAM_PA    0xC0000000UL  /* VM1 backing (1 GB-aligned)   */
+#define BOARD_LINUX2_IMAGE_PA  0xC0080000UL  /* RAM_PA + text_offset 0x80000 */
+#define BOARD_LINUX2_DTB_PA    0xC2000000UL  /* RAM_PA + 0x02000000          */
+
+/* M5 slice 3: dual-SVM scenario, VM1's bare-metal test binary. Guest IPA
+ * stays BOARD_SVM_MEM_BASE (identical to VM0's — unified address map); only
+ * the backing PA differs, at the same +0x200000 offset pattern as
+ * BOARD_SVM_MEM_BASE within its own 1 GB block, but at the new 1GB-aligned
+ * base BOARD_LINUX2_RAM_PA. */
+#define BOARD_SVM2_RAM_PA      0xC0200000UL
+
 extern const char board_name[];
 
 #endif /* BOARD_QEMU_VIRT_H */

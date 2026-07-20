@@ -7,16 +7,47 @@
  * hv_restore()            — restore HV callee-saved, ret to vm_run()
  *
  * g_hv_ctx is defined here (BSS) — only accessed from this file.
+ *
+ * M5 slice 3: g_hv_ctx is now PER-pCPU (g_hv_ctx[NR_CPUS]), not a single
+ * shared slot. With NR_VMS>1 more than one pCPU can independently be inside
+ * its own vcpu_run/hv_restore pair at the same time (e.g. VM0's vCPU0 on
+ * pCPU0 and VM1's vCPU0 on pCPU2 both issuing the debug HC_GUEST_DONE HVC
+ * around the same wall-clock time) -- a single shared g_hv_ctx let one
+ * pCPU's hv_restore() load ANOTHER pCPU's saved sp/lr, corrupting its C
+ * stack. This was latent since M1 (nothing before M5 slice 3 ever had two
+ * pCPUs concurrently past vcpu_run) and is caught by the new dual-VM svm4
+ * test scenario. Slot index = this pCPU's id, derived from TPIDR_EL2 (=
+ * &percpu[id]) exactly like the C-side current_vcpu_id() helper.
  */
 
 #include <vm.h>       /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */
-#include <percpu.h>   /* PERCPU_CUR_VCPU — current vCPU via TPIDR_EL2 */
+#include <percpu.h>   /* PERCPU_CUR_VCPU, NR_CPUS, PERCPU_SIZE */
 
     .section .bss
     .align 3
     .globl g_hv_ctx
 g_hv_ctx:
-    .zero HV_CTX_SIZE       /* 0x68 = 104 bytes */
+    .zero HV_CTX_SIZE * NR_CPUS
+
+/*
+ * x9 <- &g_hv_ctx[this pCPU's id]. Clobbers x9, x10, x11 ONLY (never x0-x8,
+ * so callers can compute this before or after loading x0..x8 with anything
+ * live). id = (TPIDR_EL2 - &percpu[0]) / PERCPU_SIZE, matching the C-side
+ * current_vcpu_id() derivation exactly.
+ */
+    .macro hv_ctx_slot
+    mrs     x9, tpidr_el2               /* &percpu[id] */
+    adrp    x10, percpu
+    add     x10, x10, :lo12:percpu
+    sub     x9, x9, x10                 /* id * PERCPU_SIZE */
+    mov     x11, #(PERCPU_SIZE)
+    udiv    x9, x9, x11                 /* id */
+    mov     x11, #(HV_CTX_SIZE)
+    mul     x9, x9, x11                 /* id * HV_CTX_SIZE */
+    adrp    x10, g_hv_ctx
+    add     x10, x10, :lo12:g_hv_ctx
+    add     x9, x9, x10                 /* &g_hv_ctx[id] */
+    .endm
 
 /* ------------------------------------------------------------------ */
 /*  vcpu_run(struct vcpu *vcpu)   x0 = vcpu*                          */
@@ -24,9 +55,9 @@ g_hv_ctx:
     .section .text
     .globl vcpu_run
 vcpu_run:
-    /* 1. Save hypervisor callee-saved registers */
-    adrp    x9, g_hv_ctx
-    add     x9, x9, :lo12:g_hv_ctx
+    /* 1. Save hypervisor callee-saved registers. hv_ctx_slot only touches
+     * x9-x11, leaving x0 (vcpu*) intact. */
+    hv_ctx_slot
     stp     x19, x20, [x9, #0x00]
     stp     x21, x22, [x9, #0x10]
     stp     x23, x24, [x9, #0x20]
@@ -160,15 +191,14 @@ el1_sync_handler:
 /* ------------------------------------------------------------------ */
     .globl hv_restore
 hv_restore:
-    adrp    x0, g_hv_ctx
-    add     x0, x0, :lo12:g_hv_ctx
-    ldr     x1,       [x0, #HV_SP]
+    hv_ctx_slot                        /* x9 = &g_hv_ctx[this pCPU's id] */
+    ldr     x1,       [x9, #HV_SP]
     mov     sp, x1
-    ldp     x19, x20, [x0, #0x00]
-    ldp     x21, x22, [x0, #0x10]
-    ldp     x23, x24, [x0, #0x20]
-    ldp     x25, x26, [x0, #0x30]
-    ldp     x27, x28, [x0, #0x40]
-    ldr     x29,      [x0, #0x50]
-    ldr     x30,      [x0, #HV_LR]
+    ldp     x19, x20, [x9, #0x00]
+    ldp     x21, x22, [x9, #0x10]
+    ldp     x23, x24, [x9, #0x20]
+    ldp     x25, x26, [x9, #0x30]
+    ldp     x27, x28, [x9, #0x40]
+    ldr     x29,      [x9, #0x50]
+    ldr     x30,      [x9, #HV_LR]
     ret

@@ -25,6 +25,15 @@ struct vuart {
 };
 
 struct vm;
+
+/* M5 slice 3: which VM currently owns RX focus (0..NR_VMS-1). Ctrl-T (0x14)
+ * on the physical console cycles it; TX is NOT gated by this -- every VM's
+ * output reaches the physical UART regardless of focus, only RX (guest
+ * keyboard input) is routed to the focused VM. Plain extern, matching this
+ * codebase's existing convention for simple cross-file state (see e.g.
+ * struct vm vm[] itself). */
+extern u32 console_focus;
+
 /* Register the shared PL011 IPA region on the MMIO bus (call once). */
 void vuart_bus_init(void);
 /* EL2 RX path: push one received char into this VM's vuart and raise its

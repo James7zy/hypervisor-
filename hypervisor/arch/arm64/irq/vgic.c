@@ -67,6 +67,20 @@ void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
     SYSREG_WRITE(ICH_LR1_EL2, lr);
 }
 
+void vgic_reload_spi_lr(struct vcpu *vcpu)
+{
+    SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
+}
+
+void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid)
+{
+    u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
+             ((u64)0xA0 << ICH_LR_PRIO_SHIFT) |
+             ((u64)intid & ICH_LR_VINTID_MASK);
+
+    vcpu->ich_lr[1] = lr;
+}
+
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2. LR0 is the vtimer and LR1 is
  * the PL011 SPI, both re-injected on their own cadence; SGIs get their own LR
  * so a pending IPI is not clobbered. Software (HW=0) Group-1. Used by the

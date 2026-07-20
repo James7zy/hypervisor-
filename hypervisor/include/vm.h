@@ -27,14 +27,22 @@ struct vcpu_regs {
 /*
  * secondary_main derives a woken pCPU's (VM, vCPU) purely from its pCPU id
  * (id / VCPUS_PER_VM, id % VCPUS_PER_VM); vm_configs[]/pcpu_base must agree
- * with that structural mapping (see vm_init's boot-time check in vm.c). Both
- * only make sense if every physical CPU is accounted for by exactly one VM's
- * static slot, i.e. NR_CPUS == NR_VMS * VCPUS_PER_VM. Catch a mismatch (e.g.
- * a future CONFIG_NR_VMS bump without a matching NR_CPUS bump) at compile
- * time instead of silently indexing percpu[]/sgi_pending[] out of bounds.
+ * with that structural mapping (see vm_init's boot-time check in vm.c). This
+ * only makes sense if every VM's static pCPU slot fits within the physical
+ * machine, i.e. NR_VMS * VCPUS_PER_VM <= NR_CPUS -- catch a mismatch (e.g. a
+ * future CONFIG_NR_VMS bump without a matching NR_CPUS bump) at compile time
+ * instead of silently indexing percpu[]/sgi_pending[] out of bounds.
+ *
+ * NR_CPUS (percpu.h) is a fixed PLATFORM constant sized for the largest build
+ * profile (4, since M5 slice 3: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
+ * intentionally NOT required to equal NR_VMS * VCPUS_PER_VM: single-VM build
+ * profiles (HV_GUEST=svm/svm2/svm3, NR_VMS=1, the pre-slice-3 SVM regression
+ * tests) only ever PSCI CPU_ON pCPUs 0/1 -- pCPUs 2/3 are simply never woken
+ * under those profiles, so under-using the physical core budget is safe; the
+ * dangerous direction (a VM's slot overrunning NR_CPUS) is what this guards.
  */
-_Static_assert(NR_VMS * VCPUS_PER_VM == NR_CPUS,
-               "NR_CPUS must equal NR_VMS * VCPUS_PER_VM");
+_Static_assert(NR_VMS * VCPUS_PER_VM <= NR_CPUS,
+               "NR_VMS * VCPUS_PER_VM must fit within NR_CPUS");
 
 struct vm;
 
@@ -60,6 +68,12 @@ struct vm {
                                          vgic_v3_mmio.c */
     const struct vm_config *config;
     struct vuart            vuart;    /* emulated PL011; see hypervisor/dm/vuart.c */
+    /* M5 slice 3: set by psci_power_down() when this VM calls CPU_OFF/
+     * SYSTEM_OFF/SYSTEM_RESET. Not read by any asm path (struct vm has no
+     * __ASSEMBLER__ offset macros, unlike struct vcpu/struct hv_ctx below) —
+     * only the kick-SGI branch of el2_irq_handler polls it, to park this VM's
+     * other pCPU(s) instead of re-entering their guest. */
+    volatile u32            off;
 };
 
 struct hv_ctx {

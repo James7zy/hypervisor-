@@ -5,6 +5,7 @@
 #include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include <percpu.h>
 #include <psci.h>
+#include "../../arch/arm64/irq/vgic_sgi.h"
 
 /* secondary_entry (head.S): EL2 PA the secondary core is powered on at. */
 extern char secondary_entry[];
@@ -64,10 +65,26 @@ static u64 psci_cpu_on_guest(struct vcpu_regs *regs)
     return PSCI_RET_INTERNAL_FAILURE;
 }
 
-/* Single-vCPU build: a power-down request just halts this CPU forever. */
+/*
+ * VM-scoped power-down (M5 slice 3). A guest's CPU_OFF/SYSTEM_OFF/
+ * SYSTEM_RESET must stop only ITS OWN VM: mark the VM `off`, kick its other
+ * pCPU(s) into EL2 so they notice `off` (el2_irq_handler's kick-SGI branch)
+ * and park instead of re-entering their guest, then park the calling pCPU
+ * itself. Other VMs' pCPUs are untouched and keep running.
+ */
 static void psci_power_down(const char *what)
 {
-    printk("[hv] PSCI: %s - halting vCPU\n", what);
+    struct vm *m = current_vcpu()->owner;
+    u32 caller_pcpu = current_vcpu_id();
+
+    printk("[hv] PSCI: VM%u %s - halting vCPU%u (pCPU%u)\n",
+           (unsigned)m->id, what, (unsigned)current_vcpu()->vcpu_idx,
+           (unsigned)caller_pcpu);
+
+    m->off = 1;
+    asm volatile("dsb ish" ::: "memory");
+    vgic_kick_vm_other_pcpus(m, caller_pcpu);
+
     for (;;)
         asm volatile("wfi");
 }

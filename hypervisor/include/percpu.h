@@ -16,7 +16,7 @@
  * virtual = 2, statically 1:1 pinned, no scheduler.
  */
 
-#define NR_CPUS 2
+#define NR_CPUS 4
 
 /*
  * Byte offset of cur_vcpu within struct percpu, consumed by the asm entry

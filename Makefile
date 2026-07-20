@@ -28,8 +28,12 @@ CFLAGS := \
 
 ifeq ($(HV_GUEST),svm)
 CFLAGS += -DCONFIG_GUEST_SVM=1
-else ifneq ($(HV_GUEST),linux)
-$(error HV_GUEST must be 'linux' or 'svm')
+else ifeq ($(HV_GUEST),svm_dual)
+CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2
+else ifeq ($(HV_GUEST),linux)
+CFLAGS += -DCONFIG_NR_VMS=2
+else
+$(error HV_GUEST must be 'linux', 'svm' or 'svm_dual')
 endif
 
 ASFLAGS := -g
@@ -62,11 +66,14 @@ SVM2_ELF   := $(BUILD_DIR)/svm2/svm2.elf
 SVM2_BIN   := $(BUILD_DIR)/svm2/svm2.bin
 SVM3_ELF   := $(BUILD_DIR)/svm3/svm3.elf
 SVM3_BIN   := $(BUILD_DIR)/svm3/svm3.bin
+SVM4_ELF   := $(BUILD_DIR)/svm4/svm4.elf
+SVM4_BIN   := $(BUILD_DIR)/svm4/svm4.bin
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 check-offsets \
-	test-svm-build test-qemu test-qemu-svm2 test-qemu-svm3 test guest
+.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 svm4 check-offsets \
+	test-svm-build test-svm-dual-build test-qemu test-qemu-svm2 test-qemu-svm3 \
+	test-qemu-svm4 test guest
 
 .NOTPARALLEL: test
 
@@ -116,6 +123,15 @@ $(SVM3_BIN): $(SVM3_ELF)
 
 svm3: $(SVM3_BIN)
 
+$(SVM4_ELF): tests/svm4/svm4_main.c tests/svm4/svm4.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -T tests/svm4/svm4.lds -o $@ tests/svm4/svm4_main.c
+
+$(SVM4_BIN): $(SVM4_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+svm4: $(SVM4_BIN)
+
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
 GUEST_DTB  := $(BUILD_DIR)/guest/guest.dtb
@@ -149,6 +165,16 @@ TEST_BUILD_DIR := build/test-svm
 test-svm-build:
 	$(MAKE) BUILD_DIR=$(TEST_BUILD_DIR) HV_GUEST=svm all svm svm2 svm3
 
+TEST_DUAL_BUILD_DIR := build/test-svm-dual
+
+test-svm-dual-build:
+	$(MAKE) BUILD_DIR=$(TEST_DUAL_BUILD_DIR) HV_GUEST=svm_dual all svm svm4
+
+test-qemu-svm4: test-svm-dual-build
+	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
+	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_svm4_test.sh
+
 test-qemu: test-svm-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm.bin sh tests/run_svm_test.sh
@@ -161,7 +187,7 @@ test-qemu-svm3: test-svm-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_BUILD_DIR)/svm3/svm3.bin sh tests/run_svm3_test.sh
 
-test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3
+test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4
 
 run: $(ELF) $(GUEST_DTB)
 	./scripts/run-qemu.sh

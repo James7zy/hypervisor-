@@ -19,8 +19,10 @@
 #include <board.h>
 #include <percpu.h>
 #include <vm.h>
+#include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include "../arch/arm64/vmexit/mmio.h"
 #include "../arch/arm64/irq/vgic.h"
+#include "../arch/arm64/irq/vgic_sgi.h"
 #include "vuart.h"
 
 /* ── PL011 register offsets this model implements ── */
@@ -53,6 +55,10 @@
 static const u8 vuart_amba_id[8] = {
     0x11, 0x10, 0x14, 0x00, 0x0D, 0xF0, 0x05, 0xB1,
 };
+
+/* M5 slice 3: RX console focus. VM0 by default (matches pre-slice-3
+ * single-VM behaviour). See the declaration in vuart.h. */
+u32 console_focus = 0;
 
 static bool vuart_rx_empty(const struct vuart *u)
 {
@@ -176,6 +182,27 @@ void vuart_rx(struct vm *m, u8 ch)
      * than corrupting the ring. */
 
     u->ris |= VUART_RIS_RX_MASK;
-    if (u->imsc & VUART_RIS_RX_MASK)
-        vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
+    if (u->imsc & VUART_RIS_RX_MASK) {
+        /*
+         * M5 slice 3: the physical PL011 IRQ (and hence this whole call) is
+         * always serviced on the pCPU that owns the physical UART (CPU0);
+         * with console focus now routable to VM1, the target vCPU0 may live
+         * on a DIFFERENT pCPU than the one running this code.
+         * vgic_inject_spi writes the LIVE ICH_LR1_EL2 of whichever vCPU is
+         * actually loaded on the CALLING core -- correct only when the
+         * target vCPU IS the caller's own current vCPU (VM0's steady state,
+         * unchanged). For any other VM, only the shadow ich_lr[1] write is
+         * safe here; the owning pCPU must reload it itself once kicked into
+         * EL2 (vgic_reload_spi_lr, called from el2_irq_handler's kick-SGI
+         * branch), the same cross-core pattern already used for SGI/IPI.
+         */
+        u32 target_pcpu = m->config->pcpu_base;   /* vCPU0 always owns console injection */
+        if (target_pcpu == current_vcpu_id()) {
+            vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
+        } else {
+            vgic_set_spi_shadow(&m->vcpu[0], BOARD_PL011_IRQ);
+            asm volatile("dsb ish" ::: "memory");
+            vgic_kick_pcpu(target_pcpu);
+        }
+    }
 }

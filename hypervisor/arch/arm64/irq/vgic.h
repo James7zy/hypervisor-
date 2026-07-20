@@ -36,8 +36,29 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 /* Inject a Shared Peripheral Interrupt (SPI, INTID >= 32) into the guest as a
  * software (HW=0) virtual interrupt via the list registers. Used by emulated
  * devices (M3.3 virtio-console: SPI 48) that have no physical GIC line. Thin
- * wrapper over vgic_inject_sw with a device-class priority. */
+ * wrapper over vgic_inject_sw with a device-class priority.
+ *
+ * MUST be called on the pCPU that currently owns `vcpu` (i.e. from that
+ * vCPU's own trap/IRQ context) -- it writes the LIVE ICH_LR1_EL2 of whichever
+ * vCPU is actually loaded on the CALLING core, not necessarily `vcpu` itself.
+ * Only the shadow vcpu->ich_lr[1] write is safe cross-core; see
+ * vgic_reload_spi_lr for the cross-core companion (M5 slice 3, PL011 console
+ * focus routed to a VM whose vCPU0 is not on the console-owning pCPU). */
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
+
+/* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
+ * pCPU from its own current vCPU's shadow ich_lr[1]. Called by the kicked
+ * target pCPU (el2_irq_handler's kick-SGI branch) after another pCPU wrote
+ * the shadow LR1 for a vCPU it does not itself own. Idempotent / harmless
+ * when ich_lr[1] has nothing pending. */
+void vgic_reload_spi_lr(struct vcpu *vcpu);
+
+/* Write only the SHADOW ich_lr[1] for `vcpu` (same encoding as
+ * vgic_inject_spi) WITHOUT touching any live system register. Safe to call
+ * from any pCPU regardless of which vCPU it currently owns. The pCPU that
+ * owns `vcpu` must be kicked (vgic_kick_pcpu) so it calls vgic_reload_spi_lr
+ * on itself and actually presents the interrupt. */
+void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid);
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).
  * Software (HW=0) Group-1, used by the cross-core IPI path (vgic_sgi.c). */
