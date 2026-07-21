@@ -123,10 +123,10 @@ void el2_irq_handler(void)
          * directly, so nothing needs the line held Active to avoid a storm --
          * that rationale only applied when the guest read hardware itself.
          *
-         * Ctrl-T (0x14) is intercepted here and delivered to NOBODY: it
-         * toggles the EL2 shell (hv_shell.h). This is the right layer for it
-         * precisely because both consumers below are downstream of that
-         * decision.
+         * Ctrl-T (HV_SHELL_ESCAPE_KEY) is intercepted here and delivered to
+         * NOBODY: it toggles the EL2 shell (hv_shell.h). This is the right
+         * layer for it precisely because both consumers below are downstream
+         * of that decision.
          *
          * Room-checking is per-consumer and must happen BEFORE uart_getc(),
          * because a physical DR read is destructive (it pops the hardware
@@ -148,7 +148,7 @@ void el2_irq_handler(void)
                 break;
             }
 
-            if (c == 0x14) {
+            if (c == (int)HV_SHELL_ESCAPE_KEY) {
                 if (shell_active) {
                     hv_shell_exit();
                 } else {

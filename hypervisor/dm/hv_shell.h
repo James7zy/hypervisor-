@@ -25,6 +25,11 @@
  * cross-file state (cf. console_focus in vuart.h, struct vm vm[]). */
 extern bool shell_active;
 
+/* Ctrl-T: the shell's toggle key on the physical UART. Intercepted by
+ * irq_handler.c's PL011 RX-drain loop before either consumer (this shell or
+ * a guest's vuart) sees the byte -- it is never delivered to any guest. */
+#define HV_SHELL_ESCAPE_KEY 0x14U
+
 /* Ctrl-T while not in the shell: take the console and print the prompt. */
 void hv_shell_enter(void);
 
