@@ -133,7 +133,7 @@ void vm_run(void)                 /* vm.c:58 */
 
 ```mermaid
 sequenceDiagram
-    participant C as vm_run() for(;;) (C, EL2)
+    participant C as vm_run() loop (C, EL2)
     participant R as vcpu_run (asm)
     participant G as Guest (EL1)
     participant H as el1_sync_handler (asm, EL2)

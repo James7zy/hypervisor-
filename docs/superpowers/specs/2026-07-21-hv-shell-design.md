@@ -56,7 +56,7 @@ sequenceDiagram
         IH->>SH: shell_active ? hv_shell_exit() : hv_shell_enter()
     else shell_active == true
         IH->>SH: hv_shell_rx(c)
-        Note over SH: line edit; on Enter, parse and dispatch<br/>vm_console <n> only sets console_focus
+        Note over SH: line edit — on Enter parse and dispatch<br/>vm_console N only sets console_focus
     else shell_active == false
         IH->>VU: vuart_rx(&vm[console_focus], c)
     end

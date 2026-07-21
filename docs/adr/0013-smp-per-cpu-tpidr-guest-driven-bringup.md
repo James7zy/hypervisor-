@@ -43,16 +43,16 @@ sequenceDiagram
     participant V1 as vCPU1 (guest EL1 / pCPU1)
 
     GL->>PS: HVC PSCI_CPU_ON(targetAff, entry, ctx)
-    Note over PS: map Aff→vCPU idx; author vcpu[idx].regs<br/>(elr=entry, x0=ctx, spsr=EL1h); mirror hcr/vttbr
+    Note over PS: map Aff→vCPU idx — author vcpu[idx].regs<br/>(elr=entry, x0=ctx, spsr=EL1h) — mirror hcr/vttbr
     PS->>FW: smc PSCI_CPU_ON(secondary_entry, ctx=idx)
     FW-->>SE: power on pCPU1 at EL2
-    Note over SE: TPIDR_EL2=&percpu[1]; per-CPU GIC/timer init;<br/>stage2_activate → vgic_restore → publish online
+    Note over SE: TPIDR_EL2=&percpu[1] — per-CPU GIC/timer init<br/>stage2_activate → vgic_restore → publish online
     PS-->>GL: x0 = SUCCESS (after online handshake)
     SE->>V1: vcpu_run(&vcpu[1])
 
     Note over V1,GL: later — an IPI from vCPU1 to vCPU0
     V1->>SE: write ICC_SGI1R_EL1 (traps, ICH_HCR_EL2.TC=1)
-    SE->>SE: set vcpu0 pending bit (SGI spinlock); physical kick-SGI → pCPU0
+    SE->>SE: set vcpu0 pending bit (SGI spinlock) → physical kick-SGI → pCPU0
     Note over PS: pCPU0 EL2 IRQ handler drains bitmap,<br/>injects vINTID into its own LR, deactivates kick
 ```
 
