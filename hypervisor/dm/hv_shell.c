@@ -30,7 +30,7 @@ static char shell_line[HV_SHELL_LINE_MAX];
 static u32  shell_line_len;
 
 /* Forward decl: defined in Task 3, dispatches one completed line. */
-static void hv_shell_dispatch(const char *line);
+static void hv_shell_dispatch(char *line);
 
 /* Compare NUL-terminated a against b. Returns true when equal. This repo has
  * no libc -- lib/string.c provides memset and nothing else -- so the command
@@ -133,9 +133,9 @@ void hv_shell_exit(void)
  * becomes a NUL), which is fine: shell_line is scratch space reset after
  * every dispatch.
  */
-static void hv_shell_dispatch(const char *line)
+static void hv_shell_dispatch(char *line)
 {
-    char *p = (char *)line;
+    char *p = line;
     const char *arg = "";
 
     /* Skip leading spaces; an all-blank line is a no-op (just reprompt). */

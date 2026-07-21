@@ -18,6 +18,7 @@
 #include <gic_v3.h>
 #include <uart.h>
 #include <vuart.h>
+#include <hv_shell.h>
 #include "vgic_debug.h"
 #include "vgic_sgi.h"
 
@@ -114,37 +115,53 @@ void el2_irq_handler(void)
     } else if (intid == BOARD_PL011_IRQ) {
         /*
          * PL011 RX: EL2 owns the physical UART exclusively (M5 slice 2). Drain
-         * the physical FIFO here and hand each byte to the vuart model, which
-         * buffers it and re-injects a SOFTWARE SPI into the guest's vGIC
-         * (vuart_rx -> vgic_inject_spi) if its virtual IMSC is unmasked.
-         * Unlike the old passthrough design, the physical SPI is fully
+         * the physical FIFO here and route each byte to its consumer, which is
+         * either the EL2 shell or the focused VM's vuart model (the vuart
+         * buffers the byte and injects a SOFTWARE SPI into that guest's vGIC
+         * if its virtual IMSC is unmasked). The physical SPI is fully
          * deactivated below: there is no guest driver left to read DR
          * directly, so nothing needs the line held Active to avoid a storm --
          * that rationale only applied when the guest read hardware itself.
          *
-         * Check vuart_rx_has_room() BEFORE uart_getc(): a physical DR read is
-         * destructive (pops the hardware FIFO), so once the virtual ring is
-         * full this loop must stop WITHOUT consuming the next physical byte --
-         * QEMU's pl011 model backpressures its chardev on the physical FIFO
-         * having room, so an un-popped byte simply waits for a later RX IRQ
-         * once the guest drains the virtual ring, instead of being lost.
+         * Ctrl-T (0x14) is intercepted here and delivered to NOBODY: it
+         * toggles the EL2 shell (hv_shell.h). This is the right layer for it
+         * precisely because both consumers below are downstream of that
+         * decision.
          *
-         * M5 slice 3: RX is routed to whichever VM currently holds console
-         * focus (console_focus); Ctrl-T (0x14) cycles focus instead of ever
-         * being delivered to a guest. TX (vuart_write's DR case) has no focus
-         * check anywhere -- every VM's output always reaches the physical
-         * wire, only keyboard input is focus-gated.
+         * Room-checking is per-consumer and must happen BEFORE uart_getc(),
+         * because a physical DR read is destructive (it pops the hardware
+         * FIFO). If the consumer cannot take the byte we must stop the loop
+         * WITHOUT consuming it -- QEMU's pl011 model backpressures its chardev
+         * on the physical FIFO having room, so an un-popped byte simply waits
+         * for a later RX IRQ instead of being lost. The shell always has room
+         * (its line buffer submits-and-resets when full), so only the vuart
+         * path needs the check -- and it must be re-evaluated every iteration
+         * against the CURRENT consumer, since a Ctrl-T mid-drain switches it.
          */
-        while (vuart_rx_has_room(&vm[console_focus])) {
-            int c = uart_getc();
-            if (c < 0)
+        for (;;) {
+            if (!shell_active && !vuart_rx_has_room(&vm[console_focus])) {
                 break;
+            }
+
+            int c = uart_getc();
+            if (c < 0) {
+                break;
+            }
+
             if (c == 0x14) {
-                console_focus = (console_focus + 1U) % (u32)NR_VMS;
-                printk("[hv] console: VM%u\n", (unsigned)console_focus);
+                if (shell_active) {
+                    hv_shell_exit();
+                } else {
+                    hv_shell_enter();
+                }
                 continue;
             }
-            vuart_rx(&vm[console_focus], (u8)c);
+
+            if (shell_active) {
+                hv_shell_rx((u8)c);
+            } else {
+                vuart_rx(&vm[console_focus], (u8)c);
+            }
         }
         gic_priority_drop(intid);
         gic_deactivate(intid);

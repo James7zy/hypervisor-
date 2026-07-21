@@ -26,10 +26,12 @@ struct vuart {
 
 struct vm;
 
-/* M5 slice 3: which VM currently owns RX focus (0..NR_VMS-1). Ctrl-T (0x14)
- * on the physical console cycles it; TX is NOT gated by this -- every VM's
- * output reaches the physical UART regardless of focus, only RX (guest
- * keyboard input) is routed to the focused VM. Plain extern, matching this
+/* Which VM receives physical console RX when the EL2 shell is NOT active
+ * (0..NR_VMS-1). Set by the shell's `vm_console <n>` command (hv_shell.c);
+ * while shell_active is true this value is simply the VM that Ctrl-T will
+ * return to on exit, and no RX reaches it. TX is NOT gated by this -- every
+ * VM's output reaches the physical UART regardless of focus or shell state,
+ * only RX (guest keyboard input) is routed. Plain extern, matching this
  * codebase's existing convention for simple cross-file state (see e.g.
  * struct vm vm[] itself). */
 extern u32 console_focus;

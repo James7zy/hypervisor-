@@ -56,8 +56,9 @@ static const u8 vuart_amba_id[8] = {
     0x11, 0x10, 0x14, 0x00, 0x0D, 0xF0, 0x05, 0xB1,
 };
 
-/* M5 slice 3: RX console focus. VM0 by default (matches pre-slice-3
- * single-VM behaviour). See the declaration in vuart.h. */
+/* Which VM receives console RX while the EL2 shell is inactive; VM0 at boot.
+ * Set by the shell's `vm_console <n>` command. See vuart.h for the full
+ * contract and hv_shell.h for the console-ownership toggle. */
 u32 console_focus = 0;
 
 static bool vuart_rx_empty(const struct vuart *u)
