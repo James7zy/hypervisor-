@@ -7,7 +7,8 @@ hv-objs := \
     common/vm/vm.o \
     common/psci/psci.o \
     common/percpu.o \
-    dm/vuart.o
+    dm/vuart.o \
+    dm/hv_shell.o
 
 hv-includes := \
     -Ihypervisor/include \
