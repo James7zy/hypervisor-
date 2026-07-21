@@ -32,6 +32,86 @@ static u32  shell_line_len;
 /* Forward decl: defined in Task 3, dispatches one completed line. */
 static void hv_shell_dispatch(const char *line);
 
+/* Compare NUL-terminated a against b. Returns true when equal. This repo has
+ * no libc -- lib/string.c provides memset and nothing else -- so the command
+ * table needs its own comparison. */
+static bool str_eq(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0') {
+        if (*a != *b) {
+            return false;
+        }
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+/*
+ * Parse a decimal u32. Returns true on success and writes *out; returns false
+ * for an empty string or any non-digit character, so "vm_console abc" and
+ * "vm_console" are both rejected rather than silently parsed as 0.
+ * No overflow handling beyond the digit cap: inputs here are VM ids (0..1).
+ */
+static bool parse_u32(const char *s, u32 *out)
+{
+    u32 val = 0U;
+    u32 digits = 0U;
+
+    if (s == NULL || *s == '\0') {
+        return false;
+    }
+    while (*s != '\0') {
+        if (*s < '0' || *s > '9') {
+            return false;
+        }
+        val = (val * 10U) + (u32)(*s - '0');
+        digits++;
+        if (digits > 9U) {   /* far beyond any valid VM id; refuse silently-wrong input */
+            return false;
+        }
+        s++;
+    }
+    *out = val;
+    return true;
+}
+
+struct hv_shell_cmd {
+    const char *name;
+    const char *help;
+    void (*fn)(const char *arg);   /* arg = text after the command name, "" if none */
+};
+
+static void cmd_help(const char *arg);
+static void cmd_vm_console(const char *arg);
+
+static const struct hv_shell_cmd hv_shell_cmds[] = {
+    { "help",       "list commands",                                cmd_help },
+    { "vm_console", "vm_console <n> - attach console input to VM n", cmd_vm_console },
+};
+
+#define HV_SHELL_NR_CMDS (sizeof(hv_shell_cmds) / sizeof(hv_shell_cmds[0]))
+
+static void cmd_help(const char *arg)
+{
+    (void)arg;
+    for (u32 i = 0U; i < (u32)HV_SHELL_NR_CMDS; i++) {
+        printk("  %s\t%s\n", hv_shell_cmds[i].name, hv_shell_cmds[i].help);
+    }
+}
+
+static void cmd_vm_console(const char *arg)
+{
+    u32 n;
+
+    if (!parse_u32(arg, &n) || n >= (u32)NR_VMS) {
+        printk("Error: invalid VM id.\n");
+        return;
+    }
+    console_focus = n;
+    printk("[hv] console: VM%u\n", (unsigned)n);
+}
+
 void hv_shell_enter(void)
 {
     shell_active = true;
@@ -47,9 +127,46 @@ void hv_shell_exit(void)
     printk("\n");
 }
 
+/*
+ * Split the line into a command name and the remaining argument text, then
+ * look the name up in the table. The split is destructive (the first space
+ * becomes a NUL), which is fine: shell_line is scratch space reset after
+ * every dispatch.
+ */
 static void hv_shell_dispatch(const char *line)
 {
-    (void)line;   /* command table arrives in Task 3 */
+    char *p = (char *)line;
+    const char *arg = "";
+
+    /* Skip leading spaces; an all-blank line is a no-op (just reprompt). */
+    while (*p == ' ') {
+        p++;
+    }
+    if (*p == '\0') {
+        return;
+    }
+
+    /* Find the end of the command name. */
+    char *name = p;
+    while (*p != '\0' && *p != ' ') {
+        p++;
+    }
+    if (*p == ' ') {
+        *p = '\0';   /* terminate the name */
+        p++;
+        while (*p == ' ') {   /* skip spaces before the argument */
+            p++;
+        }
+        arg = p;
+    }
+
+    for (u32 i = 0U; i < (u32)HV_SHELL_NR_CMDS; i++) {
+        if (str_eq(name, hv_shell_cmds[i].name)) {
+            hv_shell_cmds[i].fn(arg);
+            return;
+        }
+    }
+    printk("Error: Invalid command.\n");
 }
 
 void hv_shell_rx(u8 ch)
