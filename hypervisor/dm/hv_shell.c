@@ -71,9 +71,10 @@ void hv_shell_rx(u8 ch)
     if (ch == 0x08U || ch == 0x7FU) {
         if (shell_line_len > 0U) {
             shell_line_len--;
-            console_putc('\b');
-            console_putc(' ');
-            console_putc('\b');
+            /* One printk, not three console_putc calls: printk locks per
+             * call, so splitting "\b \b" would let a guest on another pCPU
+             * interleave a byte into the middle of the erase sequence. */
+            printk("\b \b");
         }
         return;
     }
@@ -95,4 +96,9 @@ void hv_shell_rx(u8 ch)
             printk(HV_SHELL_PROMPT);
         }
     }
+
+    /* Everything else (ESC 0x1B, arrow-key escape sequences, other control
+     * chars) falls through here and is dropped by design: this shell has no
+     * cursor movement, history, or escape-sequence parser to feed it into,
+     * so there is nothing to do with an unrecognized byte but ignore it. */
 }
