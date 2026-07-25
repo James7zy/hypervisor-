@@ -23,6 +23,10 @@ build/
 # Claude Code local settings
 .claude/
 
+# Vendored agent skills (installed tooling, not project code)
+.agents/
+skills-lock.json
+
 # GNU GLOBAL tag files
 GPATH
 GRTAGS
