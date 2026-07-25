@@ -10,6 +10,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
+#include <vm_config.h>   /* struct vm_config (pcpu_base), for vm_list */
 #include <vuart.h>
 #include <hv_shell.h>
 
@@ -83,10 +84,12 @@ struct hv_shell_cmd {
 };
 
 static void cmd_help(const char *arg);
+static void cmd_vm_list(const char *arg);
 static void cmd_vm_console(const char *arg);
 
 static const struct hv_shell_cmd hv_shell_cmds[] = {
     { "help",       "list commands",                                cmd_help },
+    { "vm_list",    "list VMs, their pCPUs, state and console focus", cmd_vm_list },
     { "vm_console", "vm_console <n> - attach console input to VM n", cmd_vm_console },
 };
 
@@ -100,12 +103,60 @@ static void cmd_help(const char *arg)
     }
 }
 
+/*
+ * One row per VM. The ID column is deliberately the same number vm_console
+ * takes as its argument -- discovering that mapping is this command's whole
+ * reason for existing.
+ *
+ * Deliberately NOT shown: config->vmid (the Stage-2 VMID). It is 1-based
+ * while the id here is 0-based, so printing both side by side invites exactly
+ * the "which number do I type?" confusion this command exists to remove.
+ *
+ * STATE says "halted", not "off", even though it reads vm->off: that flag
+ * means "some vCPU of this VM called CPU_OFF/SYSTEM_OFF/SYSTEM_RESET, so all
+ * of the VM's pCPUs are parked in wfi" (psci.c psci_power_down). "off" would
+ * imply an orderly whole-VM shutdown, which is not what the flag guarantees.
+ *
+ * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),
+ * so the columns are aligned with literal spaces in the format strings. That
+ * is sound only because every value here is a single digit: NR_VMS <= 2 and
+ * NR_CPUS == 4 by static assert (vm.h), so ids and pCPU numbers never widen.
+ */
+static void cmd_vm_list(const char *arg)
+{
+    (void)arg;
+
+    printk("  ID  pCPUs  STATE   CONSOLE\n");
+    for (u32 i = 0U; i < (u32)NR_VMS; i++) {
+        const struct vm *m = &vm[i];
+        u32 first = (u32)m->config->pcpu_base;
+
+        bool focused = (i == console_focus);
+        const char *state = (m->off != 0U) ? "halted" : "on";
+
+        /* The state field is padded to the marker column ONLY when a marker
+         * follows, so an unmarked row ends right after its state word rather
+         * than trailing blanks into the serial log. "halted" is 6 chars and
+         * "on" is 2, hence the 4-space difference. */
+        printk("   %u    %u-%u  %s%s\n",
+               (unsigned)m->id,
+               (unsigned)first,
+               (unsigned)(first + VCPUS_PER_VM - 1U),
+               state,
+               focused ? ((m->off != 0U) ? "  *" : "      *") : "");
+    }
+}
+
 static void cmd_vm_console(const char *arg)
 {
     u32 n;
 
     if (!parse_u32(arg, &n) || n >= (u32)NR_VMS) {
-        printk("Error: invalid VM id.\n");
+        /* Name the valid range rather than just rejecting: a bad id is the
+         * moment the user most needs to know what the ids are. Derived from
+         * NR_VMS so it stays correct under every build profile (the SVM
+         * profiles set NR_VMS=1, where this correctly prints "0-0"). */
+        printk("Error: invalid VM id (valid: 0-%u).\n", (unsigned)(NR_VMS - 1));
         return;
     }
     console_focus = n;
