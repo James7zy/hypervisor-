@@ -16,8 +16,8 @@ set -eu
 #   Image   @ PA 0x80080000  (guest IPA 0x40080000)          VM0
 #   DTB     @ PA 0x82000000  (guest IPA 0x42000000)          VM0
 #   initrd  @ PA 0x84000000  (guest IPA 0x44000000)  <- must match dts linux,initrd-start (VM0)
-#   Image   @ PA 0xC0080000  (guest IPA 0x40080000, VM1)     -- SAME dtb/Image files, reloaded
-#   DTB     @ PA 0xC2000000  (guest IPA 0x42000000, VM1)        at VM1's 1GB-aligned block
+#   Image   @ PA 0xC0080000  (guest IPA 0x40080000, VM1)     -- SAME Image file, reloaded
+#   DTB     @ PA 0xC2000000  (guest IPA 0x42000000, VM1)     <- guest-vm1.dtb (hv.vm=1)
 #   initrd  @ PA 0xC4000000  (guest IPA 0x44000000, VM1)     -- SAME initrd file, reloaded
 # VM1's backing block requires DRAM extending through 0x100000000 (-m 4G).
 HYPERVISOR_ELF="${HYPERVISOR_ELF:-build/hypervisor.elf}"
@@ -34,13 +34,18 @@ elif [ -n "${SVM_BIN:-}" ]; then
   fi
 elif [ -n "${LINUX_IMAGE:-}" ]; then
   GUEST_DTB="${GUEST_DTB:-build/guest/guest.dtb}"
+  # VM1 gets its OWN DTB: identical to VM0's except for the hv.vm= bootargs
+  # token that gives each guest a distinct hostname. Same Image and initramfs
+  # are still reloaded for both.
+  GUEST_DTB1="${GUEST_DTB1:-build/guest/guest-vm1.dtb}"
   [ -f "$LINUX_IMAGE" ] || { echo "ERROR: LINUX_IMAGE=$LINUX_IMAGE not found."; exit 1; }
   [ -f "$GUEST_DTB" ] || { echo "ERROR: $GUEST_DTB not found. Run 'make guest' first."; exit 1; }
+  [ -f "$GUEST_DTB1" ] || { echo "ERROR: $GUEST_DTB1 not found. Run 'make guest' first."; exit 1; }
 
   set -- -device "loader,file=${LINUX_IMAGE},addr=0x80080000" \
           -device "loader,file=${GUEST_DTB},addr=0x82000000" \
           -device "loader,file=${LINUX_IMAGE},addr=0xC0080000" \
-          -device "loader,file=${GUEST_DTB},addr=0xC2000000"
+          -device "loader,file=${GUEST_DTB1},addr=0xC2000000"
   if [ -n "${LINUX_INITRD:-}" ]; then
     [ -f "$LINUX_INITRD" ] || { echo "ERROR: LINUX_INITRD=$LINUX_INITRD not found."; exit 1; }
     set -- "$@" -device "loader,file=${LINUX_INITRD},addr=0x84000000" \

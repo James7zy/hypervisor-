@@ -9,6 +9,7 @@ ifeq ($(shell which $(CROSS_COMPILE)gcc 2>/dev/null),)
 endif
 
 CC      := $(CROSS_COMPILE)gcc
+CPP     := $(CROSS_COMPILE)cpp
 LD      := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
 
@@ -134,17 +135,35 @@ svm4: $(SVM4_BIN)
 
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
+# One DTS, one DTB per VM: they differ ONLY in the hv.vm= bootargs token, which
+# the initramfs init turns into a distinct hostname. Without it both guests
+# render an identical `~ #` prompt on the shared console and there is no way to
+# tell which VM the EL2 shell attached you to.
 GUEST_DTB  := $(BUILD_DIR)/guest/guest.dtb
+GUEST_DTB1 := $(BUILD_DIR)/guest/guest-vm1.dtb
 
-$(GUEST_DTB): $(GUEST_DTS)
+# The DTS takes its whole bootargs value as one cpp string (dtc will not
+# concatenate adjacent literals), so preprocess before dtc.
+# $(1) = output DTB, $(2) = VM id baked into that VM's hv.vm= token.
+GUEST_BOOTARGS_BASE := earlycon=pl011,0x9000000 console=ttyAMA0 nokaslr
+define build_guest_dtb
 	@command -v $(DTC) >/dev/null 2>&1 || { \
 	    echo "ERROR: '$(DTC)' not found. Install it:"; \
 	    echo "  Debian/Ubuntu: sudo apt-get install device-tree-compiler"; \
 	    exit 1; }
-	@mkdir -p $(dir $@)
-	$(DTC) -I dts -O dtb -o $@ $<
+	@mkdir -p $(dir $(1))
+	$(CPP) -nostdinc -undef -x assembler-with-cpp \
+	    -DHV_BOOTARGS='"$(GUEST_BOOTARGS_BASE) hv.vm=$(2)"' $(GUEST_DTS) \
+	    | $(DTC) -I dts -O dtb -o $(1)
+endef
 
-guest: $(GUEST_DTB)
+$(GUEST_DTB): $(GUEST_DTS)
+	$(call build_guest_dtb,$@,0)
+
+$(GUEST_DTB1): $(GUEST_DTS)
+	$(call build_guest_dtb,$@,1)
+
+guest: $(GUEST_DTB) $(GUEST_DTB1)
 
 $(BUILD_DIR)/check_offsets: tests/check_offsets.c
 	@mkdir -p $(BUILD_DIR)
@@ -189,7 +208,7 @@ test-qemu-svm3: test-svm-build
 
 test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4
 
-run: $(ELF) $(GUEST_DTB)
+run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
 
 clean:

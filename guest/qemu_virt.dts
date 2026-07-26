@@ -8,8 +8,29 @@
     interrupt-parent = <&gic>;
 
     chosen {
-        /* PL011 is passed through at its physical base 0x09000000. */
-        bootargs = "earlycon=pl011,0x9000000 console=ttyAMA0 nokaslr";
+        /*
+         * HV_BOOTARGS is passed by the Makefile so the ONE source file below
+         * produces a per-VM DTB. Both VMs otherwise share an
+         * identical guest address map (vm_config.h), which is exactly why the
+         * guests are indistinguishable on the shared console -- same Image,
+         * same initramfs, same prompt. hv.vm= is the only per-VM difference:
+         * the initramfs init reads it into PS1 (see guest/initramfs-init.sh),
+         * so `~ #` becomes `vm0:~ #` / `vm1:~ #` and you can tell which guest
+         * the EL2 shell just attached you to.
+         *
+         * The token is deliberately NOT a kernel parameter -- Linux ignores
+         * unrecognized args and passes them to init, which is where it is
+         * consumed.
+         */
+#ifndef HV_BOOTARGS
+#define HV_BOOTARGS "earlycon=pl011,0x9000000 console=ttyAMA0 nokaslr hv.vm=0"
+#endif
+        /* PL011 is passed through at its physical base 0x09000000.
+         *
+         * dtc does NOT concatenate adjacent string literals the way C does,
+         * so hv.vm= cannot be pasted on here -- the Makefile passes the whole
+         * value as one -DHV_BOOTARGS="..." string instead. */
+        bootargs = HV_BOOTARGS;
         stdout-path = "/pl011@9000000";
 
         /*
