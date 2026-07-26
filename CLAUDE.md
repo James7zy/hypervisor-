@@ -21,7 +21,7 @@ core chain is proven on QEMU.
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make test               # offset checks + M1/M2/M2.5 QEMU SVM scenarios
+make test               # offset checks + M1/M2/M2.5 + dual-VM + EL2-shell QEMU scenarios
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 make clean              # remove build/
 ```
@@ -53,11 +53,34 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 
 1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
    `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M2, and
-   M2.5 QEMU integration scenarios.
+   M2.5 QEMU integration scenarios, plus the dual-VM (`svm4`) and EL2-shell
+   scenarios on the `build/test-svm-dual/` (`NR_VMS=2`) build.
+   - `tests/run_shell_test.sh` is the only scenario that **writes** to the QEMU
+     serial stdin (the rest run `</dev/null`). It drives `Ctrl-T`, `vm_list`,
+     `help`, `vm_console`, the error paths, and backspace line editing. It
+     needs `NR_VMS=2` but no guest OS, so it uses the bare-metal SVM guests and
+     finishes in seconds instead of a ~25s Linux boot. Input timing is a fixed
+     `sleep` before the first byte — bytes sent before EL2 enables PL011 RX are
+     lost, so `BOOT_WAIT` in that script is deliberately generous.
 2. **Build check**: `make` must succeed with zero warnings (`-Werror` is on).
 3. **Linux SMP run**: boot with `LINUX_IMAGE` and optionally `LINUX_INITRD`, then
    verify CPU1 boots, `/sys/devices/system/cpu/online` reports `0-1`, and both CPU
    columns in `/proc/interrupts` have timer and IPI activity.
+
+## Known defects (found, not yet fixed)
+
+- **`CPU_OFF` kills the whole VM** (`hypervisor/common/psci/psci.c`, found
+  2026-07-25): `PSCI_CPU_OFF` shares `psci_power_down()` with `SYSTEM_OFF`/
+  `SYSTEM_RESET`, so it sets the per-VM `vm->off` flag and parks *every* pCPU of
+  the VM. Per the PSCI spec `CPU_OFF` must stop only the calling vCPU. A guest
+  doing `echo 0 > /sys/devices/system/cpu/cpu1/online` therefore takes its whole
+  VM down. Fixing it needs per-vCPU off state (only per-VM exists today) plus a
+  decision on what "last vCPU off" means; deliberately deferred because **M6
+  rewrites this state management anyway**. Visible as `halted` in the EL2
+  shell's `vm_list`.
+- **`vm_console <n>` accepts a halted VM**: attaching focus to a powered-down VM
+  silently does nothing (M5 known gap). `vm_list`'s STATE column now at least
+  makes the cause visible before you attach.
 
 ## Architecture
 ```
@@ -173,6 +196,8 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
 - **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
+- **dtc does not concatenate adjacent string literals** (unlike C), so `guest/qemu_virt.dts` takes its whole `bootargs` value as one `-DHV_BOOTARGS='"..."'` string from the Makefile. The DTS is preprocessed with `$(CPP)` before `dtc`; `make guest` emits one DTB per VM, differing only in the `hv.vm=` token.
+- **The guest initramfs `/init` lives at `guest/initramfs-init.sh`** (the `.cpio.gz` itself is outside the repo). It reads `hv.vm=` into `PS1` so the two VMs show `vm0:~ #` / `vm1:~ #` — without it both guests print an identical prompt on the shared console and `vm_console <n>` gives no visible feedback. The busybox it targets has only 11 applets and **no `hostname`**, hence `PS1` rather than a real hostname.
 
 ### Compiler flags (all translation units)
 
@@ -217,7 +242,7 @@ QEMU → _start (head.S)
 | M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
 | M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
 | M3.5 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
-| M5 — Multi-VM foundation | **done (gate-verified 2026-07-20)** | VM objectification (`g_vm` → `vm[NR_VMS]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M3), so one DTB template and one load-address scheme serve both VMs. Console: EL2 owns the physical PL011 exclusively (revoked the M3 passthrough), both VMs get trap-and-emulate vuarts (`hypervisor/dm/vuart.c`), Ctrl-T switches RX focus (TX is focus-independent). VM-scoped PSCI power-down: `SYSTEM_OFF` in one VM parks only that VM's pCPUs. Landed as three slices, each independently spec- and quality-reviewed, plus a final whole-milestone review; see [[docs/adr/0014-multi-vm-static-partition-el2-console]]. New automated regression: dual-SVM scenario (`svm4`) in `make test`. Known gaps carried into M6+: no automated test for Ctrl-T focus switching or PSCI-off isolation (verified manually only); console focus left on a since-shut-down VM is a silent no-op, not fed back to the user; `docs/reference/2026-06-21-architecture-zoom-out.md` still describes the pre-M5 single-VM model (flagged with a banner, full rewrite deferred) |
+| M5 — Multi-VM foundation | **done (gate-verified 2026-07-20)** | VM objectification (`g_vm` → `vm[NR_VMS]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M3), so one DTB template and one load-address scheme serve both VMs. Console: EL2 owns the physical PL011 exclusively (revoked the M3 passthrough), both VMs get trap-and-emulate vuarts (`hypervisor/dm/vuart.c`), Ctrl-T switches RX focus (TX is focus-independent). VM-scoped PSCI power-down: `SYSTEM_OFF` in one VM parks only that VM's pCPUs. Landed as three slices, each independently spec- and quality-reviewed, plus a final whole-milestone review; see [[docs/adr/0014-multi-vm-static-partition-el2-console]]. New automated regression: dual-SVM scenario (`svm4`) in `make test`. Known gaps carried into M6+: no automated test for PSCI-off isolation (verified manually only) — the Ctrl-T/`vm_console` focus gap was closed 2026-07-25 by `tests/run_shell_test.sh`; console focus left on a since-shut-down VM is a silent no-op, not fed back to the user (now at least visible as `halted` in `vm_list`); `docs/reference/2026-06-21-architecture-zoom-out.md` still describes the pre-M5 single-VM model (flagged with a banner, full rewrite deferred) |
 | M6 — vCPU scheduler | planned (moved up from M9, 2026-07-19) | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: M5's 2 VMs × 2 vCPUs time-sliced on 2 pCPUs (the other 2 pCPUs left idle for later Service VM work); both guests reach shells and concurrent FP workloads in both VMs run uncorrupted |
 | M7 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
 | M8 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |

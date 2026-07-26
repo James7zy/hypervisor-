@@ -74,7 +74,7 @@ HOST_CC    := cc
 
 .PHONY: all run clean defconfig menuconfig help svm svm2 svm3 svm4 check-offsets \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-svm2 test-qemu-svm3 \
-	test-qemu-svm4 test guest
+	test-qemu-svm4 test-qemu-shell test guest
 
 .NOTPARALLEL: test
 
@@ -136,9 +136,9 @@ svm4: $(SVM4_BIN)
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
 # One DTS, one DTB per VM: they differ ONLY in the hv.vm= bootargs token, which
-# the initramfs init turns into a distinct hostname. Without it both guests
-# render an identical `~ #` prompt on the shared console and there is no way to
-# tell which VM the EL2 shell attached you to.
+# the initramfs init turns into a distinct prompt (guest/initramfs-init.sh).
+# Without it both guests render an identical `~ #` on the shared console and
+# there is no way to tell which VM the EL2 shell attached you to.
 GUEST_DTB  := $(BUILD_DIR)/guest/guest.dtb
 GUEST_DTB1 := $(BUILD_DIR)/guest/guest-vm1.dtb
 
@@ -194,6 +194,13 @@ test-qemu-svm4: test-svm-dual-build
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_svm4_test.sh
 
+# The only scenario that WRITES to the QEMU serial stdin; reuses the dual-SVM
+# build because the EL2 shell needs NR_VMS=2 but no guest OS.
+test-qemu-shell: test-svm-dual-build
+	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
+	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_shell_test.sh
+
 test-qemu: test-svm-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm.bin sh tests/run_svm_test.sh
@@ -206,7 +213,7 @@ test-qemu-svm3: test-svm-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_BUILD_DIR)/svm3/svm3.bin sh tests/run_svm3_test.sh
 
-test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4
+test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4 test-qemu-shell
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
