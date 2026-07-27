@@ -9,9 +9,10 @@
  *
  * Ctrl-T (0x14) on the physical UART is a two-state toggle handled by
  * irq_handler.c's PL011 RX-drain loop: it enters this shell, or exits back to
- * whichever VM console_focus names (vuart.h). While shell_active is true, NO
- * physical RX byte reaches any guest -- every byte is line-edited here and
- * interpreted as a command on Enter.
+ * whichever VM console_focus names (vuart.h). A successful `vm_console <n>`
+ * command also exits immediately to the selected VM. While shell_active is
+ * true, NO physical RX byte reaches any guest -- every byte is line-edited
+ * here and interpreted as a command on Enter.
  *
  * Not multi-core safe by design: the physical PL011 SPI is routed to pCPU0
  * only (gic_v3.c), so every byte and every state change below happens on that
@@ -39,8 +40,8 @@ void hv_shell_enter(void);
 void hv_shell_exit(void);
 
 /* Feed one received byte to the line editor. On Enter, the accumulated line
- * is parsed and dispatched, then a fresh prompt is printed. Only called while
- * shell_active is true. */
+ * is parsed and dispatched; a fresh prompt is printed only if the command
+ * kept the shell active. Only called while shell_active is true. */
 void hv_shell_rx(u8 ch);
 
 #endif /* HV_DM_HV_SHELL_H */

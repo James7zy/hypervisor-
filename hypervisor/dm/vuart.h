@@ -27,13 +27,12 @@ struct vuart {
 struct vm;
 
 /* Which VM receives physical console RX when the EL2 shell is NOT active
- * (0..NR_VMS-1). Set by the shell's `vm_console <n>` command (hv_shell.c);
- * while shell_active is true this value is simply the VM that Ctrl-T will
- * return to on exit, and no RX reaches it. TX is NOT gated by this -- every
- * VM's output reaches the physical UART regardless of focus or shell state,
- * only RX (guest keyboard input) is routed. Plain extern, matching this
- * codebase's existing convention for simple cross-file state (see e.g.
- * struct vm vm[] itself). */
+ * (0..NR_VMS-1). A successful `vm_console <n>` command (hv_shell.c) sets this
+ * value and immediately leaves the shell; Ctrl-T can also leave the shell
+ * without changing it. TX is NOT gated by this -- every VM's output reaches
+ * the physical UART regardless of focus or shell state, only RX (guest
+ * keyboard input) is routed. Plain extern, matching this codebase's existing
+ * convention for simple cross-file state (see e.g. struct vm vm[] itself). */
 extern u32 console_focus;
 
 /* Register the shared PL011 IPA region on the MMIO bus (call once). */

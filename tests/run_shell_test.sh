@@ -55,9 +55,14 @@ drive_shell() {
     # Proves the line buffer, not just the echo, drops the erased bytes.
     printf 'vm_consoXX%s%sle 1\r' "${BS}" "${BS}"
     sleep "${STEP}"
-    printf 'vm_list\r'            # focus moved to VM1
+    # A successful attach must leave the HV shell immediately. This probe is
+    # therefore routed to VM1's vuart and must not be echoed/interpreted by
+    # the HV shell (the bare-metal VM deliberately does not consume it).
+    printf 'post_attach_probe\r'
     sleep "${STEP}"
-    printf '%s' "${ESC}"          # leave the shell
+    printf '%s' "${ESC}"          # re-enter the shell from VM1
+    sleep "${STEP}"
+    printf 'vm_list\r'            # focus moved to VM1
     sleep "${STEP}"
 }
 
@@ -108,9 +113,11 @@ check "vm_console	vm_console <n> - attach console input to VM n"
 check "Error: Invalid command."
 check "Error: invalid VM id (valid: 0-1)."
 
-# Backspace left the buffer holding exactly "vm_console 1", so focus moved.
+# Backspace left the buffer holding exactly "vm_console 1", so focus moved
+# and the command immediately handed the physical console to VM1.
 check "[hv] console: VM1"
-# ...and the second vm_list shows the marker on VM1 now.
+check_absent "post_attach_probe"
+# Ctrl-T re-entered the shell, and the second vm_list shows VM1 focused.
 check "   1    2-3  on      *"
 
 # The escape key is consumed by the drain loop, never echoed and never

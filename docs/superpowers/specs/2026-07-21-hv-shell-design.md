@@ -1,7 +1,7 @@
 # EL2 HV Shell — `vm_console` attach + extensible debug commands Design
 
-> **Status:** Draft — approved in the 2026-07-21 brainstorming session; not yet
-> implemented.
+> **Status:** Implemented; `vm_console` direct-attach behavior updated
+> 2026-07-26 after multi-VM manual testing.
 > **Milestone:** Follow-up to M5 (multi-VM foundation). Builds on
 > `hypervisor/dm/vuart.c`'s `console_focus` and `irq_handler.c`'s PL011
 > RX-drain loop (see [[../adr/0014-multi-vm-static-partition-el2-console]]).
@@ -11,17 +11,18 @@
 Replace M5's "Ctrl-T cycles console focus" with an ACRN-style **EL2 shell**:
 Ctrl-T becomes a two-state toggle that enters/exits a small command-line
 interpreter running on the physical console. Inside the shell, `vm_console
-<n>` explicitly sets which VM's vuart receives keyboard input once the shell
-is exited; `help` lists commands. This is the seam M6+ debugging commands
+<n>` explicitly sets which VM's vuart receives keyboard input and immediately
+exits the shell to that VM; `help` lists commands. This is the seam M6+
+debugging commands
 (vm_list, vcpu_list, register dumps, ...) attach to, without changing this
 milestone's actual command set.
 
 **Observable DoD:** on the M5 dual-VM `run-qemu.sh` boot, pressing Ctrl-T from
 either VM's shell prints `hv> ` and takes over the physical console;
 typing `help` lists `help` and `vm_console`; typing `vm_console 1` prints
-`[hv] console: VM1` and stays in the `hv> ` prompt; pressing Ctrl-T again
-exits the shell and delivers keystrokes to VM1's vuart, which is now
-interactive. The reverse (attach back to VM0) works identically. Backspace
+`[hv] console: VM1` and immediately delivers subsequent keystrokes to VM1's
+vuart, which is now interactive. The reverse (attach back to VM0) works
+identically. Backspace
 during shell input editing works; an unknown command prints an error and
 does not crash or hang.
 
@@ -33,12 +34,12 @@ does not crash or hang.
 |---|---|---|
 | 1 | Interaction model | A real EL2 shell (ACRN-style), not a bare loop-and-switch — commands are the extension point |
 | 2 | Ctrl-T semantics | Two-state toggle: enter shell / exit shell (**not** a VM-cycling key anymore) |
-| 3 | Exit-shell target | Exiting always returns to whatever `console_focus` currently holds — `vm_console` is the only thing that changes it |
+| 3 | Exit-shell target | Ctrl-T exits to the current `console_focus`; successful `vm_console <n>` changes the focus and exits directly to that VM |
 | 4 | Line editing | Minimal: backspace only, no history, no arrow keys |
 | 5 | Command set (this round) | Exactly two: `help`, `vm_console <n>` — extensible table, no other commands implemented now |
 | 6 | Boot default | `console_focus = 0` (VM0), `shell_active = false` — identical to pre-existing M5 boot behavior |
 | 7 | Attaching to an off VM | Allowed without validation; consistent with M5's existing known gap (focus on a shut-down VM is a silent no-op) |
-| 8 | `vm_console` side effect | Only sets `console_focus`; does **not** auto-exit the shell — exiting is always via Ctrl-T |
+| 8 | `vm_console` side effect | A valid ID sets `console_focus` and auto-exits to that VM; invalid input leaves focus unchanged and keeps the shell active |
 
 ---
 
@@ -56,7 +57,7 @@ sequenceDiagram
         IH->>SH: shell_active ? hv_shell_exit() : hv_shell_enter()
     else shell_active == true
         IH->>SH: hv_shell_rx(c)
-        Note over SH: line edit — on Enter parse and dispatch<br/>vm_console N only sets console_focus
+        Note over SH: line edit — on Enter parse and dispatch<br/>valid vm_console N sets focus and exits
     else shell_active == false
         IH->>VU: vuart_rx(&vm[console_focus], c)
     end
@@ -125,7 +126,8 @@ exact wording, kept for familiarity) and reprompt. Match: call `fn(arg)`.
 write the minimal decimal-only parser, reject non-digit input). If the
 result is `>= NR_VMS` or `arg` is empty/non-numeric: print
 `Error: invalid VM id.` and do not touch `console_focus`. Otherwise:
-`console_focus = n;` and `printk("[hv] console: VM%u\n", n);` — the exact
+set `console_focus = n;`, print `"[hv] console: VM%u\n"`, and clear
+`shell_active` so the next physical RX byte is routed to that VM. The exact
 message format already used by the (now-replaced) Ctrl-T-cycles-focus code,
 so existing manual-test muscle memory and any external expectations about
 that log line stay valid.
@@ -156,28 +158,24 @@ that log line stay valid.
 
 ## Testing
 
-No new automated QEMU scenario (matches this repo's existing gap for
-Ctrl-T-adjacent behavior, noted in ADR-0014's Consequences — the shell adds
-input-routing logic in the same category, not a new gap). Verification is
-manual, on the M5 dual-VM boot:
+`tests/run_shell_test.sh` drives the physical QEMU serial input in the
+dual-SVM profile and verifies the command, auto-exit, and RX-routing behavior.
+The corresponding manual checks on the M5 dual-VM Linux boot are:
 
 1. Both VMs boot; VM0 has input focus (unchanged default).
 2. Ctrl-T → `hv> ` appears; typing on either VM's shell no longer echoes
    there.
 3. `help` → both commands listed with their help text.
-4. `vm_console 1` → `[hv] console: VM1` printed, still at `hv> `.
-5. `vm_console 9` (out of range for `NR_VMS=2`) → `Error: invalid VM id.`,
-   `console_focus` unchanged (verify by re-running `vm_console` with no
-   further changes and confirming the next Ctrl-T-exit still lands on VM1
-   from step 4, not VM0).
-6. Backspace during a partially-typed command works (type `vm_conso`,
-   backspace 3 times, type `sole 0`, Enter → behaves as `vm_console 0`).
-7. Ctrl-T → shell exits, VM1 (per step 4) receives keystrokes; confirm with
-   an interactive command in VM1's shell.
-8. Ctrl-T again → back in `hv> `; `vm_console 0` → Ctrl-T exit → VM0
-   interactive again.
-9. `make test` stays green (no existing scenario touches Ctrl-T or the
-   shell, so this is a regression-safety check, not new coverage).
+4. `vm_console 9` (out of range for `NR_VMS=2`) → `Error: invalid VM id.`,
+   `console_focus` unchanged and the shell remains active.
+5. Backspace during a partially-typed command works.
+6. `vm_console 1` → `[hv] console: VM1` printed and the shell immediately
+   exits; VM1 receives subsequent keystrokes without another Ctrl-T.
+7. After step 6, confirm an interactive command is handled by VM1 without
+   pressing Ctrl-T.
+8. Ctrl-T → back in `hv> `; `vm_console 0` → VM0 becomes interactive
+   immediately.
+9. `make test` stays green, including the EL2-shell QEMU scenario.
 
 ---
 

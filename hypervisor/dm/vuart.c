@@ -57,8 +57,8 @@ static const u8 vuart_amba_id[8] = {
 };
 
 /* Which VM receives console RX while the EL2 shell is inactive; VM0 at boot.
- * Set by the shell's `vm_console <n>` command. See vuart.h for the full
- * contract and hv_shell.h for the console-ownership toggle. */
+ * Set when the shell's `vm_console <n>` command attaches and exits. See
+ * vuart.h for the full contract and hv_shell.h for console ownership. */
 u32 console_focus = 0;
 
 static bool vuart_rx_empty(const struct vuart *u)

@@ -161,6 +161,7 @@ static void cmd_vm_console(const char *arg)
     }
     console_focus = n;
     printk("[hv] console: VM%u\n", (unsigned)n);
+    shell_active = false;
 }
 
 void hv_shell_enter(void)
@@ -229,7 +230,9 @@ void hv_shell_rx(u8 ch)
         shell_line[shell_line_len] = '\0';
         hv_shell_dispatch(shell_line);
         shell_line_len = 0U;
-        printk(HV_SHELL_PROMPT);
+        if (shell_active) {
+            printk(HV_SHELL_PROMPT);
+        }
         return;
     }
 
@@ -261,7 +264,9 @@ void hv_shell_rx(u8 ch)
             shell_line[shell_line_len] = '\0';
             hv_shell_dispatch(shell_line);
             shell_line_len = 0U;
-            printk(HV_SHELL_PROMPT);
+            if (shell_active) {
+                printk(HV_SHELL_PROMPT);
+            }
         }
     }
 
