@@ -10,10 +10,10 @@ relationships between modules, all represented using Mermaid. A picture is worth
 A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, bao-hypervisor. The directory layout
 mirrors ACRN's `hypervisor/` structure.
 
-**M3.5 (SMP)** is complete: an unmodified Linux guest boots with two vCPUs
-statically pinned 1:1 to two pCPUs. Next: **M5 (multi-VM foundation)** — the
+**M9 (SMP)** is complete: an unmodified Linux guest boots with two vCPUs
+statically pinned 1:1 to two pCPUs. Next: **M10 (multi-VM foundation)** — the
 long-term target form is the **full ACRN model** (Service VM + userspace Device
-Model); see the roadmap below. The RK3588 port moved to M10, after the ACRN-model
+Model); see the roadmap below. The RK3588 port moved to M15, after the ACRN-model
 core chain is proven on QEMU.
 
 ## Build Commands
@@ -21,7 +21,7 @@ core chain is proven on QEMU.
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make test               # offset checks + M1/M2/M2.5 + dual-VM + EL2-shell QEMU scenarios
+make test               # offset checks + M1/M3/M4 + dual-VM + EL2-shell QEMU scenarios
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 make clean              # remove build/
 ```
@@ -52,8 +52,8 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 ## Verification (no CI; local automated integration tests)
 
 1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
-   `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M2, and
-   M2.5 QEMU integration scenarios, plus the dual-VM (`svm4`) and EL2-shell
+   `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M3, and
+   M4 QEMU integration scenarios, plus the dual-VM (`svm4`) and EL2-shell
    scenarios on the `build/test-svm-dual/` (`NR_VMS=2`) build.
    - `tests/run_shell_test.sh` is the only scenario that **writes** to the QEMU
      serial stdin (the rest run `</dev/null`). It drives `Ctrl-T`, `vm_list`,
@@ -75,11 +75,11 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
   the VM. Per the PSCI spec `CPU_OFF` must stop only the calling vCPU. A guest
   doing `echo 0 > /sys/devices/system/cpu/cpu1/online` therefore takes its whole
   VM down. Fixing it needs per-vCPU off state (only per-VM exists today) plus a
-  decision on what "last vCPU off" means; deliberately deferred because **M6
+  decision on what "last vCPU off" means; deliberately deferred because **M11
   rewrites this state management anyway**. Visible as `halted` in the EL2
   shell's `vm_list`.
 - **`vm_console <n>` accepts a halted VM**: attaching focus to a powered-down VM
-  silently does nothing (M5 known gap). `vm_list`'s STATE column now at least
+  silently does nothing (M10 known gap). `vm_list`'s STATE column now at least
   makes the cause visible before you attach.
 
 ## Architecture
@@ -234,21 +234,53 @@ QEMU → _start (head.S)
 |---|---|---|
 | M0 — Hello EL2 | **done** | Enter EL2, print banner |
 | M1 — Bare-metal guest | **done** | Stage-2 MMU, minimal vCPU |
-| M1.5 — PSCI | **done** | PSCI VERSION/FEATURES/CPU_OFF/SYSTEM_OFF over HVC (no GIC) |
-| M2 — vGIC software injection | **done** | HVC → `vgic_inject_sw` → guest EL1 IRQ handler (no physical HW) |
-| M2.5 — Physical timer + GIC + HW-forwarding | **done** | timer PPI → EL2 → `vgic_inject_hw` → guest (ADR-0001) |
-| M3.0 — Linux alive (no interrupts) | **done** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
-| M3.1 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
-| M3.2 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M3.1 bus; timer-PPI injection |
-| M3.4 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M3 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
-| M3.5 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
-| M5 — Multi-VM foundation | **done (gate-verified 2026-07-20)** | VM objectification (`g_vm` → `vm[NR_VMS]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M3), so one DTB template and one load-address scheme serve both VMs. Console: EL2 owns the physical PL011 exclusively (revoked the M3 passthrough), both VMs get trap-and-emulate vuarts (`hypervisor/dm/vuart.c`), Ctrl-T switches RX focus (TX is focus-independent). VM-scoped PSCI power-down: `SYSTEM_OFF` in one VM parks only that VM's pCPUs. Landed as three slices, each independently spec- and quality-reviewed, plus a final whole-milestone review; see [[docs/adr/0014-multi-vm-static-partition-el2-console]]. New automated regression: dual-SVM scenario (`svm4`) in `make test`. Known gaps carried into M6+: no automated test for PSCI-off isolation (verified manually only) — the Ctrl-T/`vm_console` focus gap was closed 2026-07-25 by `tests/run_shell_test.sh`; console focus left on a since-shut-down VM is a silent no-op, not fed back to the user (now at least visible as `halted` in `vm_list`); `docs/reference/arm/2026-06-21-architecture-zoom-out.md` still describes the pre-M5 single-VM model (flagged with a banner, full rewrite deferred) |
-| M6 — vCPU scheduler | planned (moved up from M9, 2026-07-19) | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: M5's 2 VMs × 2 vCPUs time-sliced on 2 pCPUs (the other 2 pCPUs left idle for later Service VM work); both guests reach shells and concurrent FP workloads in both VMs run uncorrupted |
-| M7 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
-| M8 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
-| M9 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
-| M10 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
+| M2 — PSCI | **done** | PSCI VERSION/FEATURES/CPU_OFF/SYSTEM_OFF over HVC (no GIC) |
+| M3 — vGIC software injection | **done** | HVC → `vgic_inject_sw` → guest EL1 IRQ handler (no physical HW) |
+| M4 — Physical timer + GIC + HW-forwarding | **done** | timer PPI → EL2 → `vgic_inject_hw` → guest (ADR-0001) |
+| M5 — Linux alive (no interrupts) | **done** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
+| M6 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
+| M7 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M6 bus; timer-PPI injection |
+| M8 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M5 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
+| M9 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
+| M10 — Multi-VM foundation | **done (gate-verified 2026-07-20)** | VM objectification (`g_vm` → `vm[NR_VMS]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M5), so one DTB template and one load-address scheme serve both VMs. Console: EL2 owns the physical PL011 exclusively (revoked the M5 passthrough), both VMs get trap-and-emulate vuarts (`hypervisor/dm/vuart.c`), Ctrl-T switches RX focus (TX is focus-independent). VM-scoped PSCI power-down: `SYSTEM_OFF` in one VM parks only that VM's pCPUs. Landed as three slices, each independently spec- and quality-reviewed, plus a final whole-milestone review; see [[docs/adr/0014-multi-vm-static-partition-el2-console]]. New automated regression: dual-SVM scenario (`svm4`) in `make test`. Known gaps carried into M11+: no automated test for PSCI-off isolation (verified manually only) — the Ctrl-T/`vm_console` focus gap was closed 2026-07-25 by `tests/run_shell_test.sh`; console focus left on a since-shut-down VM is a silent no-op, not fed back to the user (now at least visible as `halted` in `vm_list`); `docs/reference/arm/2026-06-21-architecture-zoom-out.md` still describes the pre-M10 single-VM model (flagged with a banner, full rewrite deferred) |
+| M11 — vCPU scheduler | planned (moved up from M14, 2026-07-19) | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count. Deliverable: M10's 2 VMs × 2 vCPUs time-sliced on 2 pCPUs (the other 2 pCPUs left idle for later Service VM work); both guests reach shells and concurrent FP workloads in both VMs run uncorrupted |
+| M12 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
+| M13 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
+| M14 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
+| M15 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
 | Deferred | — | SMMU/DMA isolation and the device-passthrough framework: not needed while all User VM devices are DM-emulated on QEMU; schedule when RK3588 passthrough demands it |
+
+### Milestone renumbering (2026-08-10)
+
+The roadmap was flattened to consecutive integers `M0`–`M15`. The old scheme had
+decimal milestones (`M1.5`, `M2.5`, `M3.0`–`M3.5`) and a gap where `M4` was never
+used, which made ordering ambiguous. **Historical documents were deliberately not
+rewritten** — `docs/superpowers/{specs,plans}/`, `docs/adr/` and `docs/debug/`
+are records of what happened at the time, and their filenames are referenced from
+git history and already-pushed branches. Use this table when reading them:
+
+| Old | New | Milestone |
+|---|---|---|
+| M0 | M0 | Hello EL2 |
+| M1 | M1 | Bare-metal guest |
+| M1.5 | **M2** | PSCI |
+| M2 | **M3** | vGIC software injection |
+| M2.5 | **M4** | Physical timer + GIC + HW-forwarding |
+| M3.0 | **M5** | Linux alive (no interrupts) |
+| M3.1 | **M6** | MMIO trap framework |
+| M3.2 | **M7** | vGICv3 emulation |
+| M3.4 | **M8** | Boot to shell |
+| M3.5 | **M9** | SMP |
+| M5 | **M10** | Multi-VM foundation |
+| M6 | **M11** | vCPU scheduler |
+| M7 | **M12** | Hypercall ABI + VM lifecycle |
+| M8 | **M13** | HSM kernel driver + io_req ring |
+| M9 | **M14** | Device Model + virtio backends |
+| M10 | **M15** | RK3588 port |
+
+There was never an `M3.3`, and the old `M4` (once "RK3588 port") was retired when
+the port moved to the end of the roadmap; neither has a new-scheme equivalent.
+Filenames such as `2026-06-23-m3.5-smp-design.md` keep their old numbering.
 
 ### ACRN-model strategy (decided 2026-07-14, revised 2026-07-19)
 
@@ -262,15 +294,15 @@ decisions shaping the roadmap ordering:
    last"): the primary project goal is learning EL2 core technology, and the
    scheduler is the densest remaining piece — it forces per-vCPU state
    (FP/SIMD, system registers, vGIC LR save/restore) to be complete. Doing it
-   at M6, before the hypercall→HSM→DM chain, means M7–M9 build on a finished
+   at M11, before the hypercall→HSM→DM chain, means M12–M14 build on a finished
    state-switching foundation instead of accumulating "no-save" assumptions.
-   M5 itself still keeps 1:1 vCPU:pCPU pinning (ACRN "partitioned" mode).
+   M10 itself still keeps 1:1 vCPU:pCPU pinning (ACRN "partitioned" mode).
 3. **No interim in-hypervisor virtio backends**: virtio backends are written
-   once, in the userspace DM (M9). Until then User VMs use vuart console +
+   once, in the userspace DM (M14). Until then User VMs use vuart console +
    initramfs (no disk). Avoids writing/maintaining the backend logic twice.
-4. **FDT parsing deferred to M10**: QEMU milestones keep static board config
+4. **FDT parsing deferred to M15**: QEMU milestones keep static board config
    (ADR-0008) and prebuilt guest DTB templates.
-5. **EL2 owns the console from M5 on** (2026-07-19): the M3 PL011 passthrough
+5. **EL2 owns the console from M10 on** (2026-07-19): the M5 PL011 passthrough
    is revoked; the physical UART belongs to EL2 and every VM sees a
    trap-and-emulate vuart, with an escape key switching input focus. This is
    the only design that gives every VM an interactive shell over one physical
@@ -278,7 +310,7 @@ decisions shaping the roadmap ordering:
 6. **One guest address map for all VMs** (2026-07-19): every VM sees RAM at
    IPA `0x40000000` regardless of the backing PA. This is not new mechanism —
    `vm_config` already separates `mem_base` (IPA) from `ram_pa`, and VM0 has
-   mapped IPA `0x40000000` → PA `0x80000000` since M3 — so VM1 is just a
+   mapped IPA `0x40000000` → PA `0x80000000` since M5 — so VM1 is just a
    second config with `ram_pa = 0xC0000000`. One DTB template, one set of
    load-offset constants, and the guest-visible machine is identical across
    VMs. (An identity-mapped VM1 was considered and rejected: it would need a
