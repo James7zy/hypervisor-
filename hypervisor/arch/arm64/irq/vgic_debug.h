@@ -9,7 +9,7 @@
  * turns it into -DCONFIG_DEBUG_VGIC=1), then rebuild.
  *
  * Used to trace the two paths verified during the GICD/GICR punch-hole work
- * (docs/reference/2026-06-21-gicd-gicr-trap-investigation.md):
+ * (docs/reference/arm/2026-06-21-gicd-gicr-trap-investigation.md):
  *   - GICD/GICR register accesses  -> vgic_v3_mmio.c shadow handlers
  *   - timer PPI / PL011 SPI inject -> irq_handler.c el2_irq_handler
  */

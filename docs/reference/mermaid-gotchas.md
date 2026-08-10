@@ -74,7 +74,7 @@ participant G   as 〔EL1〕Guest pl011 ISR
 Note over ASM,G: 跨级说明用 Note 标注
 ```
 
-（`docs/reference/2026-06-21-architecture-zoom-out.md` 第 4 节即此方案的实例。）
+（`docs/reference/arm/2026-06-21-architecture-zoom-out.md` 第 4 节即此方案的实例。）
 
 ## 小结
 

@@ -4,7 +4,7 @@
 
 ## 背景与动机
 
-2026-06-21 的一次实证 boot（见 `docs/reference/2026-06-21-gicd-gicr-trap-investigation.md`）
+2026-06-21 的一次实证 boot（见 `docs/reference/arm/2026-06-21-gicd-gicr-trap-investigation.md`）
 证明 ADR-0012 描述的 vGICv3 影子模拟**当前不生效**：
 
 - `stage2.c` 的 `l1_table[0]` 把 IPA `0x00000000–0x3FFFFFFF` identity-map 成一个**有效的

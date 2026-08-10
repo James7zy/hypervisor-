@@ -9,7 +9,7 @@
 **Tech Stack:** C (freestanding, `-mgeneral-regs-only -mstrict-align -Werror`), ARM64 Stage-2 page tables, QEMU `virt` gic-version=3. No unit-test framework — verification is `make` (zero warnings) + a real QEMU boot (CLAUDE.md "Verification" section).
 
 **Spec:** `docs/superpowers/specs/2026-06-21-stage2-gic-punch-hole-design.md`
-**Background evidence:** `docs/reference/2026-06-21-gicd-gicr-trap-investigation.md`
+**Background evidence:** `docs/reference/arm/2026-06-21-gicd-gicr-trap-investigation.md`
 
 ---
 
@@ -235,7 +235,7 @@ Expected: the Decision paragraph (around line 16-17) mentions GICD/GICR MMIO →
 
 In the Decision paragraph of `docs/adr/0012-physical-gicv3-ownership.md`, immediately after the sentence ending `…被影子模型 vgic_v3_mmio.c 模拟（ADR-0010），从不落到真实硬件。`, append:
 ```
-该 trap 由 Stage-2 punch-hole 落实：stage2_init 把覆盖 GICD/GICR 的那个 2 MB L2 entry 设为 invalid（见 docs/superpowers/specs/2026-06-21-stage2-gic-punch-hole-design.md 与 docs/reference/2026-06-21-gicd-gicr-trap-investigation.md），否则 l1_table[0] 的 identity Device 直通会让访问命中物理 GIC。
+该 trap 由 Stage-2 punch-hole 落实：stage2_init 把覆盖 GICD/GICR 的那个 2 MB L2 entry 设为 invalid（见 docs/superpowers/specs/2026-06-21-stage2-gic-punch-hole-design.md 与 docs/reference/arm/2026-06-21-gicd-gicr-trap-investigation.md），否则 l1_table[0] 的 identity Device 直通会让访问命中物理 GIC。
 ```
 
 - [ ] **Step 3: Commit**

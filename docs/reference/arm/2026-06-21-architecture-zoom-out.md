@@ -5,7 +5,7 @@
 > Stage-2/vGIC/vuart），且 §4 的键盘输入 trace 已不完整：它只覆盖 `vm[0]` 单目标注入，
 > 未描述 M5 新增的 `console_focus` 切换键与跨核 vGIC shadow/kick/reload 注入路径（VM 的
 > 控制台 vCPU 可能运行在与拥有物理 UART 的 pCPU0 不同的核上）。完整现状见
-> [[../adr/0014-multi-vm-static-partition-el2-console]] 及其 Mermaid 图；本文其余章节
+> [[../../adr/0014-multi-vm-static-partition-el2-console]] 及其 Mermaid 图；本文其余章节
 > （GIC 子系统本体、Stage-2 机制）在单 VM 视角下仍然准确，只是需要按"每 VM 一份"重新
 > 理解。全文按 M5 现状重写留作后续任务。
 
@@ -134,7 +134,7 @@ prio 0xA0、路由 Aff=0、enable）——变的是这条 SPI 落地guest的路�
 「来自 EL1 的异常」（Lower EL），不是它的运行级别。
 
 > 这里本想用 `box` 泳道分组直接画出 EL2/EL1 分层，但本地 `mermaid@11` 对 `box` 报
-> `Option is not defined`，故改用别名前缀。详见 [mermaid-gotchas.md](mermaid-gotchas.md) 坑 3。
+> `Option is not defined`，故改用别名前缀。详见 [mermaid-gotchas.md](../mermaid-gotchas.md) 坑 3。
 
 ```mermaid
 sequenceDiagram

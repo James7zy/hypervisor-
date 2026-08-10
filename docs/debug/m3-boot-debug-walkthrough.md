@@ -66,7 +66,7 @@ sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu- -j"$(nproc)"
 file busybox   # 必须是 "ELF ... ARM aarch64 ... statically linked"
 
-# (c) 组 initramfs(见 docs/reference/guest-initramfs.md),/init 末尾 exec /bin/sh
+# (c) 组 initramfs(见 docs/reference/arm/guest-initramfs.md),/init 末尾 exec /bin/sh
 ```
 
 **坑 A —— 内核镜像大小预算。** hv 的地址布局给 Image 留的空间有限:

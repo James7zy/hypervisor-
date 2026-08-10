@@ -17,8 +17,8 @@ interface**（`ICV_*` 寄存器 + `ICH_*` 控制接口）由硬件在 EL1 透明
 abort，被影子模型 `vgic_v3_mmio.c` 模拟（ADR-0010），从不落到真实硬件。该 trap 由 Stage-2
 punch-hole 落实：`stage2_init`（`mmu/stage2.c`）把覆盖 GICD/GICR 的那个 2 MB L2 entry 设为
 invalid（见 `docs/superpowers/specs/2026-06-21-stage2-gic-punch-hole-design.md`、
-`docs/reference/stage2-l1-to-l2.md` 与实证记录
-`docs/reference/2026-06-21-gicd-gicr-trap-investigation.md`），否则 `l1_table[0]` 的 identity
+`docs/reference/arm/stage2-l1-to-l2.md` 与实证记录
+`docs/reference/arm/2026-06-21-gicd-gicr-trap-investigation.md`），否则 `l1_table[0]` 的 identity
 Device 直通会让访问命中物理 GIC、模拟永不触发。唯一穿透到客户机
 的真实中断（vtimer PPI 27、PL011 SPI 33）由 EL2 接收后注入虚拟中断（ADR-0001）。
 `HCR_EL2.{IMO,FMO,AMO}=1` 把所有物理 IRQ/FIQ/SError 路由到 EL2 是这一切的前提。

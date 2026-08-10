@@ -13,7 +13,7 @@ static inspection could not.
   (disabled NET/PCI/USB/DRM/DEBUG_INFO/… kept PL011, virtio-mmio/console,
   devtmpfs, initramfs) so `Image` is **28 MB** — see "address budget" below.
 - initramfs: static aarch64 busybox (built from git, `CONFIG_STATIC=y`) packed
-  per `docs/reference/guest-initramfs.md` → `~/Music/virtual/initramfs.cpio.gz` (1.2 MB).
+  per `docs/reference/arm/guest-initramfs.md` → `~/Music/virtual/initramfs.cpio.gz` (1.2 MB).
 
 ## Bug 1 — Stage-2 L1 1 GB block mis-aligned (FIXED)
 

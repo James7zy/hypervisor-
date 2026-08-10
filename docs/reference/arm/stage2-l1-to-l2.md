@@ -464,7 +464,7 @@ A：L1 table descriptor 的「下一级表基址」字段要求低 12 位为 0�
 
 本文档（reference）的改动：
 
-- **新增** `docs/reference/stage2-l1-to-l2.md`（本文）。
+- **新增** `docs/reference/arm/stage2-l1-to-l2.md`（本文）。
 - **更新** `docs/reference/README.md`（在索引中加入本文一行）。
 
 配套的代码落地（独立 commit）：

@@ -137,7 +137,7 @@ guest 对 GICD/GICR 的每次内存映射访问被 Stage-2 punch-hole 截获后�
 
 ## 修改的文件
 
-- **新增** `docs/reference/vgic-debug-logging.md`（本文）。
+- **新增** `docs/reference/arm/vgic-debug-logging.md`（本文）。
 - **更新** `docs/reference/README.md`（索引加一行）。
 
 > 代码本身（`vgic_debug.h` + 两个调用文件）由 commit `feat(vgic): add CONFIG_DEBUG_VGIC
