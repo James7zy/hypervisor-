@@ -86,7 +86,7 @@ IRQ entry calls `vspi_irq_handler`. Compile **all** vspi C with
 `$(SVM_CFLAGS) -mgeneral-regs-only -mstrict-align -fno-stack-protector`.
 
 Guest-local definitions (no hypervisor include dependency): `u32 = unsigned
-int`, `u64 = unsigned long`; 32/64-bit MMIO volatile accessors; `now()` reads
+int`, `u64 = unsigned long`; 32/64-bit explicit LDR/STR MMIO accessors with memory clobbers (no post-index addressing: the current EL2 decoder requires ISV); `now()` reads
 CNTVCT_EL0 with ISB, `freq` reads CNTFRQ_EL0. Use release stores/acquire loads
 for guest shared handshakes (`__atomic_store_n`, `__atomic_load_n`), each
 counter single-writer; no out-of-line atomic RMW helpers are needed. Every
@@ -99,7 +99,8 @@ also waits up to 180*freq for primary to publish the selected mode; G then
 idles, S/R enter batch handshakes. Completed guests idle with timers enabled
 without declaring a missing next command to be failure. Guest `uart_puts`/decimal
 formatting emit via DR; only VM0 may emit an unsolicited boot line, preventing
-cross-VM character interleaving from corrupting markers.
+cross-VM character interleaving from corrupting markers. BOOT alone retries
+until mode to recover finite EL2 startup-message interleaving.
 
 Use named failure codes `EARLY_TIMER=1`, `DEADLINE=2`, `CPU_ON=3`, `RX_DATA=4`,
 `GIC_STATE=5`, `UNEXPECTED_IRQ=6`, `UART_REPLAY=7`, `EXCEPTION=8`. Primary emits
@@ -117,7 +118,7 @@ Each vCPU, with its new stack and VBAR installed, runs this ordered algorithm:
 
 ```text
 write ICC_SRE_EL1 = 7; ISB; ICC_PMR_EL1 = 0xff
-write ICC_CTLR_EL1 = 2                 # virtual split EOI
+write ICC_CTLR_EL1 = 0                 # virtual combined EOI
 write ICC_IGRPEN1_EL1 = 0; ISB
 write CNTV_TVAL_EL0 = freq/100; CNTV_CTL_EL0 = 1; ISB
 busy-wait CNTVCT for freq/20            # expire while VENG1 is false
@@ -132,7 +133,7 @@ require timer_count[cpu] >= 5 within 5*freq counter ticks
 ```
 
 The handler re-arms every timer tick to `freq/100` and writes ENABLE=1,
-ISBs, writes ICC_EOIR1_EL1 then ICC_DIR_EL1 with the original IAR, ISBs, then
+ISBs, writes ICC_EOIR1_EL1 with the original IAR (combined drop/deactivate), ISBs, then
 publishes completion count. Exactly one initial software-pending tick is
 insufficient; VM1 must progress on physical CPU2/3 after the mapping fix.
 
@@ -146,8 +147,11 @@ PSCI's EL2 `online` is not guest readiness. On failure CPU1 sets its own error
 and ready flag, so the primary can report rather than hang without attribution.
 No CPU_OFF/SYSTEM_OFF or HC_GUEST_DONE is used.
 
-UART interrupts must be enabled before waiting for the host command. VM0
-prints `VSPI VM0 BOOT` after UART setup (once), VM1 prints nothing unsolicited.
+UART setup precedes the primary timer detector so even a failed detector
+retains the host mode byte. VM0 retries `VSPI VM0 BOOT` every quarter second
+while waiting for mode, VM1 prints nothing unsolicited. Before sending mode,
+the host requires an exact BOOT line and all existing pCPU1/2/3 online
+announcements as fixed substrings: transport quiescence only, not guest readiness.
 The first byte accepted **only in the UART IRQ** selects `G` (gate-only), `S`
 (stress), or, in Task 2, `R` (full regression). Until that byte, retain failures
 but print nothing else. Then print `VSPI VMn ACTIVE`, report any latched error
@@ -165,7 +169,7 @@ and validating/storing bytes. There is no RX polling in the primary loop.
 Before command selection the one byte is the mode; afterwards expected byte
 at payload position `i` is `'a' + ((i + VSPI_VM_ID*7) % 26)`.
 Reject extra/mismatched bytes. Publish `rx_bytes` after processing each byte.
-Finish every real IRQ with EOIR, DIR, ISB. Empty IRQs during active input are
+Finish every real IRQ with EOIR, ISB in combined-EOI mode. Empty IRQs during active input are
 allowed; delayed/coalesced injection is not an IRQ-per-byte contract.
 Main runs only after its handler returns, so main-issued stage acknowledgements
 are necessarily after virtual interrupt completion.
@@ -247,7 +251,7 @@ batches (avoid READY 1 matching READY 10). Do not wait for a nonexistent
 second unsolicited boot banner.
 
 ```text
-wait VM0 BOOT
+wait VM0 BOOT and existing pCPU1/2/3 online announcements
 for vm in 0,1:
     if vm==1:
         write Ctrl-T (printf '\024' >&3); wait new 'hv> ' prompt
@@ -297,10 +301,10 @@ Change room check to `bool vuart_rx_has_room(struct vm *m)`; its sole caller
 already passes mutable `&vm[console_focus]`. New locks are `vuart.lock`,
 `vcpu.spi_lock`, and file-static `vgic_mmio_lock[NR_VMS]`.
 
-- [ ] **1. Implement the fixture's G mode and bounded runner first.** Follow
+- [x] **1. Implement the fixture's G mode and bounded runner first.** Follow
   the entry/CPU_ON/timer/IRQ/mode algorithms above; gate mode sends no payload.
   Add `vspi` and isolated `test-qemu-vspi` targets, not the full suite yet.
-- [ ] **2. Run the focused gate against unmodified production source.**
+- [x] **2. Run the focused gate against unmodified production source.**
 
 ```sh
 set -o pipefail
@@ -316,7 +320,7 @@ SVM_BIN2="$B/vspi/vspi-vm1.bin" sh tests/run_vspi_test.sh
   does not count as periodic progress); preserve the precise result. If it
   unexpectedly passes, inspect that VENG1 was zero during expiration and
   require the actual multi-tick test; do not infer coverage from silence.
-- [ ] **3. Fix only the physical frame mapping.** Include `vm_config.h` in
+- [x] **3. Fix only the physical frame mapping.** Include `vm_config.h` in
   `vgic_v3_mmio.c`; pass physical index to the existing helper without changing
   the logical shadow/frame index:
 
@@ -327,7 +331,7 @@ vgicr_write_sgi(m->config->pcpu_base + cpu, r, off, (u32)acc->data);
  * gic_ppi_set_enable(cpu, ...) argument to pcpu. Nothing else changes. */
 ```
 
-- [ ] **4. Re-run G green in a fresh build, then commit this attributable bugfix
+- [x] **4. Re-run G green in a fresh build, then commit this attributable bugfix
   with its focused test.** Use the command above with fresh `/tmp/vspi-gate-green-XXXXXX`
   and green log names. Require GATE PASS/DONE for both VMs and runner status 0.
   Stage only mapping/fixture/Makefile files; commit
@@ -435,7 +439,7 @@ Production behavior remains exactly Task 1's old vuart placement branch.
 **Interfaces:** Add command `R`, retaining G/S modes. Add guest single-writer
 `ipi_request`, `ipi_sent`, and `ipi_completed` monotonic counters. CPU1 services
 requests only after its stress rounds finish; INTID1 completion is published
-by CPU0's IRQ handler after EOIR/DIR/ISB. No additional hypercall or test-only
+by CPU0's IRQ handler after combined EOIR/ISB. No additional hypercall or test-only
 hypervisor hook.
 
 - [ ] **1. Extend R after STRESS PASS with the actual replay detector.**
@@ -669,3 +673,26 @@ means docs committed and reviewed by the writer, **not implementation accepted**
   is genuinely shared and locked regardless of accessing CPU.
 - Finite stress does not guarantee an unlocked-race reproduction; explicit mapping
   red/green and detector mutations are distinct evidence. No tests run in planning.
+
+## Task 1a measured evidence
+
+- Execution supervisor corrected the fixture-only plan assumption: combined
+  guest EOI completes/deactivates IRQs through EOIR+ISB. Existing TC-trapped
+  ICC_DIR_EL1 is not emulated; split-EOI guest support is deferred. No EL2
+  physical EOI policy or runtime trap handler changed.
+- Initial confounded red `/tmp/vspi-gate-red-qemu.log` had unsupported DIR
+  and compiler post-index MMIO (ISV=0); explicit fixture LDR/STR fixes the latter.
+  `/tmp/vspi-gate-supported-red-qemu.log` lost a pre-IMSC VM1 mode byte; UART
+  setup now precedes the timer detector. Neither log is mapping evidence.
+- Initial mapped run `/tmp/vspi-gate-green-qemu.log` caught BOOT interleaving
+  with the existing secondary online printk. Bounded BOOT retry plus host
+  startup-announcement wait was approved; acceptance markers remain exact.
+- Final supported red: `/tmp/vspi-gate-final-red-qemu.log`, exit 1 with
+  VM0 GATE PASS/DONE and VM1 ACTIVE/FAIL 1. Used unmapped hypervisor from
+  `/tmp/vspi-gate-ready-red-bytBMR` (all/offset build log
+  `/tmp/vspi-gate-ready-red-build.log`) plus rebuilt finalized fixtures
+  (`/tmp/vspi-gate-final-red-fixture-build.log`).
+- Fresh mapped green: /tmp/vspi-gate-final-green-qHoFgP,
+  `/tmp/vspi-gate-final-green-build.log` (all/vspi/host+target offsets),
+  `/tmp/vspi-gate-final-green-qemu.log` (both GATE PASS/DONE, exit 0).
+  This specifically establishes early-timer mapping, not race absence.

@@ -12,6 +12,7 @@
 #include <printk.h>
 #include <board.h>
 #include <vm.h>
+#include <vm_config.h>
 #include <gic_v3.h>              /* GICR_SGI_OFFSET, GICR_ISENABLER0 (physical) */
 #include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
@@ -284,7 +285,7 @@ static u32 vgicr_read_sgi(struct vgicv3_redist *r, u64 off)
     }
 }
 
-static void vgicr_write_sgi(u32 cpu, struct vgicv3_redist *r, u64 off, u32 val)
+static void vgicr_write_sgi(u32 pcpu, struct vgicv3_redist *r, u64 off, u32 val)
 {
     switch (off) {
     case VGICR_IGROUPR0:   r->igroupr0   = val;  break;
@@ -296,7 +297,7 @@ static void vgicr_write_sgi(u32 cpu, struct vgicv3_redist *r, u64 off, u32 val)
          * fires before the guest's vGIC is up; here the guest's own enable
          * brings it back, by which point VENG1 is set. Idempotent on cpu0. */
         if (val & (1U << BOARD_VTIMER_IRQ))
-            gic_ppi_set_enable(cpu, BOARD_VTIMER_IRQ, true);
+            gic_ppi_set_enable(pcpu, BOARD_VTIMER_IRQ, true);
         break;
     case VGICR_ICENABLER0: r->isenabler0 &= ~val; break;  /* clear */
     case VGICR_ISPENDR0:   r->ispendr0   |= val; break;
@@ -338,7 +339,7 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
 
     if (acc->is_write) {
         if (sgi)
-            vgicr_write_sgi(cpu, r, off, (u32)acc->data);
+            vgicr_write_sgi(m->config->pcpu_base + cpu, r, off, (u32)acc->data);
         else
             vgicr_write_rd(r, off, (u32)acc->data);
     } else {

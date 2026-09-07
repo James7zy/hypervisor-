@@ -133,6 +133,27 @@ $(SVM4_BIN): $(SVM4_ELF)
 
 svm4: $(SVM4_BIN)
 
+.PHONY: vspi test-qemu-vspi
+VSPI_BINS := $(BUILD_DIR)/vspi/vspi-vm0.bin $(BUILD_DIR)/vspi/vspi-vm1.bin
+.SECONDARY: $(VSPI_BINS:.bin=.elf)
+vspi: $(VSPI_BINS)
+
+$(BUILD_DIR)/vspi/vspi-vm%.elf: tests/vspi/vspi_main.c tests/vspi/vspi_entry.S tests/vspi/vspi_vectors.S tests/vspi/vspi.lds
+	@mkdir -p $(dir $@)
+	$(CC) $(SVM_CFLAGS) -mgeneral-regs-only -mstrict-align -fno-stack-protector \
+	      -DVSPI_VM_ID=$* -T tests/vspi/vspi.lds -o $@ \
+	      tests/vspi/vspi_main.c tests/vspi/vspi_entry.S tests/vspi/vspi_vectors.S
+
+$(BUILD_DIR)/vspi/vspi-vm%.bin: $(BUILD_DIR)/vspi/vspi-vm%.elf
+	$(OBJCOPY) -O binary $< $@
+
+VSPI_BUILD_DIR ?= build/test-vspi
+test-qemu-vspi:
+	$(MAKE) BUILD_DIR=$(VSPI_BUILD_DIR) HV_GUEST=svm_dual all vspi
+	HYPERVISOR_ELF=$(VSPI_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(VSPI_BUILD_DIR)/vspi/vspi-vm0.bin \
+	SVM_BIN2=$(VSPI_BUILD_DIR)/vspi/vspi-vm1.bin sh tests/run_vspi_test.sh
+
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
 # One DTS, one DTB per VM: they differ ONLY in the hv.vm= bootargs token, which
