@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: TBD */
 #include <types.h>
 #include <vm.h>
+#include <vm_config.h>
+#include <percpu.h>
 #include <vgic.h>
+#include <vgic_sgi.h>
 #include <asm/sysreg.h>
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
@@ -50,9 +53,7 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
 
 /* Shared encoding for LR1 (the PL011 SPI list register): pending, Group-1,
  * software (HW=0), fixed device-class priority 0xA0. Single place that builds
- * this bit pattern -- both vgic_inject_spi (same-core: shadow + live write)
- * and vgic_set_spi_shadow (cross-core: shadow write only) call this so the
- * encoding can never drift between the two paths. */
+ * this bit pattern for both local and remote vgic_inject_spi delivery. */
 static u64 vgic_spi_lr_encode(u32 intid)
 {
     return ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
@@ -70,34 +71,34 @@ static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
 /* Software SPI injection into LR1 (the vtimer owns LR0 and is re-injected
  * every tick, so sharing LR0 would clobber this before the guest takes it).
  *
- * HW=0: as of M5 slice 2, EL2 owns and fully drains+deactivates the physical
- * PL011 IRQ itself (irq_handler.c) before this is ever called, so there is no
- * physical Active state left for an HW=1 LR to release via the deactivate
- * linkage -- using HW=1 here (as the old passthrough design did, when the
- * physical line was deliberately left Active for exactly that linkage) mints
- * a virtual/physical mismatch that wedges after the first couple of
- * injections. Purely-software Group-1 injection, same shape as
- * vgic_inject_sw/vgic_inject_sgi. LR1 is saved/restored by
- * vgic_{save,restore}.
- *
- * Same-core path: this writes the live register itself immediately, so
- * nothing is left for a later vgic_reload_spi_lr() to do -- clear
- * spi_shadow_pending right back out after the live write (vgic_set_spi_shadow
- * always sets it) so a later, unrelated kick-SGI to this same pCPU does not
- * find it still set and replay this now-already-live (and possibly since
- * consumed) encoding a second time. */
-void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
+ * HW=0: EL2 owns the physical PL011, drains it and deactivates its IRQ in
+ * irq_handler.c; guest completion must not release physical Active state.
+ * Only the current target can use this PE's live LR1. Its live write and
+ * pending clear stay under spi_lock so a later unrelated kick cannot replay
+ * the shadow or clear a newer publication. Remote publication uses the same
+ * lock, then orders the shadow before notifying the statically pinned PE. */
+void vgic_inject_spi(struct vcpu *target, u32 intid)
 {
-    spin_lock(&vcpu->spi_lock);
-    vgic_set_spi_shadow_locked(vcpu, intid);
-    SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
-    vcpu->spi_shadow_pending = false;
-    spin_unlock(&vcpu->spi_lock);
+    bool local = target == current_vcpu();
+    u32 pcpu = target->owner->config->pcpu_base + target->vcpu_idx;
+
+    spin_lock(&target->spi_lock);
+    vgic_set_spi_shadow_locked(target, intid);
+    if (local) {
+        SYSREG_WRITE(ICH_LR1_EL2, target->ich_lr[1]);
+        target->spi_shadow_pending = false;
+    }
+    spin_unlock(&target->spi_lock);
+
+    if (!local) {
+        asm volatile("dsb ish" ::: "memory");
+        vgic_kick_pcpu(pcpu);
+    }
 }
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
  * pCPU from its own current vCPU's shadow ich_lr[1], but ONLY if
- * vgic_set_spi_shadow() actually left something freshly pending for this
+ * remote vgic_inject_spi() left something freshly pending for this
  * vCPU. Test-and-clear on spi_shadow_pending: called unconditionally on
  * every kick-SGI (el2_irq_handler), including ones that are ordinary
  * SGI/IPI traffic with nothing to do with the console, so without this gate
@@ -111,18 +112,6 @@ void vgic_reload_spi_lr(struct vcpu *vcpu)
         SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
         vcpu->spi_shadow_pending = false;
     }
-    spin_unlock(&vcpu->spi_lock);
-}
-
-/* Write only the SHADOW ich_lr[1] for `vcpu` and arm spi_shadow_pending so the
- * kicked owning pCPU's vgic_reload_spi_lr() knows to actually reload the live
- * register instead of skipping (see its comment). Safe to call from any pCPU
- * regardless of which vCPU it currently owns -- does not touch any live
- * system register. */
-void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid)
-{
-    spin_lock(&vcpu->spi_lock);
-    vgic_set_spi_shadow_locked(vcpu, intid);
     spin_unlock(&vcpu->spi_lock);
 }
 

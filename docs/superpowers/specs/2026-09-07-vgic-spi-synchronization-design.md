@@ -1,6 +1,12 @@
 # Static vSPI synchronization prerequisite design
 
-**Status:** Implemented and locally validated; independent prerequisite review pending.
+**Status:** Implemented and independently accepted at `91712ed` (review run
+`e5e42319-e0bf-4007-ad86-5dca9886677b`, structured verdict `clear`, verified by
+the execution supervisor). The source argument and Task 1 evidence below
+record the synchronized old producer. Task 2's regression gate was subsequently
+accepted at `857abfc`; Task 3 consolidates the same protocol in `vgic_inject_spi`
+and removes the public shadow setter. See the parent delivery spec/plan for
+current implementation status; final delivery review/full validation remain pending.
 Independent prerequisite to
 [the approved delivery design](2026-09-07-vgic-spi-delivery-deepening-design.md).
 Execution baseline: `7cc4e5771ce1d655430fa67643225aef5b7cec47`.

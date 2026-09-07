@@ -14,9 +14,9 @@ void vgic_sgi_drain(u32 cpu);
 
 /* Force pCPU `cpu` into EL2 via the physical kick SGI (BOARD_KICK_SGI). Used
  * for any cross-core "make this pCPU notice new shadow state and reload it"
- * need -- the SGI/IPI path (vgic_sgi_trap) and the vuart PL011-focus cross-
- * core injection path (vuart_rx, M5 slice 3) both need it. Does not mark
- * anything pending in the SGI bitmap. */
+ * need -- the SGI/IPI path and remote PL011 SPI delivery
+ * (vuart_rx -> vgic_inject_spi -> kick -> vgic_reload_spi_lr) share the
+ * physical mechanism. Does not mark anything pending in the SGI bitmap. */
 void vgic_kick_pcpu(u32 cpu);
 
 /* Force every ONLINE pCPU of VM `m` other than `caller_pcpu` into EL2 via the

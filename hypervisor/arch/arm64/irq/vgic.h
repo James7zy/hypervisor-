@@ -33,36 +33,29 @@ void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio);
  * the virtual IRQ releases the physical one. See docs/adr/0001-*. */
 void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 
-/* Inject the supported PL011 SPI into fixed LR1: software HW=0, Group1,
- * priority 0xA0. Holds spi_lock through payload, live write and pending clear.
- * SPI operations require initialized state and masked EL2 IRQ context.
+/* Initiate delivery of the supported PL011 SPI: fixed LR1, software HW=0,
+ * Group1, priority 0xA0. Requires initialized target/owner/config, a valid
+ * vcpu_idx, stable static 1:1 pinning and EL2 trap/IRQ context with IRQs masked.
  *
- * MUST be called on the pCPU that currently owns `vcpu` (i.e. from that
- * vCPU's own trap/IRQ context) -- it writes the LIVE ICH_LR1_EL2 of whichever
- * vCPU is actually loaded on the CALLING core, not necessarily `vcpu` itself.
- * Only the shadow vcpu->ich_lr[1] write is safe cross-core; see
- * vgic_reload_spi_lr for the cross-core companion (M5 slice 3, PL011 console
- * focus routed to a VM whose vCPU0 is not on the console-owning pCPU). */
-void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
+ * Writes live LR1 only when target == current_vcpu(); otherwise internally
+ * publishes, orders and kicks owner->config->pcpu_base + vcpu_idx for reload.
+ * Payload, pending and any live write/consumption share the target's spi_lock.
+ * A remote target must be online and able to handle the kick. No startup,
+ * offline or lifecycle guarantee, scheduling support, or IRQ queue is added.
+ * Return means delivery initiated, not guest acknowledgement; notifications
+ * may coalesce (no IRQ-per-character guarantee). */
+void vgic_inject_spi(struct vcpu *target, u32 intid);
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
  * pCPU from its own current vCPU's shadow ich_lr[1]. Called unconditionally by
  * the kicked target pCPU (el2_irq_handler's kick-SGI branch) on EVERY kick,
  * including ones that are ordinary SGI/IPI traffic -- it test-and-clears
  * vcpu->spi_shadow_pending and only actually reloads the live register when
- * that flag was set (i.e. vgic_set_spi_shadow ran since the last reload/
- * inject). This prevents replaying a stale, already-consumed shadow LR1 on an
- * unrelated later kick. Payload, live write and consumption share spi_lock. */
+ * that flag was set by remote vgic_inject_spi since the last consumption.
+ * This prevents replaying a stale, already-consumed shadow LR1 on an unrelated
+ * later kick. Payload, live write and consumption share spi_lock; caller must
+ * pass its current vCPU in masked EL2 IRQ context. */
 void vgic_reload_spi_lr(struct vcpu *vcpu);
-
-/* Write only the SHADOW ich_lr[1] for `vcpu` (same encoding as
- * vgic_inject_spi) WITHOUT touching any live system register, and arm
- * vcpu->spi_shadow_pending. Safe to call from any pCPU regardless of which
- * vCPU it currently owns. The pCPU that owns `vcpu` must be kicked
- * (vgic_kick_pcpu) so it calls vgic_reload_spi_lr on itself, sees the pending
- * flag set, and actually presents the interrupt. The caller orders this locked
- * publication before notification with dsb ish, outside the lock. */
-void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid);
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).
  * Software (HW=0) Group-1, used by the cross-core IPI path (vgic_sgi.c). */

@@ -69,17 +69,15 @@ void el2_irq_handler(void)
         /*
          * M5 slice 3: reload ICH_LR1_EL2 (the PL011 vSPI LR) from this
          * pCPU's own current vCPU shadow state. Covers the cross-core
-         * console-focus injection path (vuart_rx -> vgic_set_spi_shadow +
-         * vgic_kick_pcpu, hypervisor/dm/vuart.c): the pCPU servicing the
-         * physical UART IRQ cannot write another pCPU's LIVE list register,
-         * so it only updates the shadow and kicks the owner here to do the
-         * live reload itself.
+         * console-focus injection path (vuart_rx -> vgic_inject_spi ->
+         * vgic_kick_pcpu): vGIC publishes and orders remote state before
+         * kicking the owner here to write its own live list register.
          *
          * Called unconditionally on EVERY kick-SGI, including ordinary
          * SGI/IPI traffic that has nothing to do with the console -- safe
          * because vgic_reload_spi_lr() internally test-and-clears
          * vcpu->spi_shadow_pending and only actually reloads the live
-         * register when vgic_set_spi_shadow() armed it since the last
+         * register when remote vgic_inject_spi() armed it since the last
          * reload/inject. Without that gate this call would blindly replay a
          * stale (possibly already-consumed-by-the-guest) shadow LR1 on any
          * later, unrelated kick. Separate from and does not touch

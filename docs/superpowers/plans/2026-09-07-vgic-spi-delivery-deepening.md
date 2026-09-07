@@ -539,10 +539,10 @@ u32 intid)`; private locked helper remains internal; remove public
 `vgic_set_spi_shadow()` definition/declaration after deleting its sole external
 caller. Keep `void vgic_reload_spi_lr(struct vcpu *)` and physical kick API.
 
-- [ ] **1. Verify the green synchronized-old baseline and inspect its diff.**
+- [x] **1. Verify the green synchronized-old baseline and inspect its diff.**
   No synchronization/mapping defect remains unresolved; source review must
   approve Task 1, behavior review must approve Task 2. Do not restart full suite.
-- [ ] **2. Deepen the existing producer with precisely this algorithm.** Add
+- [x] **2. Deepen the existing producer with precisely this algorithm.** Add
   `percpu.h`, `vm_config.h`, and `vgic_sgi.h` includes where vGIC now needs them.
 
 ```c
@@ -571,7 +571,7 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
   masked EL2 context, PL011-only fixed encoding, initiation-not-guest-ack return,
   live write only for current target, remote target online/kick-capable precondition,
   and no startup/offline/lifecycle guarantees in `vgic.h`.
-- [ ] **3. Remove vuart delivery knowledge and public shadow wrapper.** After
+- [x] **3. Remove vuart delivery knowledge and public shadow wrapper.** After
   the already-locked device snapshot, the complete producer code becomes:
 
 ```c
@@ -585,7 +585,7 @@ if (notify)
   `vgic_set_spi_shadow_locked()` static, delete only its public locking wrapper.
   Update IRQ/kick comments to name `vuart_rx -> vgic_inject_spi -> kick/reload`;
   do not modify ack/deactivate, SGI draining, VM-off handling or timer branches.
-- [ ] **4. Fresh targeted regression and discoverability audit.**
+- [x] **4. Fresh targeted regression and discoverability audit.**
 
 ```sh
 B=$(mktemp -d /tmp/vspi-deep-green-XXXXXX)
@@ -619,7 +619,10 @@ make test 2>&1 | tee /tmp/vspi-final-make-test.log
   and vspi regression. This is the reserved full suite execution. If it fails,
   retain the failure, stop/escalate and use targeted diagnosis; no unsupported
   success claim or silent repeated full-suite budget consumption.
-- [ ] **6. Commit refactoring separately.** Stage only Task 3 files plus
+- [x] **6. Commit refactoring separately.** Execution supervisor assigned this
+  commit after targeted validation, **before** step 5's reserved full suite and
+  final reviewer gates; this checkbox is implementation delivery, not final
+  acceptance. Stage only Task 3 files plus
   accurate evidence docs; commit `refactor(vgic): own static SPI delivery orchestration`.
   Report exact commits/files/logs, source proof limits, all mutation outcomes,
   no staged files and required reviewer gate. No push or follow-on scheduler work.
@@ -699,10 +702,13 @@ means docs committed and reviewed by the writer, **not implementation accepted**
   `/tmp/vspi-gate-final-green-qemu.log` (both GATE PASS/DONE, exit 0).
   This specifically establishes early-timer mapping, not race absence.
 
-## Task 1b completion (prerequisite review pending)
+## Task 1b completion (prerequisite review accepted)
 
-All implementation/validation steps are complete; marking step 10 complete
-means committed for the required independent review, **not reviewer acceptance**.
+All implementation/validation steps are complete. Independent reviewer run
+`e5e42319-e0bf-4007-ad86-5dca9886677b` accepted the synchronization gate at
+`91712edaf56fc54a05760be4b1b9bff660cd4242`; supervisor verified its native
+structured verdict `clear` before Task 3. The evidence below records Task 1's
+state at completion, not the later producer structure.
 See the synchronization design's implementation evidence for the full access
 inventory, actual lock graph, init/live-VMCR exclusions, final clean build
 directories and logs. Unlocked stress failed with guest GIC_STATE before locks;
@@ -717,12 +723,15 @@ all/vspi/offset build and final-layout five stress logs are recorded in the
 synchronization design. No source edits followed those runs.
 
 
-## Task 2 completion (regression review pending)
+## Task 2 completion (regression review accepted)
 
 Implemented only the regression on synchronized old production at `91712ed`.
 The standalone test commit retains vuart's local/shadow/kick branch and the
-public shadow setter unchanged. Steps marked complete mean implemented and
-validated for review, not review acceptance or permission to begin Task 3.
+public shadow setter unchanged. Independent reviewer run
+`e05670d1-a9d2-4aad-9e29-079436768d8a` accepted the regression gate at
+`857abfca1a63cb16e44ae9bcf3a2113c4f738649`; supervisor verified its native
+structured verdict `clear` and explicitly authorized Task 3. The evidence
+below records Task 2's unchanged old-producer baseline.
 
 - `R` retains the existing interrupt-only mode/payload consumer, exact 4096
   byte sequence per VM, CPU_ON/stacks/vectors, shared-GIC/UART stress and
@@ -788,3 +797,88 @@ formal synchronization proof. Task 1's independent source-level argument and
 review remain essential. Fixed LR capacity/coalescing, static pinning,
 startup/offline guarantees, Linux, lifecycle and scheduling remain outside
 this regression's claims. Task 3 and the reserved full suite remain next.
+
+## Task 3 implementation delivery (final review/validation pending)
+
+Supervisor confirmed both prerequisite reviews above before production edits.
+The native review reports are respectively:
+`/tmp/pi-subagents-uid-1000/async-subagent-runs/e5e42319-e0bf-4007-ad86-5dca9886677b/structured-output/pi-subagent-structured-gw7d3N/output.json`
+and
+`/tmp/pi-subagents-uid-1000/async-subagent-runs/e05670d1-a9d2-4aad-9e29-079436768d8a/structured-output/pi-subagent-structured-dCczkv/output.json`.
+Task 3 was expressly assigned to commit after focused checks; step 5's one
+full suite, Task 3 gate and final Standards/Spec reviews are still pending.
+
+### Source-level preservation argument
+
+- `vgic_inject_spi(target, intid)` now implements the exact planned algorithm:
+  local iff `target == current_vcpu()`, physical slot
+  `target->owner->config->pcpu_base + target->vcpu_idx`. The existing caller
+  still selects console vCPU0. Under current stable 1:1 mapping, that pointer
+  comparison is equivalent to the old physical-index comparison; no
+  non-current-same-pCPU case or runtime placement change is supported.
+- The same private encoder/helper publishes LR1 and pending while holding
+  the same `spi_lock`. Local live write and pending clear stay inside that
+  critical section. Remote publication unlocks before `dsb ish` and kick,
+  exactly as the old caller/wrapper protocol. Consumer reload is unchanged:
+  lock, conditional live write/clear, unlock. Thus no new access gap allows
+  a consumer to clear a newer publication; delayed kicks see false after
+  consumption unless a new publication has intervened. Coalescing is unchanged.
+- vuart's device critical section, RIS/IMSC snapshot and unlock are unchanged;
+  the subsequent masked decision calls the existing producer once. There is
+  no nested device/SPI lock, no lock held across kick, printing or target wait.
+  The new producer does not mask/unmask EL2 IRQs. Boot init, initial-only
+  restore and dead save are unchanged, so Task 1's exclusions still apply.
+- Fixed LR1 HW=0/Group1/0xA0 encoding and LR0/LR2 code are unchanged.
+  `irq_handler.c` and `vgic_sgi.c/.h` change only cross-reference comments;
+  target reload, ack/deactivate, SGI bitmap and VM-off kick behavior are intact.
+  The misleading old claim that PL011 deactivation preceded injection was
+  corrected: deactivation remains after physical RX draining in the handler.
+- Public `vgic_set_spi_shadow` definition/declaration and its sole external
+  use are removed; only the static locked helper remains. vuart removes only
+  the newly orphaned vm_config/vgic_sgi includes, retaining percpu for MMIO.
+  Header contract states initialization/index, masked context, supported
+  PL011-only encoding, current-target live eligibility, online/kick-capable
+  remote precondition, initiation-not-ack return and lifecycle limitations.
+
+### Commands and evidence
+
+All build directories were freshly created with `mktemp -d`, not reused after
+header edits. Native commands exited zero with no warning diagnostics:
+
+| Command | Build log |
+|---|---|
+| `make BUILD_DIR=/tmp/vspi-deep-normal-t0OUvC all check-offsets check-offsets-target` | `/tmp/vspi-deep-normal-build.log` |
+| `make BUILD_DIR=/tmp/vspi-deep-green-EdezIa HV_GUEST=svm_dual all vspi check-offsets check-offsets-target` | `/tmp/vspi-deep-build.log` |
+| `make BUILD_DIR=/tmp/vspi-deep-single-METgd1 HV_GUEST=svm all check-offsets check-offsets-target` | `/tmp/vspi-deep-single-build.log` |
+
+For each `mode` in `regression gate stress`, ran:
+
+```sh
+B=/tmp/vspi-deep-green-EdezIa
+VSPI_MODE="$mode" VSPI_LOG="/tmp/vspi-deep-$mode.log" \
+HYPERVISOR_ELF="$B/hypervisor.elf" SVM_BIN="$B/vspi/vspi-vm0.bin" \
+SVM_BIN2="$B/vspi/vspi-vm1.bin" sh tests/run_vspi_test.sh
+```
+
+All three returned zero/`VSPI ALL PASS`; corresponding runner output is at
+`/tmp/vspi-deep-{regression,gate,stress}-run.log`. R required 128 RX batches
+(4096 ordered bytes), shared-GIC/UART stress, DRAINED and all 16 sibling IPI
+and quiet windows, REPLAY PASS/DONE per VM. G and S retained their own markers.
+No fixture, runner or Makefile edit or permanent mutation was made in Task 3.
+Old-producer mutation results remain Task 2's independent sensitivity evidence.
+
+`/tmp/vspi-deep-source-audit.log` records the Task 3 grep audit: shadow setter
+matches only the private helper definition/use in vgic.c; forbidden physical
+placement/LR/barrier/kick terms have zero matches in vuart.c. It also inventories
+LR1/pending/init/save/restore and confirms no diff in tests, Makefile,
+hypervisor/include or vgic_v3_mmio.c. `git diff --check` passed.
+An initial inspection guessed the wrong percpu.h directory; `find` located
+`hypervisor/include/percpu.h`, which was read before builds. No native build,
+test or setup failure occurred and no execution-mode fallback was used.
+
+Finite guest stress/regression is not a formal race proof; the accepted
+source argument above remains necessary. No scheduler, queue, lifecycle fix,
+startup/offline delivery guarantee or Linux gate is claimed. No full
+`make test` was run in this stage. The required scratch review package is
+regenerated after the standalone refactor commit, with baseline-to-HEAD
+committed diff and an actually checked empty index.

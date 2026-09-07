@@ -1,7 +1,7 @@
 # vGIC 虚拟 SPI 投递：深化现有 module
 
-> **状态：** 范围与 interface 方向已获用户确认；本文待审，未实施。
-> **基线：** `d29047f`，当前 M10 的静态 1:1 VCPU/pCPU 绑定。
+> **状态：** 已实施职责收拢并通过定向验证；独立同步与旧结构回归门槛已接受。最终职责收拢审查、Standards/Spec 审查及完整验证待完成。
+> **基线：** 设计基线 `d29047f`；执行基线 `7cc4e5771ce1d655430fa67643225aef5b7cec47`，当前 M10 的静态 1:1 VCPU/pCPU 绑定。
 > **顺序：** 先独立验证同步前置条件，再做保持行为的职责收拢；不替代或重排 M11。
 
 ## 1. 已确认的决定
@@ -15,9 +15,10 @@
 
 ## 2. 问题与收益
 
-`hypervisor/dm/vuart.c:185–207` 不仅处理串口，还理解目标 pCPU、实时 LR1
-写入限制、影子状态发布、`dsb ish` 和 physical kick。与此同时，影子编码、
-实时写入及防重放已经由 `hypervisor/arch/arm64/irq/vgic.c:80–114` 管理。
+重构前，`hypervisor/dm/vuart.c` 的 `vuart_rx()` 不仅处理串口，还理解目标
+pCPU、实时 LR1 写入限制、影子状态发布、`dsb ish` 和 physical kick。
+与此同时，影子编码、实时写入及防重放已经由 `hypervisor/arch/arm64/irq/vgic.c`
+管理。实现后这些投递义务统一由已有 `vgic_inject_spi()` 承担。
 
 这个 interface 对跨核生产者仍然 shallow：调用者必须编排实现顺序。
 深化的目标是减少这些调用义务，而非减少行数或声称性能提升。
@@ -131,8 +132,9 @@ LR1 影子状态与 pending 标志的发布/消费也已经同步正确**。串�
 5. 明确初始化/重置与运行期访问不会交错；检查所有当前状态写入者，不引入未来调度器 save/restore 并发的假设。
 
 现有 spinlock 本身不屏蔽 IRQ；不能在迁移逻辑时偷偷改变 EL2 的中断屏蔽前提。
-S0 的既有测试段仍未决定采用何种压力证据或同步论证：这需要在独立同步设计中
-由维护者确认，不能用本次 guest 回归全部通过代替。
+S0 的既有测试段未决定采用何种压力证据或同步论证；本次独立同步设计已按
+执行裁决提供源码同步论证与有界 guest 压力证据，并通过独立门槛审查。
+不能用本次 guest 回归全部通过代替该论证。
 
 若门槛未满足，先完善独立同步设计/修复，不在这次职责收拢中顺手发明锁方案。
 S0 的具体实现与验收取舍不由本文代定；S0 的名义完成也不能代替上述证据。
@@ -174,7 +176,8 @@ physical kick。探测串行执行，避免固定 LR2 的容量限制干扰结�
 新 fixture 还需用一次受控的投递抑制或防重放失效实验验证检测能力，实验改动不保留。
 
 既有 `make test` 继续保留。实现涉及头文件时执行 clean build，避免无头文件依赖跟踪
-导致旧对象掩盖结果。QEMU 与 Linux 均未在这次设计讨论中运行。
+导致旧对象掩盖结果。最初设计讨论未运行 QEMU 或 Linux；执行期已运行下述
+QEMU 定向检查，未增加或运行 Linux gate。
 
 ## 7. 文件范围与不做的事
 
@@ -200,3 +203,23 @@ PSCI 生命周期或静态 Board 配置；不新增通用 IRQ 队列、LR alloca
 - [M11 设计](2026-08-10-m11-vcpu-context-switch-design.md)：同步门槛先于重构；不提前引入 S3 以后的切换语义，不提前移动 S8。
 
 不推翻既有 ADR；本次是已有职责的收拢，且容易局部回退，因此不另建 ADR。
+
+## 9. 执行状态与证据
+
+- 同步门槛在 `91712ed` 被独立审查接受（run
+  `e5e42319-e0bf-4007-ad86-5dca9886677b`）；旧生产结构回归门槛在
+  `857abfc` 被接受（run `e05670d1-a9d2-4aad-9e29-079436768d8a`）。
+  执行 supervisor 已核对原生 structured reports，确认允许 Task 3。
+- Task 3 保持同一 `spi_lock` 临界区及发布后 `dsb ish`/kick 顺序；
+  vuart 仅保留设备锁内快照、解锁后向 `&m->vcpu[0]` 调用一次注入。
+  公开 shadow setter 已删除；IRQ reload、SGI bitmap、生命周期 kick、
+  初始化/restore 限制和固定 LR 编码未改变。测试与 Makefile 未改动。
+- 三个全新 BUILD_DIR 的 normal、SVM single、SVM dual 编译均无警告，
+  host/target offsets 均通过：`/tmp/vspi-deep-{normal,single}-build.log`、
+  `/tmp/vspi-deep-build.log`。定向 G/S/R 均为 `VSPI ALL PASS`：
+  `/tmp/vspi-deep-{gate,stress,regression}.log`，对应 `-run.log` 保存 runner 输出。
+- 具体命令、源码论证和目录见 [实施计划](../plans/2026-09-07-vgic-spi-delivery-deepening.md)
+  Task 3 evidence；旧结构的 RX 抑制、两 VM replay FAIL 7 实验仍作为检测灵敏度证据。
+  本阶段未重跑故障注入，也未执行保留的完整 `make test`。
+- 有界 QEMU 调度证据不是形式化 race proof。最终审查/完整 suite 待完成，
+  不声称调度、offline/startup 投递可靠性或新生命周期语义。

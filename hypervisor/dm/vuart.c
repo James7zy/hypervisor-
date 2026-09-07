@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: TBD */
 /*
- * PL011 "vuart": trap-and-emulate console for VM0's guest (M5 slice 2).
+ * PL011 "vuart": per-VM trap-and-emulate console.
  *
  * EL2 now owns the physical PL011 exclusively (see uart_pl011.c / print.c);
  * the guest's IPA window at BOARD_UART_BASE is punched out of Stage-2
@@ -11,18 +11,15 @@
  *
  * Registered ONCE globally on the M3.1 MMIO bus; the handler resolves the
  * faulting VM per-access via current_vcpu()->owner, matching vgic_v3_mmio.c's
- * idiom. Single VM, single vCPU-0 injection target (console focus / VM1
- * arrive in slice 3).
+ * idiom. Each VM's vCPU0 is its console interrupt target; vGIC owns delivery.
  */
 #include <types.h>
 #include <printk.h>
 #include <board.h>
 #include <percpu.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include "../arch/arm64/vmexit/mmio.h"
 #include "../arch/arm64/irq/vgic.h"
-#include "../arch/arm64/irq/vgic_sgi.h"
 #include "vuart.h"
 
 /* ── PL011 register offsets this model implements ── */
@@ -189,27 +186,6 @@ void vuart_rx(struct vm *m, u8 ch)
     bool notify = (u->imsc & VUART_RIS_RX_MASK) != 0;
     spin_unlock(&u->lock);
     /* Mask decision linearizes at the snapshot; no retroactive unmask delivery. */
-    if (notify) {
-        /*
-         * M5 slice 3: the physical PL011 IRQ (and hence this whole call) is
-         * always serviced on the pCPU that owns the physical UART (CPU0);
-         * with console focus now routable to VM1, the target vCPU0 may live
-         * on a DIFFERENT pCPU than the one running this code.
-         * vgic_inject_spi writes the LIVE ICH_LR1_EL2 of whichever vCPU is
-         * actually loaded on the CALLING core -- correct only when the
-         * target vCPU IS the caller's own current vCPU (VM0's steady state,
-         * unchanged). For any other VM, only the shadow ich_lr[1] write is
-         * safe here; the owning pCPU must reload it itself once kicked into
-         * EL2 (vgic_reload_spi_lr, called from el2_irq_handler's kick-SGI
-         * branch), the same cross-core pattern already used for SGI/IPI.
-         */
-        u32 target_pcpu = m->config->pcpu_base;   /* vCPU0 always owns console injection */
-        if (target_pcpu == current_vcpu_id()) {
-            vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
-        } else {
-            vgic_set_spi_shadow(&m->vcpu[0], BOARD_PL011_IRQ);
-            asm volatile("dsb ish" ::: "memory");
-            vgic_kick_pcpu(target_pcpu);
-        }
-    }
+    if (notify)
+        vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
 }

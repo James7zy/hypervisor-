@@ -104,9 +104,9 @@ void vgic_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
     }
 }
 
-/* Exported single-pCPU kick (M5 slice 3): thin wrapper so other files (e.g.
- * vuart.c's cross-core PL011 injection) can force one specific pCPU into EL2
- * without duplicating the ICC_SGI1R_EL1 pattern. */
+/* Exported single-pCPU kick: vgic_inject_spi uses this after publishing and
+ * ordering remote PL011 state. The target reloads via vgic_reload_spi_lr;
+ * this notification neither publishes SPI state nor marks the SGI bitmap. */
 void vgic_kick_pcpu(u32 cpu)
 {
     kick_pcpu(cpu);
