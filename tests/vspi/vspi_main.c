@@ -23,6 +23,11 @@ enum failure {
 };
 static u64 freq;
 static u32 errors[2], timer_count[2], secondary_ready, mode, uart_irqs, rx_bytes;
+static u32 arrived[2], batch_start, stress_done[2];
+#define BATCHES 128U
+#define BATCH_BYTES 32U
+#define ROUNDS_PER_BATCH 32U
+#define TOTAL_BYTES (BATCHES * BATCH_BYTES)
 extern char vspi_vectors[], vspi_secondary_entry[];
 /* Explicit addressing keeps MMIO within the EL2 ISV-valid decoder subset. */
 static void w32(u64 a, u32 v) { __asm__ volatile("str %w0, [%1]" :: "r"(v), "r"(a) : "memory"); }
@@ -86,14 +91,18 @@ void vspi_irq_handler(void)
     } else if (id == UART_INTID && c == 0) {
         store(&uart_irqs, load(&uart_irqs) + 1);
         w32(UART + 0x44, RX_MASK);
+        u64 start = now();
         while (!(r32(UART + 0x18) & RXFE)) {
+            if (now() - start >= 5 * freq) { fail(c, DEADLINE); break; }
             u32 ch = r32(UART) & 0xff;
             if (!load(&mode)) {
-                if (ch != 'G') fail(c, RX_DATA);
+                if (ch != 'G' && ch != 'S') fail(c, RX_DATA);
                 store(&mode, ch);
             } else {
-                fail(c, RX_DATA);
-                store(&rx_bytes, load(&rx_bytes) + 1);
+                u32 i = load(&rx_bytes);
+                if (i >= TOTAL_BYTES || ch != 'a' + ((i + VSPI_VM_ID * 7) % 26))
+                    fail(c, RX_DATA);
+                store(&rx_bytes, i + 1);
             }
         }
     } else { fail(c, UNEXPECTED_IRQ); }
@@ -106,6 +115,115 @@ void vspi_exception(void)
     fail(cpu(), EXCEPTION);
     idle();
 }
+/* All handshakes have counter deadlines, independent of working IRQ timers. */
+static void check_wait(u32 c, u64 start)
+{
+    if (now() - start >= 5 * freq) fail(c, DEADLINE);
+    if (load(&errors[0]) || load(&errors[1])) {
+        if (c == 0) report_error();
+        idle();
+    }
+}
+static void barrier(u32 c, u32 *phase)
+{
+    store(&arrived[c], ++*phase);
+    u64 start = now();
+    while (load(&arrived[1 - c]) < *phase) check_wait(c, start);
+    check_wait(c, start);
+}
+static void numbered(const char *s, u32 n)
+{
+    puts("VSPI VM"); decimal(VSPI_VM_ID); puts(" "); puts(s); puts(" ");
+    decimal(n); puts("\n");
+}
+static u64 r64(u64 a)
+{
+    u64 v; __asm__ volatile("ldr %0, [%1]" : "=r"(v) : "r"(a) : "memory"); return v;
+}
+static void uart_concurrent_access(void)
+{
+    (void)r32(UART + 0x18); (void)r32(UART + 0x3c); (void)r32(UART + 0x40);
+    w32(UART + 0x38, RX_MASK);
+    w32(UART + 0x24, 1); w32(UART + 0x28, 0); w32(UART + 0x2c, 0x70);
+    w32(UART + 0x30, 0x301); w32(UART + 0x34, 0);
+}
+static void gic_round(u32 c, u32 round, u32 *phase)
+{
+    const u64 rd0 = GICR + SGI_FRAME; /* Both CPUs intentionally use frame 0. */
+    const u64 route64 = GICD + 0x6200;
+    barrier(c, phase);
+    w32(GICD + 0x108, 1U << c);
+    w32(rd0 + 0x200, 1U << (5 + c));
+    w32(route64 + c * 4, (c ? 0x22220000U : 0x11110000U) + round);
+    barrier(c, phase);
+    u64 expected = ((u64)(0x22220000U + round) << 32) | (0x11110000U + round);
+    if ((r32(GICD + 0x108) & 3) != 3 || (r32(rd0 + 0x200) & 0x60) != 0x60 ||
+        r64(route64) != expected) fail(c, GIC_STATE);
+    barrier(c, phase);
+    w32(GICD + 0x188, 1U << c);
+    w32(rd0 + 0x280, 1U << (5 + c));
+    barrier(c, phase);
+    if ((r32(GICD + 0x108) & 3) || (r32(rd0 + 0x200) & 0x60)) fail(c, GIC_STATE);
+    if (c == 1) uart_concurrent_access();
+    barrier(c, phase);
+}
+static void stress(u32 c)
+{
+    u32 phase = 0;
+    u32 ticks[2] = { load(&timer_count[0]), load(&timer_count[1]) };
+    for (u32 b = 0; b < BATCHES; ++b) {
+        if (c == 0) {
+            numbered("RX READY", b);
+            store(&batch_start, b + 1);
+        } else {
+            u64 start = now();
+            while (load(&batch_start) < b + 1) check_wait(c, start);
+        }
+        for (u32 r = 0; r < ROUNDS_PER_BATCH; ++r)
+            gic_round(c, b * ROUNDS_PER_BATCH + r, &phase);
+        if (c == 0) {
+            u64 start = now();
+            while (load(&rx_bytes) < (b + 1) * BATCH_BYTES) check_wait(c, start);
+            if (load(&rx_bytes) != (b + 1) * BATCH_BYTES) fail(c, RX_DATA);
+            check_wait(c, start);
+            numbered("RX PASS", b);
+        } else {
+            /* Keep device accesses concurrent with paced host RX even if the
+             * GIC rounds finish before the first chunk reaches the guest. */
+            u64 start = now();
+            while (load(&rx_bytes) < (b + 1) * BATCH_BYTES) {
+                uart_concurrent_access();
+                check_wait(c, start);
+            }
+        }
+    }
+    /* End the rounds on BOTH participants, then exercise empty-FIFO masks. */
+    barrier(c, &phase);
+    for (u32 i = 0; i < 256; ++i) {
+        if (c == 1) w32(UART + 0x38, (i & 1) ? RX_MASK : 0);
+        else {
+            u32 mask = r32(UART + 0x38);
+            if (mask != 0 && mask != RX_MASK) fail(c, GIC_STATE);
+            if ((r32(UART + 0x3c) | r32(UART + 0x40)) & RX_MASK) fail(c, RX_DATA);
+            w32(UART + 0x44, RX_MASK);
+        }
+        barrier(c, &phase);
+    }
+    if (c == 1) w32(UART + 0x38, RX_MASK);
+    barrier(c, &phase);
+    if (!(r32(UART + 0x18) & RXFE) ||
+        ((r32(UART + 0x3c) | r32(UART + 0x40)) & RX_MASK)) fail(c, RX_DATA);
+    store(&stress_done[c], 1);
+    if (c == 0) {
+        u64 start = now();
+        while (!load(&stress_done[1])) check_wait(c, start);
+        if (load(&timer_count[0]) - ticks[0] < 5 || load(&timer_count[1]) - ticks[1] < 5)
+            fail(c, EARLY_TIMER);
+        if (load(&rx_bytes) != TOTAL_BYTES) fail(c, RX_DATA);
+        report_error();
+        marker("STRESS PASS");
+    }
+}
 void vspi_secondary(void)
 {
     timer_setup(1);
@@ -114,6 +232,7 @@ void vspi_secondary(void)
     while (!load(&mode)) {
         if (now() - start >= 180 * freq) { fail(1, DEADLINE); idle(); }
     }
+    if (load(&mode) == 'S') stress(1);
     idle();
 }
 void vspi_primary(void)
@@ -123,6 +242,7 @@ void vspi_primary(void)
     *(volatile unsigned char *)(GICD + 0x400 + UART_INTID) = 0xa0;
     w32(UART + 0x30, 0x301); w32(UART + 0x44, RX_MASK); w32(UART + 0x38, RX_MASK);
     timer_setup(0);
+    w32(GICD + 0x188, 3); w32(GICR + SGI_FRAME + 0x280, 0x60);
     register u64 x0 __asm__("x0") = 0xC4000003UL;
     register u64 x1 __asm__("x1") = 1;
     register u64 x2 __asm__("x2") = (u64)vspi_secondary_entry;
@@ -145,6 +265,7 @@ void vspi_primary(void)
     }
     report_error();
     marker("GATE PASS");
+    if (load(&mode) == 'S') stress(0);
     marker("DONE");
     idle();
 }

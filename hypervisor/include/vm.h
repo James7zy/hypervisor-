@@ -4,6 +4,7 @@
 
 #ifndef __ASSEMBLER__
 #include <types.h>
+#include <spinlock.h>
 #include <board.h>
 #include <percpu.h>   /* NR_CPUS, for the NR_VMS/VCPUS_PER_VM static_assert
                          below (percpu.h forward-declares struct vcpu) */
@@ -66,7 +67,9 @@ struct vcpu {
      * live ICH_LR1_EL2 on every unrelated kick. Mirrors sgi_pending[]'s role
      * for the SGI/IPI case (vgic_sgi.c) but is per-vcpu, separate state --
      * does not interact with sgi_pending[]. */
-    volatile bool spi_shadow_pending;
+    bool spi_shadow_pending;
+    /* Serializes LR1 payload/pending/live completion; never reset at runtime. */
+    struct spinlock spi_lock;
 };
 
 struct vm_config;

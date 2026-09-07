@@ -1,6 +1,7 @@
 # Static vSPI synchronization prerequisite design
 
-**Status:** Planned, not implemented or runtime-validated. Independent prerequisite to
+**Status:** Implemented and locally validated; independent prerequisite review pending.
+Independent prerequisite to
 [the approved delivery design](2026-09-07-vgic-spi-delivery-deepening-design.md).
 Execution baseline: `7cc4e5771ce1d655430fa67643225aef5b7cec47`.
 The execution ruling requires **both source-level synchronization reasoning and
@@ -20,14 +21,14 @@ copy Bao's allocator, interrupt ownership system, or WFE/event protocol.
 The existing producer structure is retained until this prerequisite and its
 regression baseline are independently accepted. Relocating code is not a race fix.
 
-| State / actual access paths | Finding and proposed rule |
+| State / actual access paths | Implemented rule |
 |---|---|
 | `struct vuart`: ring, RIS, IMSC, divisor/control/IFLS registers | Physical UART RX on pCPU0 races with MMIO from either vCPU. One embedded `struct spinlock lock`, initialized by BSS; all mutable reads/writes take it. |
-| `vuart_rx_has_room()` | Also takes the vuart lock; change parameter to `struct vm *` because locking mutates the object. It is a snapshot, not a reservation. Only pCPU0 produces; concurrent consumers only free space between check and push. |
+| `vuart_rx_has_room()` | Also takes the vuart lock; parameter is `struct vm *` because locking mutates the object. It is a snapshot, not a reservation. Only pCPU0 produces; concurrent consumers only free space between check and push. |
 | `console_focus`, shell state | Read/written only by the pCPU0 physical UART/shell path. Keep existing behavior and ownership; not moved into the vuart lock. |
 | `g_vgicd[vmid]` | Shared by both vCPUs. One file-static `vgic_mmio_lock[NR_VMS]` covers each complete MMIO access including the handler's 64-bit IROUTER fast path and all read paths. |
 | `g_vgicr[vmid][frame]` | Also shared: frame is selected by guest IPA offset, **not the accessing vCPU**. The same per-VM MMIO lock covers RD and SGI frames, all reads and writes. No nested per-frame lock. |
-| `ich_lr[1]`, `spi_shadow_pending` | Add `struct spinlock spi_lock` after the asm-visible vCPU prefix; ordinary `bool`, not volatile synchronization. Payload, pending, live write, local completion and target reload form one critical section per operation. |
+| `ich_lr[1]`, `spi_shadow_pending` | Appended `struct spinlock spi_lock` after the asm-visible vCPU prefix; ordinary `bool`, not volatile synchronization. Payload, pending, live write, local completion and target reload form one critical section per operation. |
 | `ich_lr[0,2,3]`, live LR registers, live VMCR | Still target-PE-owned under static pinning. SGI bitmap uses the existing independent `sgi_lock`; it is released before LR2 injection. No broad vCPU lock. |
 
 ### Narrow prerequisite exception: physical PPI target mapping
@@ -89,8 +90,8 @@ on unmask or retract already initiated delivery. A late notification may find
 an already-drained FIFO, as in the existing coalescing model.
 
 No new lock is held over console output, debug printing, a kick, PSCI CPU_ON,
-or any wait for target/guest acknowledgement. Put GIC debug output before its
-MMIO lock. Use a common unlock/return for the IROUTER branch. The GICR physical
+or any wait for target/guest acknowledgement. GIC debug output is before its
+MMIO lock. The IROUTER branch uses the common unlock/return. The GICR physical
 W1 enable may remain inside the tiny MMIO critical section: it has no lock or
 wait for another PE, and orders the side effect with its shadow access.
 
@@ -110,7 +111,7 @@ flowchart LR
 
 All graph dashed edges release the preceding lock, so there are **no new
 nested lock-acquisition edges**. Existing print and SGI locks are leaves too.
-`spinlock.h` must describe actual shared state and state explicitly that locks
+`spinlock.h` describes actual shared state and states explicitly that locks
 do not mask interrupts. Every current caller runs in boot with DAIF masked or
 an EL2 synchronous/IRQ exception with DAIF masked. No path enables EL2 IRQs
 inside these sections; `irq_handler_asm.S` deliberately retains masking until
@@ -173,7 +174,7 @@ orders publication before notification, and neither substitutes for the other.
   reset its state. No new preboot/offline delivery guarantee is inferred.
 - `vgic_restore()` has only the two initial-entry call sites in `vm_run()`
   and `secondary_main()`; neither `vcpu_run()` loop restores again.
-  `vgic_save()` has **no callers**. Document both exclusions beside these
+  `vgic_save()` has **no callers**. Both exclusions are documented beside these
   functions, replacing the inaccurate anticipated timer-switch comment.
   Do not lock dead save code and call it scheduler-safe: a future save could
   overwrite a remotely published shadow with live state even under a lock.
@@ -239,4 +240,161 @@ text to itself. Stress explores a finite QEMU schedule set, not all races;
 fixed LR capacity/coalescing, startup/offline delivery, Linux boot, scheduler
 save/restore and lifecycle defects remain outside its claim. Mapping-test
 red/green evidence is deterministic bug evidence, not evidence that unlocked
-races must fail on every run. No builds or tests were run during planning.
+races must fail on every run. No builds or tests were run during planning; implementation evidence follows.
+
+## Task 1 implementation evidence and access audit
+
+The implemented lock graph is the graph above: **no new nested acquisition
+edges**. The old vuart local/shadow/dsb/kick producer is still intact, and
+`vgic_set_spi_shadow()` is still public. Task 2's sibling-IPI/quiet/replay
+regression and mutation experiments, and Task 3's consolidation, have **not**
+been executed. No full `make test` was used here; its reserved execution remains
+for the final stage.
+
+### Rechecked source paths (not inferred from test output)
+
+- `vuart.c:64–129`: empty/full/pop/read/write are private and only reached
+  under the device lock. DR read advances tail and updates RIS; FR, RIS/MIS,
+  IMSC and stored config reads/writes share that lock. `vuart_mmio_handler`
+  special-cases DR TX before locking (print lock only), otherwise holds one
+  device lock through the complete operation. `vuart_rx_has_room` snapshots
+  under the same lock; sole caller is physical pCPU0's IRQ drain. `vuart_rx`
+  locks push/RIS/mask snapshot, then releases before either old producer branch.
+  Search found no device state reset or other accessor outside this file;
+  `vm[]` is BSS and `vm_init` does not memset/reset it at runtime. The single
+  producer means intervening consumers can only increase room.
+- `vgic_v3_mmio.c`: only `vgicd_mmio_handler` reaches the private distributor
+  read/write helpers or 64-bit IROUTER fast path; the entire operation is
+  protected by `vgic_mmio_lock[m->id]`, including reads and split-word RMW.
+  `vgicr_mmio_handler` rejects invalid frames without accessing state and then
+  protects all addressed RD/SGI helpers with that same per-VM lock. Both
+  vCPUs may select frame 0: no current-vCPU ownership assumption is used.
+  `g_vgicd` is BSS, `g_vgicr` static initialized data; neither has a runtime
+  reset path. Debug printk precedes locking in both handlers.
+- `vgic.c`: the private locked encoder/helper publishes LR1 payload/pending;
+  the public setter locks that operation. Local inject holds the same lock
+  through the helper, live write and pending clear; target reload holds it
+  through the conditional live write and clear. No payload is copied out
+  for a later unlocked write. Search found no runtime LR1/pending writer
+  elsewhere. `irq_handler` still calls reload after SGI drain, whose independent
+  bitmap lock has already been released. `vuart_rx` retains `dsb ish` after
+  shadow publication unlock and before kick. Encoding remains HW=0, Group1,
+  priority 0xA0, LR1; LR0 timer and LR2 SGI code is unchanged.
+- `head.S` zeroes BSS before secondaries exist; both entry paths mask DAIF
+  before C. `vm_init` initializes boot vCPUs and owner/index/config before
+  `vm_run` starts VM1. `secondary_main` initializes its own vGIC before sole
+  initial restore/entry. Only these two initial-entry functions call restore;
+  save has no callers. IMSC starts zero, and enabling it requires guest
+  execution after restore. A sibling cannot enable it earlier: only the
+  already-running console vCPU can request that sibling's CPU_ON. Thus no
+  runtime SPI publication overlaps initial LR reset/restore, even if early RX
+  fills ring/RIS. Locks are never reinitialized by `vgic_init`.
+- `vmexit.c` PMR/CTLR traps update only the executing PE's live VMCR and
+  preserve VENG1; initial restore is the other EL2 live VMCR write. Guest
+  IGRPEN1 is target-local. These do not run concurrently with that target's
+  IRQ handler. `irq_handler_asm.S` has no DAIFClr instruction (its old header
+  comment is stale); the actual tail explicitly retains IRQ masking to eret.
+  `vmexit_asm.S` likewise does not enable IRQs in EL2. Therefore no supported
+  same-PE reentry can deadlock any new lock.
+- `gic_ppi_set_enable` is one physical W1 write plus dsb/isb, not C RMW.
+  `gic_init`/`secondary_main` own other physical GICR initialization. Runtime
+  enable from virtual SGI-frame MMIO now targets `pcpu_base + addressed frame`;
+  disable in IRQ remains target-local. The live-VENG1 false-gate exclusion
+  above was checked against these writers; no physical lock or readiness
+  policy change was introduced. Console/shell state remains pCPU0-owned.
+
+Search commands from Task 1 step 8 are captured in
+`/tmp/vspi-sync-source-audit.log`; source inspection additionally covered
+`vm.c`, `head.S`, `secondary.c`, `irq_handler{,_asm.S}`, `vmexit{,_asm.S}`,
+`vgic_sgi.c`, `gic_v3.c`, `print.c`, and all touched helpers/initializers.
+The argument is confined to current static pinning, masked EL2, initial-only
+restore and a single console producer. A future save, reset, device producer,
+IRQ-unmask, or scheduler requires a fresh audit.
+
+### Fixture adjustments approved during execution
+
+The guest uses **combined EOI** (`ICC_CTLR_EL1=0`, original IAR written to
+EOIR then ISB), completing/deactivating IRQs before any main-stage marker.
+The initial plan's split-EOI assumption hit an existing unhandled TC-trapped
+ICC_DIR_EL1, not a synchronization bug. Split-mode support remains deferred;
+EL2 physical split EOI and HW timer linkage are unchanged. Explicit guest
+LDR/STR MMIO accessors avoid compiler post-index stores (ISV=0 is unsupported
+by the existing decoder), without any production adapter or test hook.
+
+UART setup precedes the primary early-timer detector so a red VM1 can retain
+its command while waiting five seconds for missing timers. Only VM0 retries
+BOOT, every quarter second until mode. Host requires an exact BOOT line plus
+all three existing secondary-online printk announcements before sending mode.
+These announcements are **transport quiescence only**, not evidence of guest
+readiness; per-core secondary_ready/timer checks remain mandatory. This bounded
+bootstrap handles startup printk interleaving without stitching guest markers
+or using a guessed sleep. It depends narrowly on the existing startup log.
+
+Stress adds UART register traffic while CPU1 waits for the paced RX batch,
+not only inside GIC rounds: fast GIC rounds cannot accidentally leave the
+entire 2ms-spaced input window without a concurrent device accessor. RX is
+consumed only by CPU0's virtual UART handler. All barrier/batch waits use
+CNTVCT deadlines plus error slots; even the IRQ FIFO drain has a deadline.
+The 180-second mode wait and post-DONE timer-enabled idle are deliberate
+exceptions to five-second phase waits.
+
+### Commands and measured outcomes
+
+- Mapping commit: `6a0b4b5` (`fix(vgic): rearm timer on the addressed VM physical CPU`).
+  Supported final red `/tmp/vspi-gate-final-red-qemu.log`: exit 1, VM0
+  GATE PASS/DONE, VM1 ACTIVE then FAIL 1. Fresh mapped green
+  `/tmp/vspi-gate-final-green-qemu.log`: both GATE PASS/DONE, exit 0.
+  Detailed initial fixture-confounder logs and directories are in the plan's
+  Task 1a evidence; none is claimed as mapping or race evidence.
+- Stress added **before locks**: `make BUILD_DIR=/tmp/vspi-stress-unlocked-3jNZkH
+  HV_GUEST=svm_dual all vspi check-offsets check-offsets-target` passed
+  (`/tmp/vspi-stress-unlocked-build.log`). First run exited 1 with VM0
+  FAIL 5 at RX READY 30 (`/tmp/vspi-stress-unlocked-qemu.log`).
+  Final strengthened fixture was guest-only rebuilt against that same saved
+  unlocked hypervisor (`/tmp/vspi-stress-final-unlocked-fixture-build.log`):
+  `/tmp/vspi-stress-final-unlocked-qemu.log` exited 1 with VM0 STRESS PASS/DONE
+  and VM1 FAIL 5 at RX READY 15. These are observed shared-GIC consistency
+  failures, not guaranteed deterministic reproductions or proof of each
+  UART/LR1 race individually. No production mutation was needed for this red.
+- Final fresh dual build: `make BUILD_DIR=/tmp/vspi-sync-final-6xIYbZ
+  HV_GUEST=svm_dual all vspi svm svm4 check-offsets check-offsets-target`
+  passed; `/tmp/vspi-sync-final-build.log`. C/EL2 compilation was warning-free,
+  but the initial fixture ELF linker reported RWX LOAD segments (see below). New header
+  layouts passed both host and cross-compiled assembly-offset checks.
+- For `n=1..5`, ran `VSPI_MODE=stress
+  VSPI_LOG=/tmp/vspi-sync-checked-stress-$n.log HYPERVISOR_ELF=$B/hypervisor.elf
+  SVM_BIN=$B/vspi/vspi-vm0.bin SVM_BIN2=$B/vspi/vspi-vm1.bin
+  sh tests/run_vspi_test.sh`, with B the final fresh dual build above and its final fixture-only rebuild
+  (`/tmp/vspi-sync-final-fixture-build.log`). All
+  five exited 0 with VSPI ALL PASS. Each required two GATE PASS, 128 exact
+  RX READY/PASS pairs per VM, two STRESS PASS and two DONE. Totals: 40,960
+  ordered RX bytes and 40,960 shared-GIC rounds across five runs/two VMs,
+  plus 256 empty-FIFO UART mask rounds per VM/run and timer progress on all
+  four guest vCPUs. Earlier five green runs (before stronger paced-window
+  UART access) remain `/tmp/vspi-sync-stress-{1..5}.log`.
+- Same final dual images: `sh tests/run_svm4_test.sh` and
+  `sh tests/run_shell_test.sh` passed with HYPERVISOR_ELF/SVM_BIN/SVM_BIN2
+  pointing to that build's hypervisor/svm/svm4 artifacts; logs
+  `/tmp/vspi-sync-final-svm4.log`, `/tmp/vspi-sync-final-shell.log`.
+- Additional fresh NR_VMS=1 build: `make BUILD_DIR=/tmp/vspi-sync-single-aMp5Q5
+  HV_GUEST=svm all svm3 check-offsets check-offsets-target` passed
+  (`/tmp/vspi-sync-single-build.log`, existing svm3 ELF RWX linker warning
+  retained, no C warnings); its `sh tests/run_svm3_test.sh` passed
+  (`/tmp/vspi-sync-single-svm3.log`) with the matching image variables.
+- Final fixture linker script separates RX and RW PT_LOAD segments (data
+  page-aligned), removing its RWX warning without suppressing diagnostics.
+  Entry IPA and binary-loader semantics are unchanged. The five checked
+  stress logs above use this final layout; the earlier layout's five runs
+  are `/tmp/vspi-sync-final-stress-{1..5}.log`.
+- Additional **fresh, zero-warning** final source build: `make
+  BUILD_DIR=/tmp/vspi-sync-warning-free-cMZcFr HV_GUEST=svm_dual all vspi
+  check-offsets check-offsets-target`, `/tmp/vspi-sync-warning-free-build.log`.
+  Both GATE PASS/DONE with that build's matching images, exit 0:
+  `/tmp/vspi-sync-final-gate.log`.
+- `git diff --check` and `sh -n tests/run_vspi_test.sh` passed.
+
+Bounded stress explores finite QEMU schedules. The source-level critical-section
+and initialization argument, independently reviewed at the prerequisite gate,
+is essential even with observed red and the bounded green runs. No formal race proof,
+IRQ-per-byte guarantee, queueing, offline/startup reliability, Linux gate,
+scheduler safety or later replay-detector acceptance is claimed.

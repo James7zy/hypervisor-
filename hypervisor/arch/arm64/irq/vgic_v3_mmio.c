@@ -13,6 +13,7 @@
 #include <board.h>
 #include <vm.h>
 #include <vm_config.h>
+#include <spinlock.h>
 #include <gic_v3.h>              /* GICR_SGI_OFFSET, GICR_ISENABLER0 (physical) */
 #include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
@@ -37,6 +38,8 @@ struct vgicv3_dist {
 /* One distributor shadow per VM, keyed by vm->id (resolved at trap time via
  * current_vcpu()->owner; the MMIO bus registration itself stays global). */
 static struct vgicv3_dist g_vgicd[NR_VMS];
+/* Both vCPUs can access GICD and ANY GICR frame. BSS-zeroed before entry. */
+static struct spinlock vgic_mmio_lock[NR_VMS];
 
 /* GICD_TYPER for a single-cpu, 1024-INTID, GICv3 distributor.
  *   ITLinesNumber[4:0] = 31  -> (31+1)*32 = 1024 INTIDs
@@ -167,7 +170,8 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
              acc->is_write ? "wr" : "rd", (unsigned long)acc->offset,
              (int)acc->size, (unsigned long)acc->data);
 
-    /* 64-bit IROUTER access. */
+    spin_lock(&vgic_mmio_lock[m->id]);
+    /* 64-bit IROUTER access, including the complete shadow read/write. */
     if (acc->size == 8U &&
         acc->offset >= VGICD_IROUTER_BASE && acc->offset <= VGICD_IROUTER_END) {
         u32 idx = (u32)(((acc->offset & ~0x7ULL) - VGICD_IROUTER_BASE) / 8U);
@@ -179,14 +183,15 @@ static int vgicd_mmio_handler(struct mmio_access *acc, void *ctx)
         } else if (!acc->is_write) {
             acc->data = 0;
         }
-        return 0;
+        goto out;
     }
 
     if (acc->is_write)
         vgicd_write(d, acc->offset, (u32)acc->data, acc->size);
     else
         acc->data = vgicd_read(d, acc->offset, acc->size);
-
+out:
+    spin_unlock(&vgic_mmio_lock[m->id]);
     return 0;
 }
 
@@ -337,6 +342,7 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
     bool sgi = (foff >= VGICR_SGI_OFFSET);
     u64  off = sgi ? (foff - VGICR_SGI_OFFSET) : foff;
 
+    spin_lock(&vgic_mmio_lock[m->id]);
     if (acc->is_write) {
         if (sgi)
             vgicr_write_sgi(m->config->pcpu_base + cpu, r, off, (u32)acc->data);
@@ -346,6 +352,7 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
         acc->data = sgi ? vgicr_read_sgi(r, off)
                         : vgicr_read_rd(r, cpu, off, acc->size);
     }
+    spin_unlock(&vgic_mmio_lock[m->id]);
     return 0;
 }
 

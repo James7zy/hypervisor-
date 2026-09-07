@@ -111,16 +111,9 @@ static u32 vuart_read(struct vuart *u, u64 off)
     }
 }
 
-static void vuart_write(struct vm *m, struct vuart *u, u64 off, u32 val)
+static void vuart_write(struct vuart *u, u64 off, u32 val)
 {
     switch (off) {
-    case VUART_DR:
-        /* Guest TX: one character, forwarded to the real UART under the
-         * printk lock so EL2 and guest output never interleave mid-char. No
-         * FIFO/blocking modelled -- console_putc blocks on the physical FR
-         * internally, which is enough for this single-VM slice. */
-        console_putc((char)(u8)val);
-        break;
     case VUART_IMSC:
         u->imsc = val;
         break;
@@ -135,7 +128,6 @@ static void vuart_write(struct vm *m, struct vuart *u, u64 off, u32 val)
     default:
         break;   /* WI, incl. DMACR */
     }
-    (void)m;
 }
 
 static int vuart_mmio_handler(struct mmio_access *acc, void *ctx)
@@ -145,10 +137,17 @@ static int vuart_mmio_handler(struct mmio_access *acc, void *ctx)
     struct vm *m = current_vcpu()->owner;
     struct vuart *u = &m->vuart;
 
+    /* TX can wait on hardware and takes the print lock, never the device lock. */
+    if (acc->is_write && acc->offset == VUART_DR) {
+        console_putc((char)(u8)acc->data);
+        return 0;
+    }
+    spin_lock(&u->lock);
     if (acc->is_write)
-        vuart_write(m, u, acc->offset, (u32)acc->data);
+        vuart_write(u, acc->offset, (u32)acc->data);
     else
         acc->data = vuart_read(u, acc->offset);
+    spin_unlock(&u->lock);
 
     return 0;
 }
@@ -163,15 +162,19 @@ void vuart_bus_init(void)
                (unsigned long)BOARD_UART_BASE);
 }
 
-bool vuart_rx_has_room(const struct vm *m)
+bool vuart_rx_has_room(struct vm *m)
 {
-    return !vuart_rx_full(&m->vuart);
+    spin_lock(&m->vuart.lock);
+    bool room = !vuart_rx_full(&m->vuart);
+    spin_unlock(&m->vuart.lock);
+    return room;
 }
 
 void vuart_rx(struct vm *m, u8 ch)
 {
     struct vuart *u = &m->vuart;
 
+    spin_lock(&u->lock);
     if (!vuart_rx_full(u)) {
         u->rx_buf[u->rx_head] = ch;
         u->rx_head = (u->rx_head + 1U) % VUART_RX_FIFO;
@@ -183,7 +186,10 @@ void vuart_rx(struct vm *m, u8 ch)
      * than corrupting the ring. */
 
     u->ris |= VUART_RIS_RX_MASK;
-    if (u->imsc & VUART_RIS_RX_MASK) {
+    bool notify = (u->imsc & VUART_RIS_RX_MASK) != 0;
+    spin_unlock(&u->lock);
+    /* Mask decision linearizes at the snapshot; no retroactive unmask delivery. */
+    if (notify) {
         /*
          * M5 slice 3: the physical PL011 IRQ (and hence this whole call) is
          * always serviced on the pCPU that owns the physical UART (CPU0);

@@ -4,6 +4,8 @@
 #include <vgic.h>
 #include <asm/sysreg.h>
 
+/* Pre-entry only: IMSC starts zero and only the target guest can enable it
+ * after its sole restore. Early RX cannot publish LR1. Never reset spi_lock. */
 void vgic_init(struct vcpu *vcpu)
 {
     /* One-off (per PE): enable the EL2 sysreg interface and let EL1 use the
@@ -58,6 +60,13 @@ static u64 vgic_spi_lr_encode(u32 intid)
            ((u64)intid & ICH_LR_VINTID_MASK);
 }
 
+/* Requires spi_lock; publishing the payload and pending is one operation. */
+static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
+{
+    vcpu->ich_lr[1] = vgic_spi_lr_encode(intid);
+    vcpu->spi_shadow_pending = true;
+}
+
 /* Software SPI injection into LR1 (the vtimer owns LR0 and is re-injected
  * every tick, so sharing LR0 would clobber this before the guest takes it).
  *
@@ -79,9 +88,11 @@ static u64 vgic_spi_lr_encode(u32 intid)
  * consumed) encoding a second time. */
 void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
 {
-    vgic_set_spi_shadow(vcpu, intid);
+    spin_lock(&vcpu->spi_lock);
+    vgic_set_spi_shadow_locked(vcpu, intid);
     SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
     vcpu->spi_shadow_pending = false;
+    spin_unlock(&vcpu->spi_lock);
 }
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
@@ -95,11 +106,12 @@ void vgic_inject_spi(struct vcpu *vcpu, u32 intid)
  * already-handled PL011 interrupt. */
 void vgic_reload_spi_lr(struct vcpu *vcpu)
 {
-    if (!vcpu->spi_shadow_pending)
-        return;
-    vcpu->spi_shadow_pending = false;
-
-    SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
+    spin_lock(&vcpu->spi_lock);
+    if (vcpu->spi_shadow_pending) {
+        SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
+        vcpu->spi_shadow_pending = false;
+    }
+    spin_unlock(&vcpu->spi_lock);
 }
 
 /* Write only the SHADOW ich_lr[1] for `vcpu` and arm spi_shadow_pending so the
@@ -109,8 +121,9 @@ void vgic_reload_spi_lr(struct vcpu *vcpu)
  * system register. */
 void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid)
 {
-    vcpu->ich_lr[1] = vgic_spi_lr_encode(intid);
-    vcpu->spi_shadow_pending = true;
+    spin_lock(&vcpu->spi_lock);
+    vgic_set_spi_shadow_locked(vcpu, intid);
+    spin_unlock(&vcpu->spi_lock);
 }
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2. LR0 is the vtimer and LR1 is
@@ -127,6 +140,8 @@ void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid)
     SYSREG_WRITE(ICH_LR2_EL2, lr);
 }
 
+/* Only initial entry in vm_run/secondary_main, before guest IMSC enable.
+ * Static pinning never restores on a runtime re-entry. M11 must re-audit. */
 void vgic_restore(struct vcpu *vcpu)
 {
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->ich_hcr_el2);
@@ -138,9 +153,9 @@ void vgic_restore(struct vcpu *vcpu)
     asm volatile("isb");
 }
 
-/* Symmetric save half. M2's single-vCPU flow never reschedules, so this has
- * no caller yet; M2.5's timer context switch is the first user. It is real
- * (non-stub) code kept paired with vgic_restore per spec §4.2. */
+/* No callers under static pinning. NOT safe for runtime scheduling: even a
+ * lock would not prevent a live read overwriting a remotely published shadow.
+ * Future save/restore users must redesign that protocol, not just add a lock. */
 void vgic_save(struct vcpu *vcpu)
 {
     vcpu->ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);

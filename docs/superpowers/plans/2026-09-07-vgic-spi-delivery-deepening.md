@@ -56,18 +56,20 @@ so host timeouts still fail if primary cannot report.
 ```ld
 OUTPUT_FORMAT("elf64-littleaarch64")
 ENTRY(_start)
+PHDRS { text PT_LOAD FLAGS(5); data PT_LOAD FLAGS(6); }
 SECTIONS {
     . = 0x40200000;
-    .text : { KEEP(*(.text.start)) *(.text*) }
-    .rodata : { *(.rodata*) }
-    .data : { *(.data*) }
+    .text : { KEEP(*(.text.start)) *(.text*) } :text
+    .rodata : { *(.rodata*) } :text
+    . = ALIGN(0x1000);
+    .data : { *(.data*) } :data
     .bss (NOLOAD) : {
         . = ALIGN(16); __bss_start = .;
         *(.bss*) *(COMMON)
         . = ALIGN(16); vspi_stack0 = .; . += 0x4000;
         vspi_stack1 = .; . += 0x4000;
         __bss_end = .;
-    }
+    } :data
 }
 ```
 
@@ -179,8 +181,8 @@ wraps). Print `VSPI VMn RX READY b` for `b=0..127`; host sends exactly that
 batch in 8 four-byte writes, 2ms apart. Run 32 shared-GIC rounds per batch,
 then require `rx_bytes == (b+1)*32`; print `VSPI VMn RX PASS b`. CPU1 never
 consumes DR; it concurrently reads FR/RIS/MIS, writes IMSC=`0x50`, and writes
-stored IBRD/FBRD/LCR_H/CR/IFLS values (1/0/0x70/0x301/0). It does not disable
-RX or clear RIS during payload transfer. Primary checks the exact sequence
+stored IBRD/FBRD/LCR_H/CR/IFLS values (1/0/0x70/0x301/0). It continues these accesses while awaiting the paced RX batch after fast GIC
+rounds finish. It does not disable RX or clear RIS during payload transfer. Primary checks the exact sequence
 and aggregate count, not UART IRQ count.
 
 Each shared-GIC round uses a reusable two-party barrier: each participant
@@ -336,12 +338,12 @@ vgicr_write_sgi(m->config->pcpu_base + cpu, r, off, (u32)acc->data);
   and green log names. Require GATE PASS/DONE for both VMs and runner status 0.
   Stage only mapping/fixture/Makefile files; commit
   `fix(vgic): rearm timer on the addressed VM physical CPU`.
-- [ ] **5. Grow the fixture to S mode before race locking.** Implement exactly
+- [x] **5. Grow the fixture to S mode before race locking.** Implement exactly
   the 128×32 RX and GIC rounds, cross-frame accesses, mask/status phase and
   timer checks above. Run once on the old unlocked path and retain output;
   a pass is possible and is not proof of race absence. The deterministic red
   test in step 2 proves only the mapping detector, not synchronization.
-- [ ] **6. Implement the minimal device/MMIO locking.** Reuse `spinlock.h`,
+- [x] **6. Implement the minimal device/MMIO locking.** Reuse `spinlock.h`,
   add embedded vuart lock and the BSS-zeroed per-VM MMIO lock array. For UART
   TX special-case DR writes in the MMIO wrapper and return after console output;
   remove the now-unreachable DR output case from the internal write helper.
@@ -369,7 +371,7 @@ vgicr_mmio_handler(acc):
 
   Snapshotting notification outside the vuart lock preserves a linearized mask
   decision; do not add delivery-on-unmask or hold any lock over a kick/print.
-- [ ] **7. Implement the entire LR1 protocol, not just a pending flag lock.**
+- [x] **7. Implement the entire LR1 protocol, not just a pending flag lock.**
   Append `struct spinlock spi_lock` to `struct vcpu`, replace volatile pending
   with ordinary bool, include spinlock definitions. Do not move asm-visible
   fields. Do not reset the BSS lock from `vgic_init()`.
@@ -390,7 +392,7 @@ reload_spi_lr(v): lock; if pending:
   the synchronization design and rechecked at the prerequisite review gate. Correct the stale lock-free claim in spinlock.h;
   state that callers enter with EL2 IRQs masked. Do not add runtime save callers,
   reset/reinitialize running state, irqsave wrappers, or physical-GICR locks.
-- [ ] **8. Validate the source-level argument independently of QEMU.**
+- [x] **8. Validate the source-level argument independently of QEMU.**
 
 ```sh
 git grep -n -E 'spi_shadow_pending|ich_lr\[1\]|vgic_(init|save|restore)\('
@@ -403,7 +405,7 @@ git grep -n -E 'g_vgic[dr]|gic_ppi_set_enable|daifclr|spin_lock|spin_unlock' hyp
   no hidden writer defeats the IMSC=0/pre-entry exclusion, no lock covers
   console/kick/wait, and hardware W1 operations/live VENG1 ownership satisfy
   the documented ordering. Any failure blocks Task 2/3, not a comment fix.
-- [ ] **9. Fresh targeted builds, five bounded stress runs, and single-scenario
+- [x] **9. Fresh targeted builds, five bounded stress runs, and single-scenario
   regressions.** Save exact build directory and logs in the sync design.
 
 ```sh
@@ -424,7 +426,7 @@ SVM_BIN2="$B/svm4/svm4.bin" sh tests/run_shell_test.sh \
   2>&1 | tee /tmp/vspi-sync-shell.log
 ```
 
-- [ ] **10. Commit and prerequisite review gate.** Record five runs × two VMs
+- [x] **10. Commit and prerequisite review gate.** Record five runs × two VMs
   ×4096 ordered bytes, 4096 shared-GIC rounds/VM/run, periodic progress and
   source audit, with bounded-evidence limitations. Stage only Task 1b files;
   commit `fix(vgic): serialize vuart MMIO and SPI publication state`.
@@ -696,3 +698,20 @@ means docs committed and reviewed by the writer, **not implementation accepted**
   `/tmp/vspi-gate-final-green-build.log` (all/vspi/host+target offsets),
   `/tmp/vspi-gate-final-green-qemu.log` (both GATE PASS/DONE, exit 0).
   This specifically establishes early-timer mapping, not race absence.
+
+## Task 1b completion (prerequisite review pending)
+
+All implementation/validation steps are complete; marking step 10 complete
+means committed for the required independent review, **not reviewer acceptance**.
+See the synchronization design's implementation evidence for the full access
+inventory, actual lock graph, init/live-VMCR exclusions, final clean build
+directories and logs. Unlocked stress failed with guest GIC_STATE before locks;
+final five bounded stress runs, dual-SVM/shell and a fresh single-VM timer
+scenario passed. Producer branching/public shadow setter remain untouched.
+No Task 2/3 work, replay mutation, suite integration or full `make test` yet.
+
+Fixture ELF permissions are now explicitly RX/RW with page-aligned data to
+eliminate the new fixture's linker RWX warning, without disabling diagnostics.
+The existing svm3 linker warning is disclosed and unchanged. Final zero-warning
+all/vspi/offset build and final-layout five stress logs are recorded in the
+synchronization design. No source edits followed those runs.

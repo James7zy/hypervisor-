@@ -3,8 +3,9 @@
 set -eu
 : "${HYPERVISOR_ELF:?}" "${SVM_BIN:?}" "${SVM_BIN2:?}"
 export HYPERVISOR_ELF SVM_BIN SVM_BIN2
-case "${VSPI_MODE:-gate}" in
+case "${VSPI_MODE:-stress}" in
     gate) mode=G ;;
+    stress) mode=S ;;
     *) echo 'unsupported VSPI_MODE' >&2; exit 1 ;;
 esac
 tmp=$(mktemp -d /tmp/vspi-run-XXXXXX)
@@ -71,6 +72,25 @@ for vm in 0 1; do
     printf '%s' "$mode" >&3
     wait_marker "VSPI VM$vm ACTIVE"
     wait_marker "VSPI VM$vm GATE PASS"
+    if [ "$mode" = S ]; then
+        b=0
+        while [ "$b" -lt 128 ]; do
+            wait_marker "VSPI VM$vm RX READY $b"
+            payload=$(awk -v b="$b" -v vm="$vm" 'BEGIN {
+                for (i=0; i<32; i++) printf "%c", 97+((b*32+i+vm*7)%26)
+            }')
+            chunk=0
+            while [ "$chunk" -lt 8 ]; do
+                first=$((chunk * 4 + 1)); last=$((first + 3))
+                printf '%s' "$payload" | cut -c "$first-$last" | tr -d '\n' >&3
+                sleep 0.002
+                chunk=$((chunk + 1))
+            done
+            wait_marker "VSPI VM$vm RX PASS $b"
+            b=$((b + 1))
+        done
+        wait_marker "VSPI VM$vm STRESS PASS"
+    fi
     wait_marker "VSPI VM$vm DONE"
 done
 printf '\001x' >&3

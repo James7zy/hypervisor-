@@ -2,6 +2,7 @@
 #ifndef HV_DM_VUART_H
 #define HV_DM_VUART_H
 #include <types.h>
+#include <spinlock.h>
 
 /*
  * Buffer depth for the emulated RX ring. The real PL011 hardware FIFO is only
@@ -18,6 +19,7 @@
 #define VUART_RX_FIFO 256U
 
 struct vuart {
+    struct spinlock lock;       /* BSS-zeroed; all mutable device state */
     u8  rx_buf[VUART_RX_FIFO];
     u32 rx_head, rx_tail;        /* head==tail -> empty */
     u32 imsc, ris;               /* interrupt mask / raw status      */
@@ -44,6 +46,6 @@ void vuart_bus_init(void);
  * dropping room-checking to inside vuart_rx would be too late to avoid
  * losing the byte. */
 void vuart_rx(struct vm *m, u8 ch);
-/* True if the virtual RX ring has space for at least one more byte. */
-bool vuart_rx_has_room(const struct vm *m);
+/* Locked snapshot, not a reservation: only pCPU0 produces; consumers free room. */
+bool vuart_rx_has_room(struct vm *m);
 #endif

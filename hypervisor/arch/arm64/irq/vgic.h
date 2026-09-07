@@ -21,7 +21,7 @@
 #define ICH_LR_PINTID_SHIFT  32              /* pINTID[44:32] (HW=1)        */
 #define ICH_LR_VINTID_MASK   0xFFFFFFFFULL   /* vINTID[31:0]                */
 
-/* Enable the virtual CPU interface and blank per-vCPU vGIC state. */
+/* Pre-entry initialization only; never resets the BSS-zeroed SPI lock. */
 void vgic_init(struct vcpu *vcpu);
 
 /* Inject a pending, Group-1, software (HW=0) virtual interrupt via ICH_LR0.
@@ -33,10 +33,9 @@ void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio);
  * the virtual IRQ releases the physical one. See docs/adr/0001-*. */
 void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
 
-/* Inject a Shared Peripheral Interrupt (SPI, INTID >= 32) into the guest as a
- * software (HW=0) virtual interrupt via the list registers. Used by emulated
- * devices (M3.3 virtio-console: SPI 48) that have no physical GIC line. Thin
- * wrapper over vgic_inject_sw with a device-class priority.
+/* Inject the supported PL011 SPI into fixed LR1: software HW=0, Group1,
+ * priority 0xA0. Holds spi_lock through payload, live write and pending clear.
+ * SPI operations require initialized state and masked EL2 IRQ context.
  *
  * MUST be called on the pCPU that currently owns `vcpu` (i.e. from that
  * vCPU's own trap/IRQ context) -- it writes the LIVE ICH_LR1_EL2 of whichever
@@ -53,7 +52,7 @@ void vgic_inject_spi(struct vcpu *vcpu, u32 intid);
  * vcpu->spi_shadow_pending and only actually reloads the live register when
  * that flag was set (i.e. vgic_set_spi_shadow ran since the last reload/
  * inject). This prevents replaying a stale, already-consumed shadow LR1 on an
- * unrelated later kick. */
+ * unrelated later kick. Payload, live write and consumption share spi_lock. */
 void vgic_reload_spi_lr(struct vcpu *vcpu);
 
 /* Write only the SHADOW ich_lr[1] for `vcpu` (same encoding as
@@ -61,14 +60,16 @@ void vgic_reload_spi_lr(struct vcpu *vcpu);
  * vcpu->spi_shadow_pending. Safe to call from any pCPU regardless of which
  * vCPU it currently owns. The pCPU that owns `vcpu` must be kicked
  * (vgic_kick_pcpu) so it calls vgic_reload_spi_lr on itself, sees the pending
- * flag set, and actually presents the interrupt. */
+ * flag set, and actually presents the interrupt. The caller orders this locked
+ * publication before notification with dsb ish, outside the lock. */
 void vgic_set_spi_shadow(struct vcpu *vcpu, u32 intid);
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2 (LR0=vtimer, LR1=PL011).
  * Software (HW=0) Group-1, used by the cross-core IPI path (vgic_sgi.c). */
 void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid);
 
-/* Save/restore the virtual interface state to/from struct vcpu. */
+/* save has no callers; restore is initial-entry-only under static pinning.
+ * Neither is runtime scheduler-safe against remote SPI publication. */
 void vgic_save(struct vcpu *vcpu);
 void vgic_restore(struct vcpu *vcpu);
 
