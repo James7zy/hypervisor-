@@ -215,8 +215,8 @@ test-qemu-svm4: test-svm-dual-build
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_svm4_test.sh
 
-# The only scenario that WRITES to the QEMU serial stdin; reuses the dual-SVM
-# build because the EL2 shell needs NR_VMS=2 but no guest OS.
+# Like vSPI, the shell scenario writes QEMU serial stdin; it reuses the
+# dual-SVM build because the EL2 shell needs NR_VMS=2 but no guest OS.
 test-qemu-shell: test-svm-dual-build
 	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
@@ -234,7 +234,7 @@ test-qemu-svm3: test-svm-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_BUILD_DIR)/svm3/svm3.bin sh tests/run_svm3_test.sh
 
-test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4 test-qemu-shell
+test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4 test-qemu-shell test-qemu-vspi
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh

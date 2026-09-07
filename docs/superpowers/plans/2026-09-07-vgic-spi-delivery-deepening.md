@@ -444,7 +444,7 @@ requests only after its stress rounds finish; INTID1 completion is published
 by CPU0's IRQ handler after combined EOIR/ISB. No additional hypercall or test-only
 hypervisor hook.
 
-- [ ] **1. Extend R after STRESS PASS with the actual replay detector.**
+- [x] **1. Extend R after STRESS PASS with the actual replay detector.**
 
 ```text
 after RX==4096 and STRESS PASS, CPU0:
@@ -476,7 +476,7 @@ after RX==4096 and STRESS PASS, CPU0:
   SGI INTIDs (fixed LR2 capacity). Check every IPI/QUIET marker in the runner.
   Fail even an empty UART IRQ after DRAINED: it is the stale-LR replay symptom.
   The initial settling interval does not erase the later observation window.
-- [ ] **2. Run R on synchronized old production before changing delivery.**
+- [x] **2. Run R on synchronized old production before changing delivery.**
 
 ```sh
 B=$(mktemp -d /tmp/vspi-old-producer-XXXXXX)
@@ -489,7 +489,7 @@ SVM_BIN2="$B/vspi/vspi-vm1.bin" sh tests/run_vspi_test.sh
   All required markers and status 0 are necessary. If it fails, distinguish
   fixture failure from pre-existing behavior; do not proceed or bundle an
   unapproved delivery fix into Task 3.
-- [ ] **3. Prove detector sensitivity with controlled, uncommitted mutations.**
+- [x] **3. Prove detector sensitivity with controlled, uncommitted mutations.**
   Start with clean committed production from Task 1; keep fixture edits intact.
   First temporarily suppress `vgic_inject_spi()` delivery (return without
   publication/live write), build in fresh `/tmp/vspi-mutation-rx-XXXXXX`, run R:
@@ -517,10 +517,10 @@ set -e
 [ "$rc" -ne 0 ] || { echo 'detector failed to reject mutation'; exit 1; }
 ```
 
-- [ ] **4. Restore experiments; rerun R green in a new build.** Confirm
+- [x] **4. Restore experiments; rerun R green in a new build.** Confirm
   `git diff -- hypervisor/` is empty before fixture commit, then freshly rebuild
   and obtain `/tmp/vspi-old-producer-restored.log`. Never reuse mutation objects.
-- [ ] **5. Integrate and commit regression.** Add `test-qemu-vspi` to `test`
+- [x] **5. Integrate and commit regression.** Add `test-qemu-vspi` to `test`
   prerequisites and update the stale Makefile comment claiming shell is the
   only serial-input test. Do not execute full `make test` yet. Commit only
   fixture/runner/Makefile and evidence docs:
@@ -715,3 +715,76 @@ eliminate the new fixture's linker RWX warning, without disabling diagnostics.
 The existing svm3 linker warning is disclosed and unchanged. Final zero-warning
 all/vspi/offset build and final-layout five stress logs are recorded in the
 synchronization design. No source edits followed those runs.
+
+
+## Task 2 completion (regression review pending)
+
+Implemented only the regression on synchronized old production at `91712ed`.
+The standalone test commit retains vuart's local/shadow/kick branch and the
+public shadow setter unchanged. Steps marked complete mean implemented and
+validated for review, not review acceptance or permission to begin Task 3.
+
+- `R` retains the existing interrupt-only mode/payload consumer, exact 4096
+  byte sequence per VM, CPU_ON/stacks/vectors, shared-GIC/UART stress and
+  periodic timer rearm. It adds a ten-tick settling interval then a stable
+  ten-tick interval, both bounded by one five-second counter deadline.
+- After DRAINED, CPU1 sends 16 serialized INTID1 SGIs to VM-local CPU0 in
+  each VM. Primary release-publishes requests; sibling acquire-observes,
+  checks the prior completion, writes ICC_SGI1R/ISB, release-publishes sent.
+  Only the CPU0 IRQ handler publishes completion, after combined EOIR/ISB.
+  Primary acquire-waits for both sent and completed before IPI PASS. Every
+  quiet window requires ten further CPU0 timer completions and CPU1 progress,
+  exact RX total/empty FIFO/clear RX status and unchanged UART IRQ count.
+  The drained IRQ count is retained across all rounds, not reset at markers.
+  There is at most one outstanding SGI, no self-IPI and no LR-private inspection.
+- Runner defaults to regression, checks every DRAINED/IPI/QUIET/REPLAY/DONE
+  marker exactly, and sends no payload after stress. `timeout -k 2 180`
+  confines cleanup to the child's process group with a two-second KILL grace
+  after TERM; failure runs leave no QEMU child. `test-qemu-vspi` is now a
+  default `test` prerequisite; no full `make test` was executed in this task.
+
+### Native commands and evidence
+
+For each build below, `make BUILD_DIR=$B HV_GUEST=svm_dual all vspi` passed.
+Old-producer and restored builds additionally ran `check-offsets
+check-offsets-target`. All five build logs below contain no warnings.
+All direct runs used `VSPI_MODE=regression VSPI_LOG=$log
+HYPERVISOR_ELF=$B/hypervisor.elf SVM_BIN=$B/vspi/vspi-vm0.bin
+SVM_BIN2=$B/vspi/vspi-vm1.bin sh tests/run_vspi_test.sh` unless noted.
+
+| Experiment | Fresh build / build log | QEMU log / result |
+|---|---|---|
+| Old synchronized producer | `/tmp/vspi-old-producer-ZIz3Zv`; `/tmp/vspi-old-producer-build.log` | `/tmp/vspi-old-producer-regression.log`: exit 0, both VMs all 128 RX batches and all 16 IPI/QUIET pairs, REPLAY PASS/DONE |
+| Local injection suppressed (temporary no-op in `vgic_inject_spi`) | `/tmp/vspi-mutation-rx-jKWG1s`; `/tmp/vspi-mutation-rx-build.log` | `/tmp/vspi-mutation-rx.log`: exit 1, missing VM0 ACTIVE; IRQ-only mode receipt never succeeds |
+| Unconditional reload (temporary pending-gate removal) | `/tmp/vspi-mutation-replay-Hx5w6W`; `/tmp/vspi-mutation-replay-build.log` | `/tmp/vspi-mutation-replay.log`: exit 1, VM0 DRAINED, IPI PASS 1, FAIL 7 |
+| VM1-only unconditional reload | `/tmp/vspi-mutation-replay-vm1-2R1qUD`; `/tmp/vspi-mutation-replay-vm1-build.log` | `/tmp/vspi-mutation-replay-vm1.log`: exit 1, VM0 all replay stages pass, VM1 DRAINED, IPI PASS 1, FAIL 7 |
+| Restored production | `/tmp/vspi-old-producer-restored-yBCsJ0`; `/tmp/vspi-old-producer-restored-build.log` | `/tmp/vspi-old-producer-restored.log`: exit 0 via default-mode `VSPI_LOG=... make VSPI_BUILD_DIR=$B test-qemu-vspi`; both VMs all required stages |
+
+Runner stdout/stderr logs are `/tmp/vspi-old-producer-run.log`,
+`/tmp/vspi-mutation-{rx,replay,replay-vm1}-run.log`, and
+`/tmp/vspi-old-producer-restored-target.log`. Mutation exit codes are also in
+`/tmp/vspi-mutation-{rx,replay,replay-vm1}.status` (all 1).
+
+The first VM1 mutation invocation had an operator typo in SVM_BIN2
+(`vspi-vspi-vm1.bin`); the runner exited 1 on child startup failure. Preserved
+`/tmp/vspi-mutation-replay-vm1-startup-failed{,-run}.log` and `.status` are
+**not replay evidence**. Execution stopped and the supervisor explicitly
+approved one same-protocol retry correcting only that path. Before retry,
+all three image files were checked and SHA256 identities/build provenance
+recorded in `/tmp/vspi-mutation-replay-vm1-images.log`. The corrected run above
+reused that already-built mutation; production source was already restored.
+No execution-mode fallback or permanent mutation switch was used.
+
+Each experiment restored only `vgic.c` from HEAD; `git diff --exit-code --
+hypervisor/` passed after restoration and before/after the final fresh build.
+Retained G and S modes passed using restored images:
+`/tmp/vspi-task2-retained-gate.log`, `/tmp/vspi-task2-retained-stress.log`.
+`sh -n tests/run_vspi_test.sh` and `git diff --check` passed. A final process
+listing found no remaining QEMU process. No header or production file changed
+in this task; assembly entry/vectors/linker layout from Task 1 are unchanged.
+
+This is finite QEMU guest-behavior and detector-sensitivity evidence, not a
+formal synchronization proof. Task 1's independent source-level argument and
+review remain essential. Fixed LR capacity/coalescing, static pinning,
+startup/offline guarantees, Linux, lifecycle and scheduling remain outside
+this regression's claims. Task 3 and the reserved full suite remain next.

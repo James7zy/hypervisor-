@@ -1,11 +1,12 @@
 #!/bin/sh
-# Guest-visible vSPI mapping/stress; serial focus is transport, not an assertion.
+# Guest-visible vSPI RX/IPI/replay; serial focus is transport, not an assertion.
 set -eu
 : "${HYPERVISOR_ELF:?}" "${SVM_BIN:?}" "${SVM_BIN2:?}"
 export HYPERVISOR_ELF SVM_BIN SVM_BIN2
-case "${VSPI_MODE:-stress}" in
+case "${VSPI_MODE:-regression}" in
     gate) mode=G ;;
     stress) mode=S ;;
+    regression) mode=R ;;
     *) echo 'unsupported VSPI_MODE' >&2; exit 1 ;;
 esac
 tmp=$(mktemp -d /tmp/vspi-run-XXXXXX)
@@ -24,7 +25,9 @@ trap cleanup EXIT
 trap 'exit 1' INT TERM
 mkfifo "$tmp/input"
 exec 3<>"$tmp/input"
-LINUX_IMAGE= timeout 180 ./scripts/run-qemu.sh <"$tmp/input" >"$log" 2>&1 &
+# timeout owns this run's process group; TERM in cleanup also arms its
+# two-second KILL grace period. No global QEMU-name matching or unbounded reap.
+LINUX_IMAGE= timeout -k 2 180 ./scripts/run-qemu.sh <"$tmp/input" >"$log" 2>&1 &
 qemu_pid=$!
 fail() { echo "VSPI FAIL: $*" >&2; cat "$log" >&2; exit 1; }
 wait_marker() {
@@ -72,7 +75,7 @@ for vm in 0 1; do
     printf '%s' "$mode" >&3
     wait_marker "VSPI VM$vm ACTIVE"
     wait_marker "VSPI VM$vm GATE PASS"
-    if [ "$mode" = S ]; then
+    if [ "$mode" != G ]; then
         b=0
         while [ "$b" -lt 128 ]; do
             wait_marker "VSPI VM$vm RX READY $b"
@@ -90,6 +93,16 @@ for vm in 0 1; do
             b=$((b + 1))
         done
         wait_marker "VSPI VM$vm STRESS PASS"
+    fi
+    if [ "$mode" = R ]; then
+        wait_marker "VSPI VM$vm DRAINED"
+        k=1
+        while [ "$k" -le 16 ]; do
+            wait_marker "VSPI VM$vm IPI PASS $k"
+            wait_marker "VSPI VM$vm QUIET PASS $k"
+            k=$((k + 1))
+        done
+        wait_marker "VSPI VM$vm REPLAY PASS"
     fi
     wait_marker "VSPI VM$vm DONE"
 done

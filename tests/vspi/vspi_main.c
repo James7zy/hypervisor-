@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: TBD */
-/* Guest-observable static vSPI prerequisite tests; no EL2 private-state seam. */
+/* Guest-observable static vSPI regression; no EL2 private-state seam. */
 typedef unsigned int u32;
 typedef unsigned long u64;
 #define UART 0x09000000UL
@@ -24,6 +24,9 @@ enum failure {
 static u64 freq;
 static u32 errors[2], timer_count[2], secondary_ready, mode, uart_irqs, rx_bytes;
 static u32 arrived[2], batch_start, stress_done[2];
+/* Single writers: primary requests, sibling sends, primary IRQ completes. */
+static u32 ipi_request, ipi_sent, ipi_completed;
+#define IPI_ROUNDS 16U
 #define BATCHES 128U
 #define BATCH_BYTES 32U
 #define ROUNDS_PER_BATCH 32U
@@ -96,7 +99,7 @@ void vspi_irq_handler(void)
             if (now() - start >= 5 * freq) { fail(c, DEADLINE); break; }
             u32 ch = r32(UART) & 0xff;
             if (!load(&mode)) {
-                if (ch != 'G' && ch != 'S') fail(c, RX_DATA);
+                if (ch != 'G' && ch != 'S' && ch != 'R') fail(c, RX_DATA);
                 store(&mode, ch);
             } else {
                 u32 i = load(&rx_bytes);
@@ -105,10 +108,12 @@ void vspi_irq_handler(void)
                 store(&rx_bytes, i + 1);
             }
         }
-    } else { fail(c, UNEXPECTED_IRQ); }
+    } else if (id != TEST_SGI || c != 0) { fail(c, UNEXPECTED_IRQ); }
     WRITE(icc_eoir1_el1, iar);
     __asm__ volatile("isb" ::: "memory");
     if (id == TIMER_INTID) store(&timer_count[c], load(&timer_count[c]) + 1);
+    if (id == TEST_SGI && c == 0)
+        store(&ipi_completed, load(&ipi_completed) + 1);
 }
 void vspi_exception(void)
 {
@@ -224,6 +229,76 @@ static void stress(u32 c)
         marker("STRESS PASS");
     }
 }
+/* Observe completed timers on both CPUs, bounded by the counter even if
+ * either timer stops. Main executes only after combined guest EOI + ISB. */
+static void timer_window(u64 start)
+{
+    u32 t0 = load(&timer_count[0]), t1 = load(&timer_count[1]);
+    while (load(&timer_count[0]) - t0 < 10 || load(&timer_count[1]) == t1)
+        check_wait(0, start);
+    check_wait(0, start);
+}
+static void require_empty_uart(u32 error)
+{
+    if (load(&rx_bytes) != TOTAL_BYTES || !(r32(UART + 0x18) & RXFE) ||
+        ((r32(UART + 0x3c) | r32(UART + 0x40)) & RX_MASK)) fail(0, error);
+    report_error();
+}
+static void sibling_ipis(void)
+{
+    for (u32 k = 1; k <= IPI_ROUNDS; ++k) {
+        u64 start = now();
+        while (load(&ipi_request) < k) check_wait(1, start);
+        check_wait(1, start);
+        if (load(&ipi_request) != k || load(&ipi_completed) != k - 1) {
+            fail(1, UNEXPECTED_IRQ); idle();
+        }
+        /* VM-local CPU0, from CPU1: exercises the physical kick/reload path.
+         * One outstanding INTID at a time respects fixed LR2 capacity. */
+        WRITE(icc_sgi1r_el1, ((u64)TEST_SGI << 24) | 1);
+        __asm__ volatile("isb" ::: "memory");
+        store(&ipi_sent, k);
+    }
+}
+static void replay_regression(void)
+{
+    require_empty_uart(RX_DATA);
+    u64 start = now();
+    timer_window(start); /* Allow already initiated UART delivery to settle. */
+    u32 quiet_irqs;
+    do {
+        quiet_irqs = load(&uart_irqs);
+        timer_window(start); /* Restart window, not the whole settling deadline. */
+    } while (load(&uart_irqs) != quiet_irqs);
+    require_empty_uart(RX_DATA);
+    if (load(&ipi_completed)) fail(0, UNEXPECTED_IRQ);
+    report_error();
+    marker("DRAINED");
+    for (u32 k = 1; k <= IPI_ROUNDS; ++k) {
+        u32 received = load(&rx_bytes), completed = load(&ipi_completed);
+        u32 t0 = load(&timer_count[0]), t1 = load(&timer_count[1]);
+        start = now();
+        store(&ipi_request, k);
+        while (load(&ipi_sent) < k || load(&ipi_completed) < completed + 1)
+            check_wait(0, start);
+        if (load(&ipi_sent) != k || load(&ipi_completed) != completed + 1)
+            fail(0, UNEXPECTED_IRQ);
+        check_wait(0, start);
+        numbered("IPI PASS", k);
+        timer_window(now());
+        /* Even an empty UART IRQ is a replay after DRAINED. Retain the
+         * drained count across ALL rounds, including marker-printing gaps. */
+        if (load(&uart_irqs) != quiet_irqs || load(&rx_bytes) != received)
+            fail(0, UART_REPLAY);
+        require_empty_uart(UART_REPLAY);
+        if (load(&ipi_completed) != completed + 1) fail(0, UNEXPECTED_IRQ);
+        if (load(&timer_count[0]) - t0 < 10 || load(&timer_count[1]) == t1)
+            fail(0, EARLY_TIMER);
+        report_error();
+        numbered("QUIET PASS", k);
+    }
+    marker("REPLAY PASS");
+}
 void vspi_secondary(void)
 {
     timer_setup(1);
@@ -232,7 +307,8 @@ void vspi_secondary(void)
     while (!load(&mode)) {
         if (now() - start >= 180 * freq) { fail(1, DEADLINE); idle(); }
     }
-    if (load(&mode) == 'S') stress(1);
+    if (load(&mode) == 'S' || load(&mode) == 'R') stress(1);
+    if (load(&mode) == 'R') sibling_ipis();
     idle();
 }
 void vspi_primary(void)
@@ -265,7 +341,8 @@ void vspi_primary(void)
     }
     report_error();
     marker("GATE PASS");
-    if (load(&mode) == 'S') stress(0);
+    if (load(&mode) == 'S' || load(&mode) == 'R') stress(0);
+    if (load(&mode) == 'R') replay_regression();
     marker("DONE");
     idle();
 }
