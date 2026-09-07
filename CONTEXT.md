@@ -11,6 +11,8 @@ This project implements a minimal ARM64 Type-1 hypervisor capable of booting a L
 - EL1: guest kernel execution level.
 - EL0: guest user-space execution level.
 - VCPU: virtual CPU state owned by the hypervisor.
+- pCPU: physical processor that executes a VCPU or hypervisor code.
+- Static 1:1 pinning: a fixed assignment in which each VCPU has a distinct pCPU.
 - Stage-2 translation: guest physical address to host physical address translation.
 - Trap: an exception from guest EL1/EL0 into EL2.
 - VM exit: transition from guest execution to hypervisor.
@@ -19,6 +21,8 @@ This project implements a minimal ARM64 Type-1 hypervisor capable of booting a L
 - VTTBR_EL2: root pointer for stage-2 translation tables.
 - SPSR_EL2 / ELR_EL2: guest return state.
 - GIC: ARM interrupt controller.
+- vGIC: virtual interrupt controller presented to a VM's VCPUs, distinct from the physical GIC owned by EL2.
+- vuart: virtual UART through which a guest exchanges console characters, distinct from the physical UART owned by EL2.
 - PSCI: firmware interface normally used by Linux for CPU and power management.
 
 ## Non-goals for MVP
