@@ -1,6 +1,6 @@
 # vGIC 虚拟 SPI 投递：深化现有 module
 
-> **状态：** 已实施职责收拢并通过定向验证；独立同步与旧结构回归门槛已接受。最终职责收拢审查、Standards/Spec 审查及完整验证待完成。
+> **状态：** 已实施；独立同步、旧结构回归、职责收拢、Standards/Spec 审查已接受。2026-09-07 clean normal build（零警告）及一次完整 `make test`（含 vspi）通过；最终证据见 §9 与实施计划。
 > **基线：** 设计基线 `d29047f`；执行基线 `7cc4e5771ce1d655430fa67643225aef5b7cec47`，当前 M10 的静态 1:1 VCPU/pCPU 绑定。
 > **顺序：** 先独立验证同步前置条件，再做保持行为的职责收拢；不替代或重排 M11。
 
@@ -221,5 +221,14 @@ PSCI 生命周期或静态 Board 配置；不新增通用 IRQ 队列、LR alloca
 - 具体命令、源码论证和目录见 [实施计划](../plans/2026-09-07-vgic-spi-delivery-deepening.md)
   Task 3 evidence；旧结构的 RX 抑制、两 VM replay FAIL 7 实验仍作为检测灵敏度证据。
   本阶段未重跑故障注入，也未执行保留的完整 `make test`。
-- 有界 QEMU 调度证据不是形式化 race proof。最终审查/完整 suite 待完成，
-  不声称调度、offline/startup 投递可靠性或新生命周期语义。
+- 最终职责收拢、Standards、Spec 原生审查在 `ccedd793155f71732f5cacde80562dec297a924d`
+  均为 `clear`。前两者指出 `vm.h` 的已删除符号注释及计划 audit 摘要不准确；
+  supervisor 授权在 clean build 前仅修正该注释，最终 receipt 已纠正摘要，历史 log 保留。
+- 最终 `make clean`、`make`（零警告）、host/target offsets、shell syntax 与 diff checks
+  均通过；一次 `VSPI_LOG=/tmp/vspi-final-validation-cg3Qr8/vspi-qemu.log make test`
+  返回 0，含 M1/M3/M4、dual-SVM、shell 和 vspi regression。完整输出
+  `/tmp/vspi-final-validation-cg3Qr8/{build,offsets,full-test}.log`。
+  suite 仍有原有 svm3 ELF RWX linker warning；不把 suite 宣称为零警告。
+- 有界 QEMU 调度证据不是形式化 race proof；源码同步论证仍是必要证据。
+  未运行 Linux boot，不声称调度、offline/startup 投递可靠性或新生命周期语义。
+  最终改动仅为上述注释及三个状态/证据文档，未修改可执行逻辑或测试。

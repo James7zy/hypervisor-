@@ -6,7 +6,9 @@ the execution supervisor). The source argument and Task 1 evidence below
 record the synchronized old producer. Task 2's regression gate was subsequently
 accepted at `857abfc`; Task 3 consolidates the same protocol in `vgic_inject_spi`
 and removes the public shadow setter. See the parent delivery spec/plan for
-current implementation status; final delivery review/full validation remain pending.
+current implementation status. Delivery, Standards and Spec reviews accepted
+`ccedd793155f71732f5cacde80562dec297a924d`; final clean normal build and the one
+reserved full suite passed on 2026-09-07 (receipt below).
 Independent prerequisite to
 [the approved delivery design](2026-09-07-vgic-spi-delivery-deepening-design.md).
 Execution baseline: `7cc4e5771ce1d655430fa67643225aef5b7cec47`.
@@ -403,4 +405,26 @@ Bounded stress explores finite QEMU schedules. The source-level critical-section
 and initialization argument, independently reviewed at the prerequisite gate,
 is essential even with observed red and the bounded green runs. No formal race proof,
 IRQ-per-byte guarantee, queueing, offline/startup reliability, Linux gate,
-scheduler safety or later replay-detector acceptance is claimed.
+scheduler safety or later replay-detector acceptance is claimed by Task 1 alone.
+
+## Final validation receipt (2026-09-07)
+
+Task 2's replay detector and Task 3's unchanged synchronization protocol were
+subsequently independently accepted, as recorded in the parent plan. Final
+reviewed source HEAD is `ccedd793155f71732f5cacde80562dec297a924d`.
+The supervisor authorized one comment-only correction in `vm.h` naming remote
+`vgic_inject_spi()` instead of the removed public setter, before clean rebuilding.
+No synchronization code, test code or invariant changed in this final stage.
+
+`make clean`, warning-free normal `make`, host/target offset checks and one full
+`make test` passed. The latter includes the vspi regression: both VMs completed
+4096 ordered RX bytes, shared-GIC/UART stress, and 16 sibling-IPI/quiet pairs
+with timer progress and no UART replay. Complete logs are under
+`/tmp/vspi-final-validation-cg3Qr8/`; `full-test.log` retains the pre-existing
+svm3 ELF RWX linker warning. The new normal/vspi builds have no warning.
+The source reference audit in `preflight.log` now finds only the private locked
+shadow helper; the prior audit's stale `vm.h` comment finding is not erased.
+
+This receipt closes the final execution gate, not the excluded scheduler,
+startup/offline, lifecycle or Linux-boot work. Finite guest behavior evidence
+still supplements, rather than replaces, the accepted source-level argument.

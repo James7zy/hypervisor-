@@ -4,6 +4,8 @@
 
 **Goal:** Synchronize the existing static PL011 SPI path, establish a guest-observable regression on its old producer structure, then consolidate delivery responsibility inside `vgic_inject_spi()`.
 
+**Status:** Implementation and independent gates accepted; final clean normal build and the reserved full suite passed on 2026-09-07. See the final validation receipt for exact tested revision, review-note cleanup and logs.
+
 **Architecture:** Retain vuart device semantics and fixed LR0/LR1/LR2 assignments. Independently serialize mutable UART, GIC MMIO and LR1 publication/consumption state; subsequently move placement/publication/kick orchestration behind the existing vGIC interface. One dedicated `vspi` fixture grows vertically across the tasks.
 
 **Tech Stack:** Freestanding AArch64 C/assembly, existing ticket spinlocks, GNU make/toolchain, POSIX shell, QEMU virt/GICv3.
@@ -603,7 +605,9 @@ git diff --check
   or producer references; second must have no matches. A grep status of 1 here
   is expected absence, not a tooling failure. Review that Task 3 changes only
   responsibility placement/contracts, not lock semantics or test expectations.
-- [ ] **5. One final complete suite, with clean header-dependent objects.**
+- [x] **5. One final complete suite, with clean header-dependent objects.**
+  Completed 2026-09-07; actual commands/log paths are in the final receipt.
+  `make clean` removed all nested test build directories as well.
 
 ```sh
 set -o pipefail
@@ -798,7 +802,7 @@ review remain essential. Fixed LR capacity/coalescing, static pinning,
 startup/offline guarantees, Linux, lifecycle and scheduling remain outside
 this regression's claims. Task 3 and the reserved full suite remain next.
 
-## Task 3 implementation delivery (final review/validation pending)
+## Task 3 implementation delivery (targeted-stage historical receipt)
 
 Supervisor confirmed both prerequisite reviews above before production edits.
 The native review reports are respectively:
@@ -806,7 +810,8 @@ The native review reports are respectively:
 and
 `/tmp/pi-subagents-uid-1000/async-subagent-runs/e05670d1-a9d2-4aad-9e29-079436768d8a/structured-output/pi-subagent-structured-dCczkv/output.json`.
 Task 3 was expressly assigned to commit after focused checks; step 5's one
-full suite, Task 3 gate and final Standards/Spec reviews are still pending.
+full suite, Task 3 gate and final Standards/Spec reviews were pending at that
+stage; all subsequently completed as recorded in the final receipt below.
 
 ### Source-level preservation argument
 
@@ -867,8 +872,11 @@ and quiet windows, REPLAY PASS/DONE per VM. G and S retained their own markers.
 No fixture, runner or Makefile edit or permanent mutation was made in Task 3.
 Old-producer mutation results remain Task 2's independent sensitivity evidence.
 
-`/tmp/vspi-deep-source-audit.log` records the Task 3 grep audit: shadow setter
-matches only the private helper definition/use in vgic.c; forbidden physical
+`/tmp/vspi-deep-source-audit.log` records the Task 3 grep audit: executable
+shadow setter matches are the private helper definition/use in vgic.c, but
+line 3 also finds a stale removed-setter comment in vm.h. The original receipt
+incorrectly omitted that comment hit; final reviewers identified it and the
+final-stage source audit below verifies its correction. Forbidden physical
 placement/LR/barrier/kick terms have zero matches in vuart.c. It also inventories
 LR1/pending/init/save/restore and confirms no diff in tests, Makefile,
 hypervisor/include or vgic_v3_mmio.c. `git diff --check` passed.
@@ -882,3 +890,76 @@ startup/offline delivery guarantee or Linux gate is claimed. No full
 `make test` was run in this stage. The required scratch review package is
 regenerated after the standalone refactor commit, with baseline-to-HEAD
 committed diff and an actually checked empty index.
+
+## Final validation and review receipt (2026-09-07)
+
+Reviewed/tested implementation HEAD:
+`ccedd793155f71732f5cacde80562dec297a924d`, on `master`; execution baseline
+`7cc4e5771ce1d655430fa67643225aef5b7cec47` was resolved again with `git rev-parse`.
+Entry worktree and index were clean. All temporary mutation experiments were
+already restored: `git diff --exit-code HEAD -- hypervisor tests Makefile`
+passed before the one authorized comment correction. No executable production
+or test changes were made during this stage.
+
+### Independent review receipts
+
+The supplied Standards/Spec Markdown artifacts were empty. The supervisor
+confirmed the canonical native JSON verdicts below, and this writer read all
+three reports rather than inferring acceptance from empty files:
+
+| Review | Run / native report | Verdict at reviewed HEAD |
+|---|---|---|
+| Delivery gate | `/tmp/pi-subagents-uid-1000/async-subagent-runs/787ca400-636f-4e42-a4e6-4ec772078958/structured-output/pi-subagent-structured-TCH81H/output.json` | clear, OK with notes |
+| Standards | `/tmp/pi-subagents-uid-1000/async-subagent-runs/b2ea344a-5cfa-4b8b-b40b-856646cfbe03/structured-output/pi-subagent-structured-w08ZUR/output.json` | clear, OK with notes |
+| Spec | `/tmp/pi-subagents-uid-1000/async-subagent-runs/76444dd0-d08a-4889-ae6f-d14d3eeb9a7f/structured-output/pi-subagent-structured-v1GwqU/output.json` | clear, no issues found |
+
+Delivery/Standards noted the stale `vgic_set_spi_shadow()` reference in
+`vm.h:61` and the inaccurate Task 3 audit summary above. Supervisor explicitly
+authorized this one **comment-only header correction before clean rebuilding**:
+pending publication now names remote `vgic_inject_spi()`. Historical logs are
+preserved. A fresh source-reference audit finds only the private locked helper
+in vgic.c, no placement/LR/barrier/kick references in vuart.c, and the corrected
+comment in vm.h. The subsequent cleanup is comment/documentation-only, not a
+claim that reviewers had inspected a later executable revision.
+
+### Actual final commands and results
+
+Complete output directory: `/tmp/vspi-final-validation-cg3Qr8` (outside source).
+All commands below passed; no native failure, retry, fallback or second full
+suite execution occurred in this stage.
+
+| Command/check | Log / result |
+|---|---|
+| `git rev-parse` baseline/HEAD, branch/status/index and restored-source diff checks; `grep -R -n 'vgic_set_spi_shadow' hypervisor`; vuart responsibility grep; `sh -n tests/run_vspi_test.sh`; `git diff --check` and baseline-to-HEAD whitespace check | `preflight.log`; only the authorized vm.h comment differed before build |
+| `make clean` | `clean.log`; removed `build/`, including all prior header-dependent normal/test objects |
+| `make` | `build.log`; normal Linux-profile hypervisor compiled with `-mgeneral-regs-only`, `-Werror`, zero warning/error diagnostics (`build-diagnostics.log` empty); this is not a Linux boot |
+| `make check-offsets check-offsets-target` | `offsets.log`; host and cross-compiled offsets passed |
+| `VSPI_LOG=/tmp/vspi-final-validation-cg3Qr8/vspi-qemu.log make test` | **One invocation**, `full-test.log` complete stdout/stderr; `full-test-receipt.log` records HEAD and exit 0 |
+
+The full suite passed host/target offsets, M1 bare guest, M3 software vIRQ,
+M4 hardware-forwarded timer, dual-VM `svm4`, EL2 shell and vspi regression.
+`test-qemu-vspi` is already a `test` prerequisite, so no duplicate standalone
+invocation was necessary. Its new images were built after clean in
+`build/test-vspi`; `vspi-qemu.log` preserves complete guest output. Both VMs
+reported GATE PASS, 128 RX READY/PASS batches (4096 ordered bytes each), STRESS
+PASS, DRAINED, 16 sibling IPI PASS/QUIET PASS pairs, REPLAY PASS and DONE;
+runner reports `VSPI ALL PASS`. Other existing runners emit their assertion
+results on success, not full captured QEMU serial output; those results are
+retained verbatim in `full-test.log`.
+
+The full-suite build retains **one pre-existing svm3 ELF RWX LOAD linker
+warning**, at `full-test.log:40`; no warning was suppressed or fixed here.
+The normal build and new vspi build have no warnings. Process inspection after
+the suite found no remaining QEMU process. Syntax/whitespace checks and empty
+index/clean worktree checks are repeated around the final documentation commit;
+the regenerated scratch review package records final HEAD and the commit list.
+
+Only the three parent status/evidence documents and the authorized vm.h comment
+are included in the final receipt commit. Implementation history remains
+`19b4102` (plan), `6a0b4b5` (mapping), `91712ed` (synchronization), `857abfc`
+(regression), `ccedd79` (delivery consolidation), then this receipt. No push.
+
+Residual limits: finite QEMU schedules do not formally prove race freedom;
+the independently accepted source synchronization argument remains essential.
+No Linux boot was run, no scheduler/queue/allocator or lifecycle/focus policy
+changed, no new startup/offline delivery or IRQ-per-byte guarantee is claimed.

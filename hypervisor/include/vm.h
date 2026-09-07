@@ -58,7 +58,7 @@ struct vcpu {
     struct vm *owner;        /* back-pointer: trap handlers navigate via
                                 current_vcpu()->owner instead of globals */
     u32        vcpu_idx;     /* affinity inside the VM (VMPIDR Aff0) */
-    /* M5 slice 3 fix: set by vgic_set_spi_shadow() right before kicking the
+    /* M5 slice 3 fix: set by remote vgic_inject_spi() before kicking the
      * owning pCPU, test-and-cleared by vgic_reload_spi_lr() on that pCPU.
      * Distinguishes "this kick-SGI carries a freshly-shadowed PL011 SPI" from
      * "this kick-SGI is an ordinary cross-core IPI/park-check with nothing
