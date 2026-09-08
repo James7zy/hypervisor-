@@ -14,14 +14,10 @@
 #include <vm.h>
 #include <vm_config.h>
 #include <spinlock.h>
-#include <gic_v3.h>              /* GICR_SGI_OFFSET, GICR_ISENABLER0 (physical) */
+#include <gic_v3.h>              /* gic_ppi_set_enable (physical PPI rearm) */
 #include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
 #include "vgic_debug.h"
-
-/* Physical GICR SGI-frame enable registers (relative to RD_base + SGI frame). */
-#define GICR_PHYS_ISENABLER0  0x0100U
-#define GICR_PHYS_ICENABLER0  0x0180U
 
 /* ── GICD shadow state (1024 INTIDs => 32 words of 1 bit/INTID) ── */
 struct vgicv3_dist {
