@@ -78,24 +78,6 @@ void vgic_sgi_trap(u64 sgi1r)
 }
 
 /*
- * Force every other ONLINE pCPU of VM `m` into EL2 (M5 slice 3, VM-scoped
- * PSCI power-down). Deliberately does NOT touch sgi_pending: this kick is not
- * carrying a virtual SGI, just forcing the target to EL2 so it can observe
- * m->off (checked in el2_irq_handler's kick-SGI branch) and park instead of
- * re-entering its guest.
- */
-void vgic_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
-{
-    for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
-        u32 pcpu = m->config->pcpu_base + idx;
-        if (pcpu == caller_pcpu)
-            continue;
-        if (percpu[pcpu].online)
-            gic_kick_pcpu(pcpu);
-    }
-}
-
-/*
  * Target path (kicked pCPU): drain this core's pending SGI bitmap and inject
  * each as a virtual SGI. Called from el2_irq_handler on BOARD_KICK_SGI.
  */

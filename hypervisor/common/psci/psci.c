@@ -5,7 +5,7 @@
 #include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include <percpu.h>
 #include <psci.h>
-#include "../../arch/arm64/irq/vgic_sgi.h"
+#include <gic_v3.h>
 
 /* secondary_entry (head.S): EL2 PA the secondary core is powered on at. */
 extern char secondary_entry[];
@@ -66,6 +66,27 @@ static u64 psci_cpu_on_guest(struct vcpu_regs *regs)
 }
 
 /*
+ * Force every ONLINE pCPU of VM `m` other than `caller_pcpu` into EL2 via the
+ * physical kick SGI. Carries no virtual interrupt and touches no vGIC state:
+ * the kick exists purely so each target re-enters EL2 and observes `m->off`
+ * (el2_irq_handler's kick-SGI branch), then parks instead of re-entering its
+ * guest. That makes this PSCI policy, not interrupt virtualization, which is
+ * why it lives here rather than in the vGIC.
+ *
+ * Callers must set m->off and order it (dsb ish) BEFORE calling.
+ */
+static void psci_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
+{
+    for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
+        u32 pcpu = m->config->pcpu_base + idx;
+        if (pcpu == caller_pcpu)
+            continue;
+        if (percpu[pcpu].online)
+            gic_kick_pcpu(pcpu);
+    }
+}
+
+/*
  * VM-scoped power-down (M5 slice 3). A guest's CPU_OFF/SYSTEM_OFF/
  * SYSTEM_RESET must stop only ITS OWN VM: mark the VM `off`, kick its other
  * pCPU(s) into EL2 so they notice `off` (el2_irq_handler's kick-SGI branch)
@@ -83,7 +104,7 @@ static void psci_power_down(const char *what)
 
     m->off = 1;
     asm volatile("dsb ish" ::: "memory");
-    vgic_kick_vm_other_pcpus(m, caller_pcpu);
+    psci_kick_vm_other_pcpus(m, caller_pcpu);
 
     for (;;)
         asm volatile("wfi");

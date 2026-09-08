@@ -44,7 +44,7 @@ void el2_irq_handler(void)
 
         /*
          * M5 slice 3: VM-scoped PSCI power-down. If this pCPU's VM has been
-         * marked off (psci_power_down, kicked via vgic_kick_vm_other_pcpus),
+         * marked off (psci_power_down, kicked via psci_kick_vm_other_pcpus),
          * do NOT drain the SGI bitmap or return to the guest loop -- the only
          * re-entry point back to the guest from this handler is the trailing
          * eret in irq_handler_asm.S, so parking HERE, before returning, is
