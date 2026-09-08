@@ -419,7 +419,7 @@ guest 访问被挖洞的 GIC 地址 → Stage-2 fault 后，由这条既有链�
 - `hypervisor/arch/arm64/vmexit/vmexit.c` → `handle_exit()`：`case 0x24` 分流 Data Abort。
 - `hypervisor/arch/arm64/vmexit/mmio.c` → `mmio_handle_data_abort()` / `mmio_bus_lookup()`：
   解析 ISS、按 IPA 查 MMIO 总线。
-- `hypervisor/arch/arm64/irq/vgic_v3_mmio.c` → `vgicd_mmio_handler()` / `vgicr_mmio_handler()`，
+- `hypervisor/arch/arm64/vgic/vgic_v3_mmio.c` → `vgicd_mmio_handler()` / `vgicr_mmio_handler()`，
   经 `vgicv3_mmio_init()` 注册到 MMIO 总线。
 
 > 这条接收链在 punch-hole 之前就存在，只是当时 GIC 访问从不 fault、handler 从未被调用

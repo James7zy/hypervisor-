@@ -3,8 +3,8 @@
 本文解释 hypervisor 怎么把一个中断「注入」进 guest，让 guest 在 EL1 看到并处理它。
 源码：
 
-- `hypervisor/arch/arm64/irq/vgic.c` — 三个注入函数 + save/restore。
-- `hypervisor/arch/arm64/irq/vgic.h` — `ICH_LR<n>_EL2` 列表寄存器位定义。
+- `hypervisor/arch/arm64/vgic/vgic.c` — 三个注入函数 + save/restore。
+- `hypervisor/arch/arm64/vgic/vgic.h` — `ICH_LR<n>_EL2` 列表寄存器位定义。
 - `hypervisor/arch/arm64/irq/irq_handler.c` — EL2 物理 IRQ → 选哪种注入。
 
 配套阅读：物理 IRQ 怎么进到 EL2 见 [vcpu-run-world-switch.md](vcpu-run-world-switch.md)；

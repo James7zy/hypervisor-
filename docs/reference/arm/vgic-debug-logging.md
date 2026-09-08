@@ -6,7 +6,7 @@
 > [vgic-injection.md](vgic-injection.md)（注入写 `ICH_LR` 的细节）。
 
 本文说明仓库内置的 vGIC 调试日志开关怎么用、打印的每个字段是什么意思、典型输出怎么读。
-代码见 `hypervisor/arch/arm64/irq/vgic_debug.h` 及它的 4 个调用点。
+代码见 `hypervisor/arch/arm64/vgic/vgic_debug.h` 及它的 4 个调用点。
 
 ---
 

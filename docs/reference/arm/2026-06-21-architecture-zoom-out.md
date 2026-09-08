@@ -94,8 +94,8 @@ GIC 工作拆成**三个互不混淆**的关注点：
 | 关注点 | 文件 | 拥有什么 |
 | --- | --- | --- |
 | **物理 GICv3**（host 侧） | `irq/gic_v3.c` | 真实 distributor/redistributor + EL2 CPU 接口。hypervisor 独占。 |
-| **vGIC CPU 接口**（硬件虚拟化） | `irq/vgic.c` + `vgic.h` | `ICH_*` 列表寄存器机制，向 guest **呈现**虚拟 IRQ。 |
-| **vGIC distributor/redistributor**（模拟） | `irq/vgic_v3_mmio.c` | 影子 GICD/GICR 寄存器——纯 trap-and-emulate，从不碰真实硬件。 |
+| **vGIC CPU 接口**（硬件虚拟化） | `vgic/vgic.c` + `vgic.h` | `ICH_*` 列表寄存器机制，向 guest **呈现**虚拟 IRQ。 |
+| **vGIC distributor/redistributor**（模拟） | `vgic/vgic_v3_mmio.c` | 影子 GICD/GICR 寄存器——纯 trap-and-emulate，从不碰真实硬件。 |
 
 核心框架：**guest 看到的是全虚拟 GIC**。它的 `ICC_*` CPU 接口访问被硬件经
 `ICC_SRE_EL2` 重定向到 `ICV_*`；它的 GICD/GICR **内存**访问以 Stage-2 data abort 陷入，命中
@@ -196,8 +196,8 @@ PL011 RX 分支在 EL2 里 `gic_priority_drop` **且** `gic_deactivate`（不再
 | `vmexit/mmio.c` | MMIO 总线 | 各模拟设备；ADR-0006 |
 | `arch/.../mmu/stage2.c` | Stage-2 GPA→PA 隔离 | `vm_init`；ADR-0004 |
 | `arch/.../irq/gic_v3.c` | 物理 GICv3（host） | `main.c`；ADR-0012 |
-| `arch/.../irq/vgic.c` | vGIC CPU 接口（ICH_*、LR） | `vm_init`、`vmexit.c`、timer |
-| `arch/.../irq/vgic_v3_mmio.c` | GICD/GICR 模拟 | 注册到 MMIO 总线；ADR-0010 |
+| `arch/.../vgic/vgic.c` | vGIC CPU 接口（ICH_*、LR） | `vm_init`、`vmexit.c`、timer |
+| `arch/.../vgic/vgic_v3_mmio.c` | GICD/GICR 模拟 | 注册到 MMIO 总线；ADR-0010 |
 | `arch/.../timer/vtimer.c` | 虚拟定时器、PPI 注入 | `main.c`、IRQ handler；ADR-0001 |
 | `common/psci/psci.c` | PSCI 电源管理 | `handle_hvc` |
 | `dm/virtio_mmio.c`+`virtqueue.c`+`virtio_console.c` | 设备模型：virtio-mmio v2、virtqueue、console | `vm_init`、MMIO 总线；ADR-0011 |

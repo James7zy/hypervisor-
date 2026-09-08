@@ -189,6 +189,44 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 
 ### Board vs Driver separation
 
+### Physical GIC vs vGIC separation (2026-09-08)
+
+Interrupt code is split by ownership, in two directories that must not
+merge back:
+
+| Directory | Owns | Changes when |
+|---|---|---|
+| `arch/arm64/irq/` | `gic_v3.c` — the physical GICv3 the hypervisor owns; `irq_handler.c` — the EL2 dispatcher | the SoC changes (M15 RK3588) |
+| `arch/arm64/vgic/` | `vgic.c` (ICH_LR injection), `vgic_v3_mmio.c` (GICD/GICR trap-and-emulate), `vgic_sgi.c` (SGI/IPI) | guest-visible interrupt semantics change (M11 scheduler) |
+
+**The dependency is one-way: `vgic/` may call `gic_v3.h`; `irq/gic_v3.c` must
+never know about VMs, vCPUs or the vGIC.** Enforced by review, not by the
+build. Today `vgic/` reaches into the driver at exactly three call sites, all
+through public `gic_*` functions — keep that list short and deliberate:
+
+| Call site | Calls | Why |
+|---|---|---|
+| `vgic_v3_mmio.c` (guest enables its virtual PPI 27) | `gic_ppi_set_enable()` | rearm the physical vtimer PPI masked during early SMP bring-up |
+| `vgic_sgi.c` (guest IPI to another vCPU) | `gic_kick_pcpu()` | force the target pCPU to EL2 to drain its SGI bitmap |
+| `vgic.c` (remote SPI publication) | `gic_kick_pcpu()` | force the target pCPU to EL2 to reload its shadow LR1 |
+
+Consequences worth knowing before editing:
+- **Physical INTIDs stay out of `vgic/`.** Cross-core kicks go through
+  `gic_kick_pcpu()`, which hides `BOARD_KICK_SGI`. Do not write
+  `ICC_SGI1R_EL1` from outside `gic_v3.c`.
+- **`irq_handler.c` is a dispatcher only** — ack, decide, inject, EOI. Device
+  work does not belong there: PL011 console RX arbitration lives in
+  `dm/console.c` (`console_rx_drain()`), which owns `console_focus` and the
+  Ctrl-T/shell/vuart routing decision.
+- **Kicking a VM's pCPUs for power-down is PSCI policy**, not vGIC work — it
+  is `psci_kick_vm_other_pcpus()` in `common/psci/psci.c`.
+- **Do not create a shared `gic_regs.h`.** Both directories describe the same
+  ARM spec but take disjoint subsets for opposite purposes — `gic_v3.h` holds
+  registers EL2 *writes*, `vgic_v3_mmio.h` holds the `VGICD_`/`VGICR_` offsets
+  it *emulates*. Merging them produces a header neither side uses fully.
+- `docs/superpowers/{specs,plans}/` and `docs/adr/` still cite the pre-split
+  `irq/vgic*.c` paths on purpose; they are historical records.
+
 ### Key invariants
 
 - **`-mgeneral-regs-only` is mandatory**: M0 does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
