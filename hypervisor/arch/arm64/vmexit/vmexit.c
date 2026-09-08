@@ -7,7 +7,7 @@
 #include <psci.h>
 #include <vgic.h>
 #include "mmio.h"
-#include "../irq/vgic_sgi.h"
+#include <vgic_sgi.h>
 
 /* Defined in vmexit_asm.S; does not return */
 extern void hv_restore(void);

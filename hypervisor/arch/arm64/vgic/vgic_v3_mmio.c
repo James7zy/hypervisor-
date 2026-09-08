@@ -15,7 +15,7 @@
 #include <vm_config.h>
 #include <spinlock.h>
 #include <gic_v3.h>              /* gic_ppi_set_enable (physical PPI rearm) */
-#include "../../vmexit/mmio.h"   /* struct mmio_access, mmio_handler_t, bus */
+#include <mmio.h>                /* struct mmio_access, mmio_handler_t, bus */
 #include "vgic_v3_mmio.h"
 #include "vgic_debug.h"
 

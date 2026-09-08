@@ -9,7 +9,7 @@
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
-#include "../../arch/arm64/irq/vgic_v3_mmio.h"
+#include <vgic_v3_mmio.h>
 
 /* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
 extern char secondary_entry[];

@@ -19,7 +19,7 @@
 #include <percpu.h>
 #include <vm.h>
 #include "../arch/arm64/vmexit/mmio.h"
-#include "../arch/arm64/irq/vgic.h"
+#include <vgic.h>
 #include "vuart.h"
 #include "console.h"   /* console_focus */
 

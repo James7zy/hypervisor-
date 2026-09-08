@@ -19,7 +19,7 @@
 #include <vm.h>
 #include <asm/sysreg.h>
 #include <gic_v3.h>
-#include "../irq/vgic.h"
+#include <vgic.h>
 #include "../mmu/stage2.h"
 
 static inline void mmio_write32(unsigned long addr, u32 val)
