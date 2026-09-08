@@ -12,6 +12,7 @@
 #include <vm.h>
 #include <vm_config.h>   /* struct vm_config (pcpu_base), for vm_list */
 #include <vuart.h>
+#include <console.h>   /* console_focus */
 #include <hv_shell.h>
 
 #define HV_SHELL_PROMPT "hv> "

@@ -8,8 +8,8 @@
  * plays the same role there).
  *
  * Ctrl-T (0x14) on the physical UART is a two-state toggle handled by
- * irq_handler.c's PL011 RX-drain loop: it enters this shell, or exits back to
- * whichever VM console_focus names (vuart.h). A successful `vm_console <n>`
+ * console_rx_drain() (dm/console.c): it enters this shell, or exits back to
+ * whichever VM console_focus names (console.h). A successful `vm_console <n>`
  * command also exits immediately to the selected VM. While shell_active is
  * true, NO physical RX byte reaches any guest -- every byte is line-edited
  * here and interpreted as a command on Enter.
@@ -21,14 +21,14 @@
  */
 
 /* True while the physical console is owned by the shell rather than a guest.
- * Read by irq_handler.c to pick a dispatch; written only by the two functions
- * below. Plain extern matches this codebase's convention for simple
- * cross-file state (cf. console_focus in vuart.h, struct vm vm[]). */
+ * Read by console_rx_drain() to pick a dispatch; written only by the two
+ * functions below. Plain extern matches this codebase's convention for simple
+ * cross-file state (cf. console_focus in console.h, struct vm vm[]). */
 extern bool shell_active;
 
 /* Ctrl-T: the shell's toggle key on the physical UART. Intercepted by
- * irq_handler.c's PL011 RX-drain loop before either consumer (this shell or
- * a guest's vuart) sees the byte -- it is never delivered to any guest. */
+ * console_rx_drain() before either consumer (this shell or a guest's vuart)
+ * sees the byte -- it is never delivered to any guest. */
 #define HV_SHELL_ESCAPE_KEY 0x14U
 
 /* Ctrl-T while not in the shell: take the console and print the prompt. */

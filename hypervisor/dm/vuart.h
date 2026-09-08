@@ -9,9 +9,9 @@
  * 16 bytes deep, but QEMU's pl011 model (hw/char/pl011.c) gates chardev
  * delivery on that FIFO having room (pl011_can_receive: read_count < 16), so
  * a single physical RX IRQ can hand EL2 up to a full 16-byte backlog in one
- * drain (irq_handler.c's PL011 branch drains the physical FIFO to empty
- * before the guest ever runs, unlike the old passthrough design where the
- * guest drained incrementally by polling hardware itself). Size this ring
+ * drain (console_rx_drain() empties the physical FIFO before the guest ever
+ * runs, unlike the old passthrough design where the guest drained
+ * incrementally by polling hardware itself). Size this ring
  * with headroom above that worst-case single-IRQ burst so a normal typed
  * command line does not lose bytes before the guest gets scheduled to drain
  * it via DR reads.
@@ -28,20 +28,11 @@ struct vuart {
 
 struct vm;
 
-/* Which VM receives physical console RX when the EL2 shell is NOT active
- * (0..NR_VMS-1). A successful `vm_console <n>` command (hv_shell.c) sets this
- * value and immediately leaves the shell; Ctrl-T can also leave the shell
- * without changing it. TX is NOT gated by this -- every VM's output reaches
- * the physical UART regardless of focus or shell state, only RX (guest
- * keyboard input) is routed. Plain extern, matching this codebase's existing
- * convention for simple cross-file state (see e.g. struct vm vm[] itself). */
-extern u32 console_focus;
-
 /* Register the shared PL011 IPA region on the MMIO bus (call once). */
 void vuart_bus_init(void);
 /* EL2 RX path: push one received char into this VM's vuart and raise its
- * virtual RX interrupt (SPI 33) if unmasked. Caller (irq_handler.c's drain
- * loop) must check vuart_rx_has_room() BEFORE popping a byte off the
+ * virtual RX interrupt (SPI 33) if unmasked. Caller (console_rx_drain) must
+ * check vuart_rx_has_room() BEFORE popping a byte off the
  * physical UART with uart_getc() -- a physical read is destructive, so
  * dropping room-checking to inside vuart_rx would be too late to avoid
  * losing the byte. */

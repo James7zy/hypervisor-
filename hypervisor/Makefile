@@ -8,6 +8,7 @@ hv-objs := \
     common/psci/psci.o \
     common/percpu.o \
     dm/vuart.o \
+    dm/console.o \
     dm/hv_shell.o
 
 hv-includes := \

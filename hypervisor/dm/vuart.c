@@ -7,7 +7,7 @@
  * (stage2.c) so every guest access traps here instead of touching hardware.
  * TX is forwarded to the physical UART via console_putc (serialized with
  * printk under the same lock); RX is filled by EL2's IRQ handler draining the
- * physical FIFO and calling vuart_rx() (irq_handler.c, BOARD_PL011_IRQ branch).
+ * physical FIFO and calling vuart_rx() (console_rx_drain, dm/console.c).
  *
  * Registered ONCE globally on the M3.1 MMIO bus; the handler resolves the
  * faulting VM per-access via current_vcpu()->owner, matching vgic_v3_mmio.c's
@@ -21,6 +21,7 @@
 #include "../arch/arm64/vmexit/mmio.h"
 #include "../arch/arm64/irq/vgic.h"
 #include "vuart.h"
+#include "console.h"   /* console_focus */
 
 /* ── PL011 register offsets this model implements ── */
 #define VUART_DR     0x000U
@@ -53,10 +54,6 @@ static const u8 vuart_amba_id[8] = {
     0x11, 0x10, 0x14, 0x00, 0x0D, 0xF0, 0x05, 0xB1,
 };
 
-/* Which VM receives console RX while the EL2 shell is inactive; VM0 at boot.
- * Set when the shell's `vm_console <n>` command attaches and exits. See
- * vuart.h for the full contract and hv_shell.h for console ownership. */
-u32 console_focus = 0;
 
 static bool vuart_rx_empty(const struct vuart *u)
 {
