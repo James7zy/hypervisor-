@@ -70,7 +70,7 @@ void el2_irq_handler(void)
          * M5 slice 3: reload ICH_LR1_EL2 (the PL011 vSPI LR) from this
          * pCPU's own current vCPU shadow state. Covers the cross-core
          * console-focus injection path (vuart_rx -> vgic_inject_spi ->
-         * vgic_kick_pcpu): vGIC publishes and orders remote state before
+         * gic_kick_pcpu): vGIC publishes and orders remote state before
          * kicking the owner here to write its own live list register.
          *
          * Called unconditionally on EVERY kick-SGI, including ordinary

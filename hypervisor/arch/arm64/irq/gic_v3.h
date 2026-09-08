@@ -48,4 +48,15 @@ void gic_deactivate(u32 intid);
  * re-enabled when the guest enables its virtual PPI. */
 void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable);
 
+/* Force pCPU `cpu` into EL2 by sending it the physical kick SGI. The INTID
+ * used (BOARD_KICK_SGI) is an implementation detail of this driver: callers
+ * express the intent ("make that pCPU take an EL2 interrupt now"), not the
+ * mechanism, so nothing above this layer needs to know a physical INTID.
+ *
+ * Carries no payload — it neither marks a virtual SGI pending nor publishes
+ * any vGIC state. Callers that need the target to observe new shared state
+ * must publish and order that state (dsb ish) BEFORE calling. What the target
+ * then does with the kick is decided entirely in el2_irq_handler. */
+void gic_kick_pcpu(u32 cpu);
+
 #endif /* HV_GIC_V3_H */

@@ -38,7 +38,8 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
  * vcpu_idx, stable static 1:1 pinning and EL2 trap/IRQ context with IRQs masked.
  *
  * Writes live LR1 only when target == current_vcpu(); otherwise internally
- * publishes, orders and kicks owner->config->pcpu_base + vcpu_idx for reload.
+ * publishes, orders and kicks owner->config->pcpu_base + vcpu_idx (via
+ * gic_kick_pcpu) for reload.
  * Payload, pending and any live write/consumption share the target's spi_lock.
  * A remote target must be online and able to handle the kick. No startup,
  * offline or lifecycle guarantee, scheduling support, or IRQ queue is added.

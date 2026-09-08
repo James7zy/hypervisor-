@@ -12,13 +12,6 @@ void vgic_sgi_trap(u64 sgi1r);
 /* Target pCPU: drain this core's pending SGI bitmap into its LRs. */
 void vgic_sgi_drain(u32 cpu);
 
-/* Force pCPU `cpu` into EL2 via the physical kick SGI (BOARD_KICK_SGI). Used
- * for any cross-core "make this pCPU notice new shadow state and reload it"
- * need -- the SGI/IPI path and remote PL011 SPI delivery
- * (vuart_rx -> vgic_inject_spi -> kick -> vgic_reload_spi_lr) share the
- * physical mechanism. Does not mark anything pending in the SGI bitmap. */
-void vgic_kick_pcpu(u32 cpu);
-
 /* Force every ONLINE pCPU of VM `m` other than `caller_pcpu` into EL2 via the
  * physical kick SGI, without marking anything pending in the SGI bitmap (no
  * virtual SGI is meant to be delivered — the target is expected to notice

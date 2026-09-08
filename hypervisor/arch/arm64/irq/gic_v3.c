@@ -111,6 +111,18 @@ void gic_deactivate(u32 intid)
     SYSREG_WRITE(ICC_DIR_EL1, intid);
 }
 
+/* ICC_SGI1R_EL1 fields (Arm IHI0069). Our topology is flat: Aff1=Aff2=Aff3=0,
+ * so the TargetList bitmap alone selects the target PE and its bit is Aff0,
+ * which equals the pCPU index. */
+#define SGI1R_INTID_SHIFT   24
+
+void gic_kick_pcpu(u32 cpu)
+{
+    u64 sgi = ((u64)BOARD_KICK_SGI << SGI1R_INTID_SHIFT) | (1ULL << cpu);
+    asm volatile("msr ICC_SGI1R_EL1, %0" :: "r"(sgi));
+    asm volatile("isb");
+}
+
 void gic_ppi_set_enable(u32 cpu, u32 intid, bool enable)
 {
     const unsigned long sgi = BOARD_GIC_RDIST_BASE

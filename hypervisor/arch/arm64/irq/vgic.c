@@ -4,7 +4,7 @@
 #include <vm_config.h>
 #include <percpu.h>
 #include <vgic.h>
-#include <vgic_sgi.h>
+#include <gic_v3.h>
 #include <asm/sysreg.h>
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
@@ -92,7 +92,7 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
 
     if (!local) {
         asm volatile("dsb ish" ::: "memory");
-        vgic_kick_pcpu(pcpu);
+        gic_kick_pcpu(pcpu);
     }
 }
 

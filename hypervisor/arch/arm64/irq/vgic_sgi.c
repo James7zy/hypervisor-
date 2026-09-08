@@ -39,15 +39,6 @@ static struct spinlock sgi_lock = SPINLOCK_INIT;
 #define SGI1R_TARGETLIST    0xFFFFULL          /* bits [15:0] */
 #define SGI1R_IRM           (1ULL << 40)       /* 1 = broadcast to all but self */
 
-/* Send the physical kick SGI to pCPU `cpu` via the real ICC_SGI1R_EL1.
- * TargetList bit = (1 << Aff0); Aff0 == cpu for our topology. */
-static void kick_pcpu(u32 cpu)
-{
-    u64 sgi = ((u64)BOARD_KICK_SGI << SGI1R_INTID_SHIFT) | (1ULL << cpu);
-    asm volatile("msr ICC_SGI1R_EL1, %0" :: "r"(sgi));
-    asm volatile("isb");
-}
-
 /*
  * Trap path (sender pCPU): decode the guest's ICC_SGI1R_EL1 value, mark the
  * target vCPUs' pending bitmaps, and kick each target pCPU. Targets are
@@ -81,7 +72,7 @@ void vgic_sgi_trap(u64 sgi1r)
             /* Self-IPI: inject directly, no physical kick needed. */
             vgic_sgi_drain(pcpu);
         } else {
-            kick_pcpu(pcpu);
+            gic_kick_pcpu(pcpu);
         }
     }
 }
@@ -100,16 +91,8 @@ void vgic_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
         if (pcpu == caller_pcpu)
             continue;
         if (percpu[pcpu].online)
-            kick_pcpu(pcpu);
+            gic_kick_pcpu(pcpu);
     }
-}
-
-/* Exported single-pCPU kick: vgic_inject_spi uses this after publishing and
- * ordering remote PL011 state. The target reloads via vgic_reload_spi_lr;
- * this notification neither publishes SPI state nor marks the SGI bitmap. */
-void vgic_kick_pcpu(u32 cpu)
-{
-    kick_pcpu(cpu);
 }
 
 /*
