@@ -32,6 +32,11 @@
   架构鸟瞰:一次「拉高一层」的整体梳理,从顶层调用链 → GIC 子系统 → 一次键盘输入
   端到端 trace,三层逐步放大,把各模块与调用者串成一张图。新读者入口。配套
   [[adr-0012]](物理 GICv3 独占)。
+- [arm/target-architecture.md](arm/target-architecture.md) — **目标架构**(ACRN 模型,
+  M12–M15):Service VM + 用户态 Device Model 的终点形态,两张 Mermaid 图(顶层系统图、
+  特权层次图)+「与当前实现的差距」对照表。原为 `CLAUDE.md` 里的两块 ASCII 大图,
+  2026-09-14 迁出重画。**非当前实现**——现状看 [[2026-06-21-architecture-zoom-out]];
+  x86 对位版本见 [[x86/architecture-x86]] §1、§2。
 - [arm/2026-06-21-gicd-gicr-trap-investigation.md](arm/2026-06-21-gicd-gicr-trap-investigation.md) —
   一次从提问到实证的查证:「客户机访问 GICD/GICR 怎么到 EL2?」带 instrumentation 的
   真实 boot 证明 ADR-0012「触发 Stage-2 abort → 影子模拟 → 从不碰硬件」**不成立**——

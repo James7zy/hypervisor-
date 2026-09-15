@@ -20,8 +20,9 @@ build/
 # Superpowers brainstorm sessions
 .superpowers/
 
-# Claude Code local settings
-.claude/
+# Claude Code local settings (but track shared skills)
+.claude/*
+!.claude/skills/
 
 # Vendored agent skills (installed tooling, not project code)
 .agents/
