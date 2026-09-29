@@ -27,9 +27,10 @@ static const struct vm_config vm_configs[NR_VMS] = {
      * VM1's SVM guest: SAME guest-visible IPA as VM0 (entry/mem_base =
      * BOARD_SVM_MEM_BASE, unified guest address map) but a DIFFERENT backing
      * PA (BOARD_SVM2_RAM_PA) — Stage-2 maps that shared IPA to a distinct
-     * physical block per VM. This only works because the svm4 test binary is
-     * linked at the SAME link address as svm.lds (0x40200000): the guest code
-     * executes correctly regardless of which physical RAM backs its IPA.
+     * physical block per VM. This only works because every SVM test case
+     * links at the SAME address via tests/svm/svm.lds (0x40200000): the
+     * guest code executes correctly regardless of which physical RAM backs
+     * its IPA.
      */
     [1] = { .vmid = 2, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM2_RAM_PA, .mem_size = BOARD_SVM_MEM_SIZE,

@@ -61,20 +61,17 @@ LD_SCRIPT := $(arch-ldscript)
 
 SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
-SVM_ELF    := $(BUILD_DIR)/svm/svm.elf
-SVM_BIN    := $(BUILD_DIR)/svm/svm.bin
-SVM2_ELF   := $(BUILD_DIR)/svm2/svm2.elf
-SVM2_BIN   := $(BUILD_DIR)/svm2/svm2.bin
-SVM3_ELF   := $(BUILD_DIR)/svm3/svm3.elf
-SVM3_BIN   := $(BUILD_DIR)/svm3/svm3.bin
-SVM4_ELF   := $(BUILD_DIR)/svm4/svm4.elf
-SVM4_BIN   := $(BUILD_DIR)/svm4/svm4.bin
+# Bare-metal SVM test guests: one shared runtime, one binary per case
+# (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
+SVM_CASES  := basic vtimer vm1
+SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
+SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm svm2 svm3 svm4 check-offsets \
-	test-svm-build test-svm-dual-build test-qemu test-qemu-svm2 test-qemu-svm3 \
-	test-qemu-svm4 test-qemu-shell test guest
+.PHONY: all run clean defconfig menuconfig help svm check-offsets \
+	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
+	test-qemu-dual test-qemu-shell test guest
 
 .NOTPARALLEL: test
 
@@ -95,43 +92,16 @@ $(OBJ_DIR)/%.o: hypervisor/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c -o $@ $<
 
-$(SVM_ELF): tests/svm/svm_main.c tests/svm/svm.lds
+.SECONDARY: $(SVM_BINS:.bin=.elf)
+svm: $(SVM_BINS)
+
+$(BUILD_DIR)/svm/svm-%.elf: tests/svm/cases/%.c $(SVM_COMMON) tests/svm/svm_lib.h tests/svm/svm.lds
 	@mkdir -p $(dir $@)
-	$(CC) $(SVM_CFLAGS) -T tests/svm/svm.lds -o $@ $<
+	$(CC) $(SVM_CFLAGS) -Wl,--no-warn-rwx-segments -T tests/svm/svm.lds \
+	      -o $@ $< $(SVM_COMMON)
 
-$(SVM_BIN): $(SVM_ELF)
+$(BUILD_DIR)/svm/svm-%.bin: $(BUILD_DIR)/svm/svm-%.elf
 	$(OBJCOPY) -O binary $< $@
-
-svm: $(SVM_BIN)
-
-$(SVM2_ELF): tests/svm2/svm2_main.c tests/svm2/svm2_vectors.S tests/svm2/svm2.lds
-	@mkdir -p $(dir $@)
-	$(CC) $(SVM_CFLAGS) -T tests/svm2/svm2.lds -o $@ \
-	      tests/svm2/svm2_main.c tests/svm2/svm2_vectors.S
-
-$(SVM2_BIN): $(SVM2_ELF)
-	$(OBJCOPY) -O binary $< $@
-
-svm2: $(SVM2_BIN)
-
-$(SVM3_ELF): tests/svm3/svm3_main.c tests/svm3/svm3_vectors.S tests/svm3/svm3.lds
-	@mkdir -p $(dir $@)
-	$(CC) $(SVM_CFLAGS) -T tests/svm3/svm3.lds -o $@ \
-	      tests/svm3/svm3_main.c tests/svm3/svm3_vectors.S
-
-$(SVM3_BIN): $(SVM3_ELF)
-	$(OBJCOPY) -O binary $< $@
-
-svm3: $(SVM3_BIN)
-
-$(SVM4_ELF): tests/svm4/svm4_main.c tests/svm4/svm4.lds
-	@mkdir -p $(dir $@)
-	$(CC) $(SVM_CFLAGS) -T tests/svm4/svm4.lds -o $@ tests/svm4/svm4_main.c
-
-$(SVM4_BIN): $(SVM4_ELF)
-	$(OBJCOPY) -O binary $< $@
-
-svm4: $(SVM4_BIN)
 
 .PHONY: vspi test-qemu-vspi
 VSPI_BINS := $(BUILD_DIR)/vspi/vspi-vm0.bin $(BUILD_DIR)/vspi/vspi-vm1.bin
@@ -203,38 +173,37 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 TEST_BUILD_DIR := build/test-svm
 
 test-svm-build:
-	$(MAKE) BUILD_DIR=$(TEST_BUILD_DIR) HV_GUEST=svm all svm svm2 svm3
+	$(MAKE) BUILD_DIR=$(TEST_BUILD_DIR) HV_GUEST=svm all svm
 
 TEST_DUAL_BUILD_DIR := build/test-svm-dual
 
 test-svm-dual-build:
-	$(MAKE) BUILD_DIR=$(TEST_DUAL_BUILD_DIR) HV_GUEST=svm_dual all svm svm4
+	$(MAKE) BUILD_DIR=$(TEST_DUAL_BUILD_DIR) HV_GUEST=svm_dual all svm
 
-test-qemu-svm4: test-svm-dual-build
-	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
-	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
-	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_svm4_test.sh
+test-qemu: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm-basic.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/basic.txt
+
+test-qemu-vtimer: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm-vtimer.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/vtimer.txt
+
+test-qemu-dual: test-svm-dual-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-basic.bin \
+	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-vm1.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/dual.txt
 
 # Like vSPI, the shell scenario writes QEMU serial stdin; it reuses the
 # dual-SVM build because the EL2 shell needs NR_VMS=2 but no guest OS.
 test-qemu-shell: test-svm-dual-build
 	HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
-	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm.bin \
-	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm4/svm4.bin sh tests/run_shell_test.sh
+	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-basic.bin \
+	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-vm1.bin sh tests/run_shell_test.sh
 
-test-qemu: test-svm-build
-	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
-	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm.bin sh tests/run_svm_test.sh
-
-test-qemu-svm2: test-svm-build
-	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
-	SVM_BIN=$(TEST_BUILD_DIR)/svm2/svm2.bin sh tests/run_svm2_test.sh
-
-test-qemu-svm3: test-svm-build
-	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
-	SVM_BIN=$(TEST_BUILD_DIR)/svm3/svm3.bin sh tests/run_svm3_test.sh
-
-test: check-offsets check-offsets-target test-qemu test-qemu-svm2 test-qemu-svm3 test-qemu-svm4 test-qemu-shell test-qemu-vspi
+test: check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh

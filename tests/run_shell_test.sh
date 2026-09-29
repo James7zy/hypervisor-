@@ -3,7 +3,7 @@
 # Integration test: drive the EL2 shell (hypervisor/dm/hv_shell.c) over the
 # physical console and check every command's output.
 #
-# Called by: make test-qemu-shell (after make all svm svm4, HV_GUEST=svm_dual)
+# Called by: make test-qemu-shell (after make all svm, HV_GUEST=svm_dual)
 # Requires: SVM_BIN, SVM_BIN2, HYPERVISOR_ELF set by Makefile,
 #           qemu-system-aarch64 in PATH.
 #
@@ -94,7 +94,7 @@ check_absent() {
 # Both guests still reached their steady state -- the shell must not have
 # disturbed them.
 check "Hello from EL2"
-check "SVM4: hello from VM1"
+check "SVM: hello from VM1"
 
 # Ctrl-T printed a prompt.
 check "hv> "

@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: TBD */
-/* EL1 vector table for the M2 SVM guest. The guest runs at EL1h (SP_EL1),
- * so a virtual IRQ taken while running enters at offset 0x280 (Current EL
- * with SP_ELx, IRQ). Every other vector parks. */
+/* EL1 vector table shared by every SVM test case. The guest runs at EL1h
+ * (SP_EL1), so a virtual IRQ enters at offset 0x280 (Current EL with SP_ELx,
+ * IRQ) and is dispatched to the case's svm_irq_handler(). Every other vector
+ * parks. Only cases that call svm_gic_el1_init() ever point VBAR_EL1 here. */
 
     .macro VEC label
     .align 7                    /* 128-byte (0x80) vector stride */
@@ -10,31 +11,31 @@
 
     .section .text.vectors, "ax"
     .align 11                   /* VBAR_EL1 requires 2048-byte alignment */
-    .globl svm2_vectors
-svm2_vectors:
-    VEC svm2_park       /* 0x000 Cur EL SP0  Sync */
-    VEC svm2_park       /* 0x080 Cur EL SP0  IRQ  */
-    VEC svm2_park       /* 0x100 Cur EL SP0  FIQ  */
-    VEC svm2_park       /* 0x180 Cur EL SP0  SErr */
-    VEC svm2_park       /* 0x200 Cur EL SPx  Sync */
-    VEC svm2_irq_entry  /* 0x280 Cur EL SPx  IRQ  */
-    VEC svm2_park       /* 0x300 Cur EL SPx  FIQ  */
-    VEC svm2_park       /* 0x380 Cur EL SPx  SErr */
-    VEC svm2_park       /* 0x400 Lower A64   Sync */
-    VEC svm2_park       /* 0x480 Lower A64   IRQ  */
-    VEC svm2_park       /* 0x500 Lower A64   FIQ  */
-    VEC svm2_park       /* 0x580 Lower A64   SErr */
-    VEC svm2_park       /* 0x600 Lower A32   Sync */
-    VEC svm2_park       /* 0x680 Lower A32   IRQ  */
-    VEC svm2_park       /* 0x700 Lower A32   FIQ  */
-    VEC svm2_park       /* 0x780 Lower A32   SErr */
+    .globl svm_vectors
+svm_vectors:
+    VEC svm_park       /* 0x000 Cur EL SP0  Sync */
+    VEC svm_park       /* 0x080 Cur EL SP0  IRQ  */
+    VEC svm_park       /* 0x100 Cur EL SP0  FIQ  */
+    VEC svm_park       /* 0x180 Cur EL SP0  SErr */
+    VEC svm_park       /* 0x200 Cur EL SPx  Sync */
+    VEC svm_irq_entry  /* 0x280 Cur EL SPx  IRQ  */
+    VEC svm_park       /* 0x300 Cur EL SPx  FIQ  */
+    VEC svm_park       /* 0x380 Cur EL SPx  SErr */
+    VEC svm_park       /* 0x400 Lower A64   Sync */
+    VEC svm_park       /* 0x480 Lower A64   IRQ  */
+    VEC svm_park       /* 0x500 Lower A64   FIQ  */
+    VEC svm_park       /* 0x580 Lower A64   SErr */
+    VEC svm_park       /* 0x600 Lower A32   Sync */
+    VEC svm_park       /* 0x680 Lower A32   IRQ  */
+    VEC svm_park       /* 0x700 Lower A32   FIQ  */
+    VEC svm_park       /* 0x780 Lower A32   SErr */
 
     .section .text
-svm2_park:
-    b   svm2_park
+svm_park:
+    b   svm_park
 
-    .globl svm2_irq_entry
-svm2_irq_entry:
+    .globl svm_irq_entry
+svm_irq_entry:
     /* Frame: x0..x18, x30, ELR_EL1, SPSR_EL1 — 11 pairs = 176 bytes (16-aligned).
      * x19..x28 are preserved by the AAPCS C handler, so we need not save them. */
     stp     x0,  x1,  [sp, #-176]!
@@ -51,7 +52,7 @@ svm2_irq_entry:
     mrs     x1, spsr_el1
     stp     x0,  x1,  [sp, #0xA0]
 
-    bl      svm2_irq_handler
+    bl      svm_irq_handler
 
     ldp     x0,  x1,  [sp, #0xA0]
     msr     elr_el1,  x0

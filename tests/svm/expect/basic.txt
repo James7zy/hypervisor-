@@ -1,0 +1,3 @@
+Hello from EL2
+SVM: launching VMID=
+SVM HVC: done (x1=0x10001)

@@ -15,9 +15,10 @@
  * around the same wall-clock time) -- a single shared g_hv_ctx let one
  * pCPU's hv_restore() load ANOTHER pCPU's saved sp/lr, corrupting its C
  * stack. This was latent since M1 (nothing before M5 slice 3 ever had two
- * pCPUs concurrently past vcpu_run) and is caught by the new dual-VM svm4
- * test scenario. Slot index = this pCPU's id, derived from TPIDR_EL2 (=
- * &percpu[id]) exactly like the C-side current_vcpu_id() helper.
+ * pCPUs concurrently past vcpu_run) and is caught by the dual-VM SVM
+ * test scenario (make test-qemu-dual). Slot index = this pCPU's id, derived
+ * from TPIDR_EL2 (= &percpu[id]) exactly like the C-side current_vcpu_id()
+ * helper.
  */
 
 #include <vm.h>       /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */

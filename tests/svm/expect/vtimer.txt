@@ -1,0 +1,10 @@
+Hello from EL2
+[hv] GIC: initialized (dist=0x8000000 rdist=0x80a0000 PPI=27)
+[hv] vtimer: CNTHCTL_EL2=0x3, CNTVOFF_EL2=0x0
+SVM: launching VMID=
+[svm] EL1 init
+[svm] GIC EL1 configured
+[svm] virtual timer armed
+[svm] virtual timer IRQ received (INTID=27)
+[svm] signalling HVC done
+SVM HVC: done

@@ -37,7 +37,7 @@ struct vcpu_regs {
  * NR_CPUS (percpu.h) is a fixed PLATFORM constant sized for the largest build
  * profile (4, since M5 slice 3: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
  * intentionally NOT required to equal NR_VMS * VCPUS_PER_VM: single-VM build
- * profiles (HV_GUEST=svm/svm2/svm3, NR_VMS=1, the pre-slice-3 SVM regression
+ * profiles (HV_GUEST=svm, NR_VMS=1, the pre-slice-3 SVM regression
  * tests) only ever PSCI CPU_ON pCPUs 0/1 -- pCPUs 2/3 are simply never woken
  * under those profiles, so under-using the physical core budget is safe; the
  * dangerous direction (a VM's slot overrunning NR_CPUS) is what this guards.

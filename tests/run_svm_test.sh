@@ -1,30 +1,33 @@
 #!/bin/sh
 # SPDX-License-Identifier: TBD
-# Integration test: run hypervisor + SVM in QEMU, verify output.
-# Called by: make test-qemu (after make all svm)
-# Requires: SVM_BIN set by Makefile, qemu-system-aarch64 in PATH.
+# Integration test: boot the hypervisor with one or two bare-metal SVM guests
+# in QEMU and check that every line of an expect file appears in the output
+# (fixed-string match, order-independent).
+#
+# Usage: sh tests/run_svm_test.sh tests/svm/expect/<scenario>.txt
+# Called by: make test-qemu / test-qemu-vtimer / test-qemu-dual
+# Requires: SVM_BIN (and SVM_BIN2 for dual), HYPERVISOR_ELF set by Makefile,
+#           qemu-system-aarch64 in PATH.
 set -eu
 
-: "${SVM_BIN:?must be set by make test-qemu}"
+EXPECT=${1:?usage: run_svm_test.sh <expect-file>}
+: "${SVM_BIN:?must be set by make}"
+[ -f "${EXPECT}" ] || { echo "ERROR: ${EXPECT} not found."; exit 1; }
 
 TIMEOUT=10
 
-OUTPUT=$(SVM_BIN="${SVM_BIN}" \
-         timeout "${TIMEOUT}" ./scripts/run-qemu.sh </dev/null 2>&1 || true)
+OUTPUT=$(timeout "${TIMEOUT}" ./scripts/run-qemu.sh </dev/null 2>&1 || true)
 
 FAILURES=0
-check() {
-    if echo "${OUTPUT}" | grep -qF "$1"; then
-        printf "PASS: '%s'\n" "$1"
+while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    if printf '%s\n' "${OUTPUT}" | grep -qF -- "${line}"; then
+        printf "PASS: '%s'\n" "${line}"
     else
-        printf "FAIL: '%s' not found in output\n" "$1"
+        printf "FAIL: '%s' not found in output\n" "${line}"
         FAILURES=$((FAILURES + 1))
     fi
-}
-
-check "Hello from EL2"
-check "SVM: launching VMID="
-check "SVM HVC: done (x1=0x10001)"
+done < "${EXPECT}"
 
 if [ "${FAILURES}" -gt 0 ]; then
     printf "\n--- QEMU output ---\n%s\n---\n" "${OUTPUT}"

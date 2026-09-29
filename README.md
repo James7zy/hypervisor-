@@ -112,8 +112,8 @@ aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 There is no CI; verification is local and automated.
 
 1. **Automated suite**: `make test` checks C/assembly struct offsets, then runs
-   five QEMU integration scenarios — M1, M3 and M4 on a single-VM SVM build
-   (`build/test-svm/`), plus the dual-VM (`svm4`) and EL2-shell scenarios on a
+   QEMU integration scenarios — `basic` and `vtimer` on a single-VM SVM build
+   (`build/test-svm/`), plus the dual-VM (`test-qemu-dual`) and EL2-shell scenarios on a
    `NR_VMS=2` build (`build/test-svm-dual/`). The shell scenario drives real
    keystrokes into QEMU's serial stdin (`Ctrl-T`, `vm_list`, `help`,
    `vm_console`, error paths, backspace editing) and uses bare-metal guests, so

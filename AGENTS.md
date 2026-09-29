@@ -52,9 +52,17 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 ## Verification (no CI; local automated integration tests)
 
 1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
-   `build/test-svm/`, checks C/assembly struct offsets, and runs the M1, M3, and
-   M4 QEMU integration scenarios, plus the dual-VM (`svm4`) and EL2-shell
-   scenarios on the `build/test-svm-dual/` (`NR_VMS=2`) build.
+   `build/test-svm/`, checks C/assembly struct offsets, and runs the `basic`
+   (HVC/PSCI round trip) and `vtimer` (HW-forwarded PPI 27) QEMU scenarios,
+   plus the dual-VM (`test-qemu-dual`), EL2-shell and vSPI scenarios on
+   `NR_VMS=2` builds.
+   - **All bare-metal SVM guests live in `tests/svm/`**: one shared runtime
+     (`svm_lib.c`, `svm_vectors.S`, `svm.lds`) and one file per scenario in
+     `cases/<case>.c`, built to `build/.../svm/svm-<case>.bin`. Expected output
+     lines live in `expect/<scenario>.txt`, checked by the single runner
+     `tests/run_svm_test.sh`. A new scenario is a new case file + expect file
+     + one Makefile target — **do not add another `tests/svmN/` directory**.
+     (`tests/vspi/` predates this and is still separate.)
    - `tests/run_shell_test.sh` is the only scenario that **writes** to the QEMU
      serial stdin (the rest run `</dev/null`). It drives `Ctrl-T`, `vm_list`,
      `help`, `vm_console`, the error paths, and backspace line editing. It
