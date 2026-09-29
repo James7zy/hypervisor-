@@ -1,11 +1,7 @@
 # 知识库 / Reference
 
-跨里程碑、可长期查阅的参考资料与操作配方。区别于其它文档:
-
-- `docs/adr/` — **架构决策**(为什么这么设计,Status/Decision/Consequences)。
-- `docs/debug/` — **调试实录**(某次定位过程,按时间顺序)。
-- `docs/superpowers/{specs,plans}/` — **历史规格与计划**(当时怎么拆解执行,不改)。
-- `docs/reference/`(本目录)— **稳定的子系统说明与操作配方**,随实现演进更新。
+跨里程碑、可长期查阅的参考资料与操作配方,随实现演进更新。与 `adr/`、`debug/`、
+`superpowers/` 的分工、语言与命名规则见 [docs/README.md](../README.md)。
 
 ## 目录组织
 
@@ -30,12 +26,13 @@
 
 - [arm/2026-06-21-architecture-zoom-out.md](arm/2026-06-21-architecture-zoom-out.md) —
   架构鸟瞰:一次「拉高一层」的整体梳理,从顶层调用链 → GIC 子系统 → 一次键盘输入
-  端到端 trace,三层逐步放大,把各模块与调用者串成一张图。新读者入口。配套
-  [[adr-0012]](物理 GICv3 独占)。
+  端到端 trace,三层逐步放大,把各模块与调用者串成一张图。配套
+  [[adr-0012]](物理 GICv3 独占)。**历史快照(M3 时代,单 VM)**,不反映 M10 多 VM
+  现状,不再作为新读者入口;计划在 M11 完成后重写。
 - [arm/target-architecture.md](arm/target-architecture.md) — **目标架构**(ACRN 模型,
   M12–M15):Service VM + 用户态 Device Model 的终点形态,两张 Mermaid 图(顶层系统图、
   特权层次图)+「与当前实现的差距」对照表。原为 `CLAUDE.md` 里的两块 ASCII 大图,
-  2026-09-14 迁出重画。**非当前实现**——现状看 [[2026-06-21-architecture-zoom-out]];
+  2026-09-14 迁出重画。**非当前实现**——现状看 `CLAUDE.md` 与 ADR 索引;
   x86 对位版本见 [[x86/architecture-x86]] §1、§2。
 - [arm/2026-06-21-gicd-gicr-trap-investigation.md](arm/2026-06-21-gicd-gicr-trap-investigation.md) —
   一次从提问到实证的查证:「客户机访问 GICD/GICR 怎么到 EL2?」带 instrumentation 的

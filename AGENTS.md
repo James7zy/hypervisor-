@@ -10,10 +10,11 @@ relationships between modules, all represented using Mermaid. A picture is worth
 A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, bao-hypervisor. The directory layout
 mirrors ACRN's `hypervisor/` structure.
 
-**M9 (SMP)** is complete: an unmodified Linux guest boots with two vCPUs
-statically pinned 1:1 to two pCPUs. Next: **M10 (multi-VM foundation)** — the
-long-term target form is the **full ACRN model** (Service VM + userspace Device
-Model); see the roadmap below. The RK3588 port moved to M15, after the ACRN-model
+**M10 (multi-VM foundation)** is complete: two Linux VMs, each with two
+vCPUs statically pinned 1:1 to its own pCPUs (2+2 on 4), with an EL2-owned
+console and shell. Next: **M11 (vCPU scheduler)**. The long-term target form
+is the **full ACRN model** (Service VM + userspace Device Model); see the
+roadmap below. The RK3588 port moved to M15, after the ACRN-model
 core chain is proven on QEMU.
 
 ## Build Commands
@@ -21,7 +22,7 @@ core chain is proven on QEMU.
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make test               # offset checks + M1/M3/M4 + dual-VM + EL2-shell QEMU scenarios
+make test               # offset checks + basic/vtimer/dual-VM/EL2-shell/vSPI QEMU scenarios
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 make clean              # remove build/
 ```
@@ -89,6 +90,9 @@ Test: *would it still hold on another machine, for another person?*
 - **No** (local paths, personal workflow) → the agent's private memory under
   `~/.claude/`, never checked in. There is no in-repo `memory/` directory;
   do not recreate one.
+- **New docs are written in Chinese** (code identifiers and technical terms
+  stay English); never keep the same content in two languages. Category,
+  language and file-naming rules: [docs/README.md](docs/README.md).
 
 ## Known defects (found, not yet fixed)
 

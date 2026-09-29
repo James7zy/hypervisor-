@@ -10,10 +10,9 @@
 > is understanding EL2 core mechanism, not reaching the ACRN end-state fastest.
 > Several decisions below resolve differently than they would under an
 > engineering-throughput objective; those are marked ⚑.
-> **Companion documents:** `2026-08-10-m11-vcpu-context-switch-design-zh.md`
-> (Chinese translation, equivalent content) and
-> `2026-08-10-m11-decision-record.md` (the reasoning behind each decision,
-> including ownership and reversal conditions).
+> **Companion document:** `2026-08-10-m11-decision-record.md` (the reasoning
+> behind each decision, including ownership and reversal conditions). A Chinese
+> summary translation was dropped on 2026-09-29; this file is the only spec.
 
 ## Problem Statement
 
