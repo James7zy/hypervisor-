@@ -75,6 +75,21 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
    verify CPU1 boots, `/sys/devices/system/cpu/online` reports `0-1`, and both CPU
    columns in `/proc/interrupts` have timer and IPI activity.
 
+**"Done" means observed running.** A milestone is marked done only after its
+DoD was actually run in QEMU and the result seen. Build-clean + `readelf`
+checks alone make it **static-only** — say so explicitly. M3 was once marked
+done on static checks and its first real run found three bugs
+(`docs/debug/m3-boot-verification.md`).
+
+## Where knowledge lives
+
+Test: *would it still hold on another machine, for another person?*
+- **Yes** → the repo: debugging lessons in `docs/debug/`, decisions in
+  `docs/adr/`, standing rules in `CLAUDE.md`/`AGENTS.md`.
+- **No** (local paths, personal workflow) → the agent's private memory under
+  `~/.claude/`, never checked in. There is no in-repo `memory/` directory;
+  do not recreate one.
+
 ## Known defects (found, not yet fixed)
 
 - **`CPU_OFF` kills the whole VM** (`hypervisor/common/psci/psci.c`, found
