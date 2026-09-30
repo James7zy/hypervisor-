@@ -206,7 +206,7 @@ test-qemu-shell: test-svm-dual-build
 # Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
 # hooks and <arch/xxx.h> (ADR-0015); zero tolerance, no allowlist.
 check-arch-boundary:
-	sh scripts/check-arch-boundary.sh
+	CC="$(CC)" CPPFLAGS="$(filter -D% -I%,$(CFLAGS))" sh scripts/check-arch-boundary.sh
 
 test: check-arch-boundary check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 

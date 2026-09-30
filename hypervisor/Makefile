@@ -4,6 +4,7 @@ hv-objs := \
     lib/string.o \
     lib/print.o \
     common/vm/vm.o \
+    common/vm/vm_configs.o \
     common/percpu.o \
     common/io/mmio.o \
     dm/vuart.o \

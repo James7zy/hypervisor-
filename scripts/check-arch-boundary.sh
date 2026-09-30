@@ -11,8 +11,15 @@
 # There is no allowlist: the migration that needed one is finished. The only
 # exceptions are the permanent ones in exempt() below.
 #
-# Usage: sh scripts/check-arch-boundary.sh
+# With CC and CPPFLAGS set (make check-arch-boundary does this), it also
+# preprocesses every non-arch .c file and fails if it pulls in, even
+# transitively, an arch header other than the public <arch/xxx.h> ones --
+# grep alone cannot see a board.h reached through another header.
+#
+# Needs: sh, perl, grep, sed, sort, comm (and CC for the transitive pass).
+# Usage: sh scripts/check-arch-boundary.sh    (from any directory)
 set -eu
+cd "$(dirname "$0")/.."
 
 ROOT=hypervisor
 
@@ -33,7 +40,7 @@ arch-path  #[[:space:]]*include[[:space:]]*[<"].*arch/(arm64|x86|riscv)/
 # (ADR-0008), so it may read BOARD_* constants.
 exempt() {
     case "$1 $2" in
-        "$ROOT/common/vm/vm_config.h board") return 0 ;;
+        "$ROOT/common/vm/vm_configs.c board") return 0 ;;
     esac
     return 1
 }
@@ -64,15 +71,38 @@ for f in $files; do
             defined $1 ? $1 : defined $2 ? q("") : defined $3 ? $3 :
             do { (my $c = $4 // q()) =~ s/[^\n]//g; $c }
         }gsme' "$f" > "$tmp/src"
-    echo "$RULES" | while read -r id re; do
+    printf '%s\n' "$RULES" | while read -r id re; do
         [ -n "$id" ] || continue
         exempt "$f" "$id" && continue
-        if grep -En -- "$re" "$tmp/src" > "$tmp/hits"; then
+        rc=0
+        grep -En -- "$re" "$tmp/src" > "$tmp/hits" || rc=$?
+        if [ "$rc" -eq 0 ]; then
             echo "$f $id" >> "$found"
             sed "s#^#$f: $id: #" "$tmp/hits" > "$tmp/$(echo "$f $id" | tr '/ ' '__')"
+        elif [ "$rc" -ne 1 ]; then
+            echo "ERROR: grep failed (rc=$rc) on rule $id for $f" >&2
+            exit 2
         fi
     done
 done
+
+# Transitive pass: which headers does each non-arch .c really include?
+if [ -n "${CC:-}" ]; then
+    for f in $files; do
+        case "$f" in *.c) ;; *) continue ;; esac
+        exempt "$f" board && continue
+        # shellcheck disable=SC2086
+        "$CC" -E ${CPPFLAGS:-} "$f" > "$tmp/pp"
+        grep -o '^# [0-9]* "[^"]*"' "$tmp/pp" | sed 's/^# [0-9]* "\(.*\)"/\1/' \
+            | grep "^$ROOT/arch/" | grep -v "^$ROOT/arch/[^/]*/include/arch/" \
+            | sort -u > "$tmp/leak" || true
+        if [ -s "$tmp/leak" ]; then
+            echo "$f arch-header" >> "$found"
+            sed "s#^#$f: arch-header: includes (transitively) #" "$tmp/leak" \
+                > "$tmp/$(echo "$f arch-header" | tr '/ ' '__')"
+        fi
+    done
+fi
 
 sort -u "$found" -o "$found"
 
