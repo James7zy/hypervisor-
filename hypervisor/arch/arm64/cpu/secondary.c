@@ -17,7 +17,7 @@
 #include <board.h>
 #include <percpu.h>
 #include <vm.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 #include <gic_v3.h>
 #include <vgic.h>
 #include "../mmu/stage2.h"

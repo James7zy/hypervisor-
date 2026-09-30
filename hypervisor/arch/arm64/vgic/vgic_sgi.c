@@ -23,7 +23,7 @@
 #include <vm_config.h>   /* struct vm_config (pcpu_base) */
 #include <percpu.h>
 #include <spinlock.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 #include <vgic.h>
 #include <gic_v3.h>
 #include "vgic_sgi.h"

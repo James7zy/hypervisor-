@@ -5,7 +5,7 @@
 #include <percpu.h>
 #include <vgic.h>
 #include <gic_v3.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
  * after its sole restore. Early RX cannot publish LR1. Never reset spi_lock. */

@@ -16,6 +16,7 @@ hypervisor/common/vm/vm.c psci
 hypervisor/common/vm/vm.c stage2
 hypervisor/common/vm/vm.c sysreg
 hypervisor/common/vm/vm.c vgic
+hypervisor/dm/vuart.c arch-path
 hypervisor/dm/vuart.c board
 hypervisor/dm/vuart.c vgic
 hypervisor/include/percpu.h asm

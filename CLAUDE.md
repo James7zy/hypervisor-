@@ -157,7 +157,8 @@ Code **outside `hypervisor/arch/`** (`common/`, `boot/`, `dm/`, `debug/`,
 `<object>_arch_<verb>` hooks (`cpu_`, `vm_`, `vcpu_`) and `<arch/xxx.h>`
 headers. Forbidden outside `arch/`: inline asm and `.S` files, system register
 names (`*_ELn`, `ICH_*`, `ICC_*`), PSCI, direct `vgic_*`/`stage2_*`/`gic_*`/
-`vtimer_*` calls, `BOARD_*`/`board.h` (except the static VM config table).
+`vtimer_*` calls, `BOARD_*`/`board.h` (except the static VM config table),
+and include paths into a concrete `arch/<name>/` directory.
 Decision and rejected options: [ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md);
 migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 

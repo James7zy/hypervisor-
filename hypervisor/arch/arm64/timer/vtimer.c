@@ -9,7 +9,7 @@
  */
 #include <types.h>
 #include <printk.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 #include <vtimer.h>
 
 void vtimer_init(void)

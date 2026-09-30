@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: TBD */
-#ifndef HV_ASM_SYSREG_H
-#define HV_ASM_SYSREG_H
+#ifndef HV_ARCH_SYSREG_H
+#define HV_ARCH_SYSREG_H
 
 #include <types.h>
 
@@ -15,4 +15,4 @@
     __asm__ volatile("msr " #reg ", %0" :: "r"(__v));    \
 } while (0)
 
-#endif /* HV_ASM_SYSREG_H */
+#endif /* HV_ARCH_SYSREG_H */

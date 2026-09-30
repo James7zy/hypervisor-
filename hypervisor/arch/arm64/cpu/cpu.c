@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: TBD */
 #include <types.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 
 u64 read_currentel(void)
 {

@@ -30,6 +30,7 @@ stage2     (^|[^A-Za-z0-9_])stage2
 gic        (^|[^A-Za-z0-9_])gic_
 vtimer     (^|[^A-Za-z0-9_])vtimer
 board      (^|[^A-Za-z0-9_])BOARD_[A-Z0-9_]+|board\.h
+arch-path  #[[:space:]]*include[[:space:]]*[<"].*arch/(arm64|x86|riscv)/
 '
 
 # Permanent exemptions: the static VM configuration table IS board config
@@ -60,12 +61,13 @@ for f in $files; do
             continue ;;
     esac
     # Blank string literals and comments, keeping every newline so the
-    # reported line numbers are the real ones.
+    # reported line numbers are the real ones. #include lines are kept
+    # verbatim: their "path" is code, not prose.
     perl -0777 -pe '
-        s{("(?:\\.|[^"\\\n])*")|(\x27(?:\\.|[^\x27\\\n])*\x27)|(/\*.*?\*/)|(//[^\n]*)}{
-            defined $1 ? q("") : defined $2 ? $2 :
-            do { (my $c = $3 // q()) =~ s/[^\n]//g; $c }
-        }gse' "$f" > "$tmp/src"
+        s{(^[ \t]*\#[ \t]*include[^\n]*)|("(?:\\.|[^"\\\n])*")|(\x27(?:\\.|[^\x27\\\n])*\x27)|(/\*.*?\*/)|(//[^\n]*)}{
+            defined $1 ? $1 : defined $2 ? q("") : defined $3 ? $3 :
+            do { (my $c = $4 // q()) =~ s/[^\n]//g; $c }
+        }gsme' "$f" > "$tmp/src"
     echo "$RULES" | while read -r id re; do
         [ -n "$id" ] || continue
         exempt "$f" "$id" && continue

@@ -10,7 +10,7 @@
 #include <types.h>
 #include <board.h>
 #include <printk.h>
-#include <asm/sysreg.h>
+#include <arch/sysreg.h>
 #include <gic_v3.h>
 
 static inline void mmio_write32(unsigned long addr, u32 val)
