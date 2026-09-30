@@ -59,6 +59,5 @@
  * base BOARD_LINUX2_RAM_PA. */
 #define BOARD_SVM2_RAM_PA      0xC0200000UL
 
-extern const char board_name[];
 
 #endif /* BOARD_QEMU_VIRT_H */

@@ -3,9 +3,6 @@
 # on any violation not listed here AND on any entry here that no longer
 # matches, so this file only ever shrinks. Target: empty (ticket #12 of the
 # arch-boundary spec, docs/superpowers/specs/2026-09-29-arch-boundary-design.md).
-hypervisor/boot/main.c board
-hypervisor/boot/main.c gic
-hypervisor/boot/main.c vtimer
 hypervisor/dm/vuart.c arch-path
 hypervisor/dm/vuart.c board
 hypervisor/dm/vuart.c vgic

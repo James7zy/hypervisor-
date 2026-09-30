@@ -9,6 +9,10 @@
  * missing implementation fails the link.
  */
 
+/* One-time arch bring-up on the boot pCPU, after the console is up
+ * (arm64: report the exception level, init the physical GIC and vtimer). */
+void cpu_arch_init(void);
+
 /* Stop this pCPU for good (arm64: wfi forever). */
 void cpu_arch_halt(void) __attribute__((noreturn));
 

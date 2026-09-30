@@ -2,19 +2,15 @@
 #include <types.h>
 #include <uart.h>
 #include <printk.h>
-#include <board.h>
+#include <board_info.h>
+#include <cpu.h>
 #include <vm.h>
-#include <gic_v3.h>
-#include <vtimer.h>
-
-extern u64 read_currentel(void);
-extern void cpu_wfi(void);
 
 void hypervisor_main(uintptr_t dtb_phys)
 {
     (void)dtb_phys;
 
-    uart_init(BOARD_UART_BASE);
+    uart_init(board_uart_base);
 
     printk("\n");
     printk("  H   H Y   Y PPPP  EEEEE RRRR  V   V IIIII SSSSS  OOO  RRRR  \n");
@@ -24,11 +20,7 @@ void hypervisor_main(uintptr_t dtb_phys)
     printk("  H   H   Y   P     EEEEE R  R    V   IIIII SSSSS   OOO  R  R   \n");
     printk("\n");
 
-    u64 el = read_currentel();
-    printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name, el);
-
-    gic_init();
-    vtimer_init();
+    cpu_arch_init();
 
     vm_init();   /* builds vCPU0 Stage-2 / VMID, which vCPU1 shares (M3.5) */
 
@@ -36,6 +28,5 @@ void hypervisor_main(uintptr_t dtb_phys)
      * psci_cpu_on_guest), not by the hypervisor. */
     vm_run();
 
-    for (;;)
-        cpu_wfi();
+    cpu_arch_halt();
 }
