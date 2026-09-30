@@ -8,9 +8,6 @@
 #include "data_abort.h"
 #include <vgic_sgi.h>
 
-/* Defined in vmexit_asm.S; does not return */
-extern void hv_restore(void);
-
 static void handle_hvc(struct arch_regs *regs)
 {
     u32 func_id = (u32)regs->x[0];

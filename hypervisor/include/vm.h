@@ -87,7 +87,8 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg);
  * Stage-2, vGIC list registers). */
 void vcpu_arch_load(struct vcpu *v);
 /* Raise virtual interrupt `irq` for vCPU `v`; callable from any pCPU (arm64:
- * vGIC SPI injection, kicking v's pCPU if remote). */
+ * vGIC SPI injection, kicking v's pCPU if remote). arm64 supports shared
+ * peripheral interrupts only (the vuart's SPI) -- the one caller today. */
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq);
 /* Enter the guest on this pCPU; returns on an exit that needs the caller. */
 void vcpu_arch_run(struct vcpu *v);
@@ -96,6 +97,5 @@ void vcpu_arch_run(struct vcpu *v);
 #ifdef __ASSEMBLER__
 #include <arch/vm.h>   /* asm offset macros into struct vcpu / struct hv_ctx */
 #endif
-
 
 #endif /* HV_VM_H */

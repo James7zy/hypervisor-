@@ -14,8 +14,6 @@
 #include <types.h>
 #include <spinlock.h>
 
-struct vcpu;
-
 struct arch_regs {
     u64 x[31];      /* x0–x30   offset 0x000 */
     u64 sp_el1;     /*           offset 0x0F8 */
@@ -52,7 +50,7 @@ struct hv_ctx {
     u64 sp;   /* offset 0x060 */
 };
 
-extern void hv_restore(void);
+extern void hv_restore(void);   /* vmexit_asm.S; does not return */
 #endif /* !__ASSEMBLER__ */
 
 #ifdef __ASSEMBLER__
