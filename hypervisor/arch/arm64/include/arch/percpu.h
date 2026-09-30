@@ -12,4 +12,9 @@ static inline struct percpu *cpu_arch_this_percpu(void)
     return pc;
 }
 
+static inline void cpu_arch_set_this_percpu(struct percpu *pc)
+{
+    __asm__ volatile("msr tpidr_el2, %0" :: "r"(pc));
+}
+
 #endif /* HV_ARCH_PERCPU_H */

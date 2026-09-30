@@ -2,7 +2,7 @@
 /*
  * vmexit_asm.S — EL2↔EL1 context switch.
  *
- * vcpu_run(struct vcpu*)  — save HV callee-saved, load guest regs, eret to EL1
+ * vcpu_arch_run(struct vcpu*)  — save HV callee-saved, load guest regs, eret to EL1
  * el1_sync_handler        — save guest regs, call handle_exit()
  * hv_restore()            — restore HV callee-saved, ret to vm_run()
  *
@@ -10,12 +10,12 @@
  *
  * M5 slice 3: g_hv_ctx is now PER-pCPU (g_hv_ctx[NR_CPUS]), not a single
  * shared slot. With NR_VMS>1 more than one pCPU can independently be inside
- * its own vcpu_run/hv_restore pair at the same time (e.g. VM0's vCPU0 on
+ * its own vcpu_arch_run/hv_restore pair at the same time (e.g. VM0's vCPU0 on
  * pCPU0 and VM1's vCPU0 on pCPU2 both issuing the debug HC_GUEST_DONE HVC
  * around the same wall-clock time) -- a single shared g_hv_ctx let one
  * pCPU's hv_restore() load ANOTHER pCPU's saved sp/lr, corrupting its C
  * stack. This was latent since M1 (nothing before M5 slice 3 ever had two
- * pCPUs concurrently past vcpu_run) and is caught by the dual-VM SVM
+ * pCPUs concurrently past vcpu_arch_run) and is caught by the dual-VM SVM
  * test scenario (make test-qemu-dual). Slot index = this pCPU's id, derived
  * from TPIDR_EL2 (= &percpu[id]) exactly like the C-side current_vcpu_id()
  * helper.
@@ -60,11 +60,11 @@ g_hv_ctx:
     .endm
 
 /* ------------------------------------------------------------------ */
-/*  vcpu_run(struct vcpu *vcpu)   x0 = vcpu*                          */
+/*  vcpu_arch_run(struct vcpu *vcpu)   x0 = vcpu*                          */
 /* ------------------------------------------------------------------ */
     .section .text
-    .globl vcpu_run
-vcpu_run:
+    .globl vcpu_arch_run
+vcpu_arch_run:
     /* 1. Save hypervisor callee-saved registers. hv_ctx_slot only touches
      * x9-x11, leaving x0 (vcpu*) intact. */
     hv_ctx_slot

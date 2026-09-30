@@ -44,7 +44,7 @@ struct vcpu_arch {
     struct spinlock spi_lock;
 };
 
-/* Hypervisor callee-saved context, saved by vcpu_run and restored by
+/* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by
  * hv_restore (vmexit_asm.S), one slot per pCPU. */
 struct hv_ctx {
     u64 x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29;
@@ -52,7 +52,6 @@ struct hv_ctx {
     u64 sp;   /* offset 0x060 */
 };
 
-extern void vcpu_run(struct vcpu *vcpu);
 extern void hv_restore(void);
 #endif /* !__ASSEMBLER__ */
 

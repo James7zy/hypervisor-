@@ -50,10 +50,12 @@ _Static_assert(sizeof(struct percpu) == PERCPU_SIZE,
 extern struct percpu percpu[NR_CPUS];
 
 /*
- * Arch hook: this pCPU's slot in percpu[]. Each arch defines it (static
- * inline) in <arch/percpu.h>; arm64 reads TPIDR_EL2.
+ * Arch hook: this pCPU's slot in percpu[]. Each arch defines the hooks
+ * below (static inline) in <arch/percpu.h>; arm64 uses TPIDR_EL2.
  */
 static inline struct percpu *cpu_arch_this_percpu(void);
+/* Arch hook: make `pc` this pCPU's slot (arm64: TPIDR_EL2 = pc). */
+static inline void cpu_arch_set_this_percpu(struct percpu *pc);
 #include <arch/percpu.h>
 
 /* This pCPU's slot → its current vCPU. */

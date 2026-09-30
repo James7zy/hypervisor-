@@ -6,11 +6,6 @@
 hypervisor/boot/main.c board
 hypervisor/boot/main.c gic
 hypervisor/boot/main.c vtimer
-hypervisor/common/vm/vm.c asm
-hypervisor/common/vm/vm.c psci
-hypervisor/common/vm/vm.c stage2
-hypervisor/common/vm/vm.c sysreg
-hypervisor/common/vm/vm.c vgic
 hypervisor/dm/vuart.c arch-path
 hypervisor/dm/vuart.c board
 hypervisor/dm/vuart.c vgic

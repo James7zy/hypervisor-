@@ -71,6 +71,23 @@ extern struct vm vm[NR_VMS];
 
 void vm_init(void);
 void vm_run(void);
+
+/*
+ * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.
+ */
+/* Per-VM arch setup (arm64: build the VM's Stage-2 table, VMID, VTTBR). */
+void vm_arch_init(struct vm *m);
+/* Register the arch's emulated platform devices (arm64: the vGIC
+ * distributor/redistributors) on the MMIO bus, once for all VMs. */
+void vm_arch_devices_init(void);
+/* Put a VM's boot vCPU in its architectural reset/boot state for `cfg`
+ * (arm64: Linux boot protocol registers, HCR_EL2, virtual CPU interface). */
+void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg);
+/* Load `v` onto this pCPU's virtualization hardware (arm64: VMPIDR_EL2,
+ * Stage-2, vGIC list registers). */
+void vcpu_arch_load(struct vcpu *v);
+/* Enter the guest on this pCPU; returns on an exit that needs the caller. */
+void vcpu_arch_run(struct vcpu *v);
 #endif /* !__ASSEMBLER__ */
 
 #ifdef __ASSEMBLER__
