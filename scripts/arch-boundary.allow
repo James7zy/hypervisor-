@@ -1,0 +1,24 @@
+# Arch boundary allowlist: known violations outside hypervisor/arch/ that are
+# not yet migrated. Format: <file> <rule>. scripts/check-arch-boundary.sh fails
+# on any violation not listed here AND on any entry here that no longer
+# matches, so this file only ever shrinks. Target: empty (ticket #12 of the
+# arch-boundary spec, docs/superpowers/specs/2026-09-29-arch-boundary-design.md).
+hypervisor/boot/main.c board
+hypervisor/boot/main.c gic
+hypervisor/boot/main.c vtimer
+hypervisor/common/psci/psci.c asm
+hypervisor/common/psci/psci.c gic
+hypervisor/common/psci/psci.c psci
+hypervisor/common/psci/psci.c sysreg
+hypervisor/common/psci/psci.h psci
+hypervisor/common/vm/vm.c asm
+hypervisor/common/vm/vm.c psci
+hypervisor/common/vm/vm.c stage2
+hypervisor/common/vm/vm.c sysreg
+hypervisor/common/vm/vm.c vgic
+hypervisor/dm/vuart.c board
+hypervisor/dm/vuart.c vgic
+hypervisor/include/percpu.h asm
+hypervisor/include/spinlock.h asm
+hypervisor/include/vm.h board
+hypervisor/include/vm.h sysreg

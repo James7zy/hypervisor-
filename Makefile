@@ -69,7 +69,7 @@ SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm check-offsets \
+.PHONY: all run clean defconfig menuconfig help svm check-offsets check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-dual test-qemu-shell test guest
 
@@ -203,7 +203,12 @@ test-qemu-shell: test-svm-dual-build
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-basic.bin \
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-vm1.bin sh tests/run_shell_test.sh
 
-test: check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
+# Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
+# hooks; scripts/arch-boundary.allow lists the violations not yet migrated.
+check-arch-boundary:
+	sh scripts/check-arch-boundary.sh
+
+test: check-arch-boundary check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
