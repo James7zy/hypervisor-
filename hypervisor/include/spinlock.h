@@ -4,6 +4,11 @@
 
 #include <types.h>
 
+/* Arch hooks, defined (static inline) in <arch/spinlock.h>. */
+static inline u32 atomic_arch_fetch_inc_u32(u32 *p);   /* return (*p)++ atomically */
+static inline void cpu_arch_relax(void);               /* spin-wait hint */
+#include <arch/spinlock.h>
+
 /*
  * Minimal SMP spinlock (M3.5). The repo had zero synchronization primitives
  * through M3.4 (a single core never needed any); this is the first. Kept
@@ -27,23 +32,14 @@ struct spinlock {
 
 static inline void spin_lock(struct spinlock *lock)
 {
-    u32 my, tmp, ok;
-
-    /* Atomically take the next ticket: my = next++; (LDXR/STXR retry loop). */
-    __asm__ volatile(
-        "1: ldxr    %w0, [%3]\n"        /* my = next                  */
-        "   add     %w1, %w0, #1\n"     /* tmp = my + 1               */
-        "   stxr    %w2, %w1, [%3]\n"   /* try next = tmp; ok==0 wins */
-        "   cbnz    %w2, 1b\n"
-        : "=&r"(my), "=&r"(tmp), "=&r"(ok)
-        : "r"(&lock->next)
-        : "memory");
+    /* Atomically take the next ticket: my = next++. */
+    u32 my = atomic_arch_fetch_inc_u32(&lock->next);
 
     /* Busy-wait until our ticket is served. Plain spin (no WFE/SEV): critical
      * sections are tiny and there are at most 4 cores, so a simple, provably
      * correct spin beats the WFE/event-register race. */
     while (__atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE) != my)
-        __asm__ volatile("yield");
+        cpu_arch_relax();
 }
 
 static inline void spin_unlock(struct spinlock *lock)

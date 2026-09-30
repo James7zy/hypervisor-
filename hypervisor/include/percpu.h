@@ -49,12 +49,17 @@ _Static_assert(sizeof(struct percpu) == PERCPU_SIZE,
 
 extern struct percpu percpu[NR_CPUS];
 
-/* Read TPIDR_EL2 → current pCPU's percpu slot → its current vCPU. */
+/*
+ * Arch hook: this pCPU's slot in percpu[]. Each arch defines it (static
+ * inline) in <arch/percpu.h>; arm64 reads TPIDR_EL2.
+ */
+static inline struct percpu *cpu_arch_this_percpu(void);
+#include <arch/percpu.h>
+
+/* This pCPU's slot → its current vCPU. */
 static inline struct vcpu *current_vcpu(void)
 {
-    struct percpu *pc;
-    __asm__ volatile("mrs %0, tpidr_el2" : "=r"(pc));
-    return pc->cur_vcpu;
+    return cpu_arch_this_percpu()->cur_vcpu;
 }
 
 /* Returns this PHYSICAL pCPU's id. This is NOT the VM-local vCPU index --
@@ -70,9 +75,7 @@ static inline struct vcpu *current_vcpu(void)
  * derivation, check hv_ctx_slot still agrees, and vice versa. */
 static inline u32 current_vcpu_id(void)
 {
-    struct percpu *pc;
-    __asm__ volatile("mrs %0, tpidr_el2" : "=r"(pc));
-    return pc->cpu_id;
+    return cpu_arch_this_percpu()->cpu_id;
 }
 #endif /* !__ASSEMBLER__ */
 
