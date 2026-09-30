@@ -16,19 +16,23 @@
 1. `hypervisor/arch/` **以外**的代码(不只 `common/`,也包括启动入口、设备模型、
    调试、库和通用头文件)**禁止**:内联汇编、`.S` 文件、系统寄存器名(`*_ELn`、
    `ICH_*`、`ICC_*`)、PSCI 符号、直接调用 `vgic_*`/`stage2_*`/`gic_*`/`vtimer_*`、
-   `BOARD_*` 常量和 `board.h`。唯一例外是静态 VM 配置表,它本身就是板级配置
-   (ADR-0008)。
+   `BOARD_*` 常量和 `board.h`。唯一例外是静态 VM 配置表 `common/vm/vm_configs.c`,
+   它本身就是板级配置(ADR-0008);声明它的 `vm_config.h` 不引入 `board.h`。
 2. 访问架构层只有两种途径:`<对象>_arch_<动词>` 钩子(`cpu_`、`vm_`、`vcpu_`),
    以及 `<arch/xxx.h>` 命名空间头文件(由构建系统按 `ARCH` 解析)。
 3. 钩子原型由**通用头文件**声明,每个 arch 都必须实现,**不提供 weak 默认实现**,
    缺实现在链接时就报错。钩子**按需增长**:由真实调用点引入,不预先设计完整 HAL。
 4. 通用结构体嵌入 arch 结构体(`struct vcpu` ⊃ `struct arch_regs` + `struct
-   vcpu_arch`,`struct vm` ⊃ `struct vm_arch`)。汇编偏移宏跟着 arch 结构体
+   vcpu_arch`)。`struct vm_arch` 同样按需引入:`struct vm` 目前没有 arch 私有
+   字段(per-VM 的 Stage-2/vGIC 状态在各自文件的 static 数组里),第一个这样的
+   字段出现时再嵌入。汇编偏移宏跟着 arch 结构体
    **移到 arch 头文件**。这一点修订了 ADR-0003:"结构体和偏移宏放在同一头文件、
    由 `check-offsets` 校验"的约定不变,变的只是位置,从 `include/vm.h` 移到了 arch。
-5. `scripts/check-arch-boundary.sh` 在 `make test` 中执行这些规则。尚未迁移的违规
-   列在 `scripts/arch-boundary.allow` 里,这份白名单**只减不增**:新违规会失败,
-   白名单里已修复却没删的条目也会失败。
+5. `scripts/check-arch-boundary.sh` 在 `make test` 中执行这些规则,**零容忍**。
+   它分两步:先对去掉注释和字符串的源码做 grep;再预处理 arch 以外的每个 `.c`,
+   凡是(哪怕间接)引入了 `arch/<name>/include/arch/` 以外的 arch 头文件就失败。
+   迁移期间曾用一份只减不增的白名单(`scripts/arch-boundary.allow`)度量进度,
+   迁移完成时清空并删除。
 6. **设备相关不等于架构相关**:模拟的设备(vuart = PL011)留在 `dm/`,物理驱动放在
    `drivers/`;它们只需要切断和 vGIC、`BOARD_*` 的直接耦合。
 
@@ -42,7 +46,7 @@ flowchart TB
     end
     subgraph ARCH["arch/arm64"]
         IMPL["钩子实现<br/>cpu/ vmexit/ mmu/ vgic/ irq/"]
-        ARCHH["include/arch/<br/>arch_regs / vcpu_arch / vm_arch<br/>+ 汇编偏移宏"]
+        ARCHH["include/arch/<br/>arch_regs / vcpu_arch<br/>+ 汇编偏移宏"]
     end
     BOOT --> HOOKS
     VMM --> HOOKS
@@ -73,8 +77,8 @@ flowchart TB
 - 加入新架构的工作量是"实现一组已命名的钩子,再加上 `arch/<new>/include/arch/`",
   通用代码保持不变。
 - 物理 GIC / vGIC 的拆分规则(CLAUDE.md)仍然有效,它位于本边界之内。
-- 检查基于 grep,只能发现**写法**上的越界,发现不了**语义**上的耦合,比如通用代码
-  假设 IPA 按 1 GB 对齐。语义耦合仍然要靠 review。
+- 检查能发现**写法**上的越界和**头文件**层面的间接依赖,发现不了**语义**上的耦合,
+  比如通用代码假设 IPA 按 1 GB 对齐。语义耦合仍然要靠 review。
 - `CPU_OFF` 杀掉整个 VM 的已知缺陷在迁移中保持原样。电源策略(`vm->off`、kick
   其它 pCPU)随 guest PSCI 模拟进入 arch,把它抽成通用 API 由 M11 负责。
 - M11 调度器新增的运行状态放进通用 `struct vcpu`,EL1 系统寄存器块放进

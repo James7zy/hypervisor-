@@ -45,6 +45,7 @@ Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-l
 - `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
 - `dtc` (device-tree-compiler) — Debian/Ubuntu: `sudo apt-get install device-tree-compiler`
+- `perl` — `scripts/check-arch-boundary.sh` (part of `make test`) uses it to blank comments and strings
 
 Exit QEMU with `Ctrl-A x`. GDB attach:
 `LINUX_IMAGE=/path/to/Image QEMU_EXTRA_ARGS="-s -S" make run`, then
@@ -96,7 +97,7 @@ Test: *would it still hold on another machine, for another person?*
 
 ## Known defects (found, not yet fixed)
 
-- **`CPU_OFF` kills the whole VM** (`hypervisor/common/psci/psci.c`, found
+- **`CPU_OFF` kills the whole VM** (`hypervisor/arch/arm64/vmexit/vpsci.c`, found
   2026-07-25): `PSCI_CPU_OFF` shares `psci_power_down()` with `SYSTEM_OFF`/
   `SYSTEM_RESET`, so it sets the per-VM `vm->off` flag and parks *every* pCPU of
   the VM. Per the PSCI spec `CPU_OFF` must stop only the calling vCPU. A guest
@@ -216,10 +217,42 @@ Test: *would it still hold on another machine, for another person?*
 
 ### Board vs Driver separation
 
+### Arch boundary: core vs arch/ (2026-09-29)
+
+Code **outside `hypervisor/arch/`** (`common/`, `boot/`, `dm/`, `drivers/`,
+`debug/`, `lib/`, `include/`) must reach the architecture only through
+`<object>_arch_<verb>` hooks (`cpu_`, `vm_`, `vcpu_`) and `<arch/xxx.h>`
+headers. Forbidden outside `arch/`: inline asm and `.S` files, system register
+names (`*_ELn`, `ICH_*`, `ICC_*`), PSCI, direct `vgic_*`/`stage2_*`/`gic_*`/
+`vtimer_*` calls, `BOARD_*`/`board.h` (except the static VM config table),
+and include paths into a concrete `arch/<name>/` directory.
+Decision and rejected options: [ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md);
+migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
+
+- **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), with zero
+  tolerance: the 2026-09-29 migration emptied its allowlist and the allowlist
+  was deleted. It greps comment-stripped source *and* preprocesses each
+  non-arch `.c`, so an arch-private header reached through another header
+  (e.g. `board.h` via a config header) fails too. A hit means the code belongs
+  in `arch/` behind a hook; the only exemption (`common/vm/vm_configs.c`, the
+  static VM config table, may read `BOARD_*`) is hard-coded in the script.
+- Hooks today: `include/cpu.h` (`cpu_arch_init/halt/power_on`),
+  `include/percpu.h` (`cpu_arch_this_percpu/set_this_percpu`),
+  `include/spinlock.h` (`atomic_arch_fetch_inc_u32`, `cpu_arch_relax`),
+  `include/vm.h` (`vm_arch_init/devices_init`,
+  `vcpu_arch_reset/load/run/inject_irq`). arm64 implements them in
+  `arch/arm64/{cpu,guest}/` and `<arch/*.h>`. Board data reaches common code
+  through `include/board_info.h`; the MMIO bus is `common/io/`.
+- Hook prototypes live in the **generic** header; every arch implements them;
+  **no weak defaults**. Add a hook only when a real call site needs it.
+- Device-specific is not arch-specific: an emulated PL011 stays in `dm/`, it
+  just injects via a hook instead of calling the vGIC.
+- The physical GIC / vGIC split above sits *inside* this boundary.
+
 ### Key invariants
 
 - **`-mgeneral-regs-only` is mandatory**: M0 does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
-- **No magic numbers in `uart_pl011.c`**: driver receives base from `uart_init`.
+- **No magic numbers in `drivers/uart/pl011.c`**: driver receives base from `uart_init`. Which drivers a board links is listed in its `board.mk` (`board-drivers`).
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
 - **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
@@ -246,9 +279,10 @@ QEMU → _start (head.S)
   5. VBAR_EL2 = hv_vectors (panic stubs)
   6. DAIF mask, dsb/isb
   7. bl hypervisor_main(dtb_phys)
-     → uart_init(BOARD_UART_BASE)
-     → printk("[hv] Hello from EL2, CurrentEL=0x%lx\n", read_currentel())
-     → for(;;) cpu_wfi()
+     → uart_init(board_uart_base)            (include/board_info.h)
+     → cpu_arch_init()   "[hv] Hello from EL2 on <board>, CurrentEL=..."; GIC + vtimer
+     → vm_init() → vm_run()                   (never returns; guests run)
+     → cpu_arch_halt()
 ```
 
 ### Load address

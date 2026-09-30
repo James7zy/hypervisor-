@@ -45,6 +45,7 @@ Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-l
 - `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` ≥ 6.0
 - `dtc` (device-tree-compiler) — Debian/Ubuntu: `sudo apt-get install device-tree-compiler`
+- `perl` — `scripts/check-arch-boundary.sh` (part of `make test`) uses it to blank comments and strings
 
 Exit QEMU with `Ctrl-A x`. GDB attach:
 `LINUX_IMAGE=/path/to/Image QEMU_EXTRA_ARGS="-s -S" make run`, then
@@ -164,9 +165,11 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 
 - **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), with zero
   tolerance: the 2026-09-29 migration emptied its allowlist and the allowlist
-  was deleted. A hit means the code belongs in `arch/` behind a hook; the only
-  exemption (`common/vm/vm_config.h` may read `BOARD_*`) is hard-coded in the
-  script.
+  was deleted. It greps comment-stripped source *and* preprocesses each
+  non-arch `.c`, so an arch-private header reached through another header
+  (e.g. `board.h` via a config header) fails too. A hit means the code belongs
+  in `arch/` behind a hook; the only exemption (`common/vm/vm_configs.c`, the
+  static VM config table, may read `BOARD_*`) is hard-coded in the script.
 - Hooks today: `include/cpu.h` (`cpu_arch_init/halt/power_on`),
   `include/percpu.h` (`cpu_arch_this_percpu/set_this_percpu`),
   `include/spinlock.h` (`atomic_arch_fetch_inc_u32`, `cpu_arch_relax`),
@@ -210,9 +213,10 @@ QEMU → _start (head.S)
   5. VBAR_EL2 = hv_vectors (panic stubs)
   6. DAIF mask, dsb/isb
   7. bl hypervisor_main(dtb_phys)
-     → uart_init(BOARD_UART_BASE)
-     → printk("[hv] Hello from EL2, CurrentEL=0x%lx\n", read_currentel())
-     → for(;;) cpu_wfi()
+     → uart_init(board_uart_base)            (include/board_info.h)
+     → cpu_arch_init()   "[hv] Hello from EL2 on <board>, CurrentEL=..."; GIC + vtimer
+     → vm_init() → vm_run()                   (never returns; guests run)
+     → cpu_arch_halt()
 ```
 
 ### Load address
