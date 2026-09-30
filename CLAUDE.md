@@ -162,11 +162,18 @@ and include paths into a concrete `arch/<name>/` directory.
 Decision and rejected options: [ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md);
 migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 
-- **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), not by
-  review alone. Violations not yet migrated are listed in
-  `scripts/arch-boundary.allow`; the check fails on a new violation *and* on
-  an entry that no longer matches — **delete the entry when you fix it**, never
-  add one for new code.
+- **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), with zero
+  tolerance: the 2026-09-29 migration emptied its allowlist and the allowlist
+  was deleted. A hit means the code belongs in `arch/` behind a hook; the only
+  exemption (`common/vm/vm_config.h` may read `BOARD_*`) is hard-coded in the
+  script.
+- Hooks today: `include/cpu.h` (`cpu_arch_init/halt/power_on`),
+  `include/percpu.h` (`cpu_arch_this_percpu/set_this_percpu`),
+  `include/spinlock.h` (`atomic_arch_fetch_inc_u32`, `cpu_arch_relax`),
+  `include/vm.h` (`vm_arch_init/devices_init`,
+  `vcpu_arch_reset/load/run/inject_irq`). arm64 implements them in
+  `arch/arm64/{cpu,guest}/` and `<arch/*.h>`. Board data reaches common code
+  through `include/board_info.h`; the MMIO bus is `common/io/`.
 - Hook prototypes live in the **generic** header; every arch implements them;
   **no weak defaults**. Add a hook only when a real call site needs it.
 - Device-specific is not arch-specific: an emulated PL011 stays in `dm/`, it

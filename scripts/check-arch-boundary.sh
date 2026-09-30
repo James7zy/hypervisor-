@@ -1,24 +1,20 @@
 #!/bin/sh
 # SPDX-License-Identifier: TBD
-# Arch boundary ratchet (docs/superpowers/specs/2026-09-29-arch-boundary-design.md).
+# Arch boundary check (ADR-0015; migration: docs/superpowers/specs/2026-09-29-arch-boundary-design.md).
 #
 # Code outside hypervisor/arch/ must reach the architecture only through
-# *_arch_* hooks and <arch/xxx.h> headers. This scans every non-arch source
-# file (comments stripped, so prose may still say "PSCI" or "EL2") for
-# forbidden patterns and compares the (file, rule) pairs it finds with the
-# allowlist of known, not-yet-migrated violations. String literals are blanked
-# too, so log text such as "[hv] PSCI: ..." does not count.
+# *_arch_* hooks and <arch/xxx.h> headers (ADR-0015). This scans every
+# non-arch source file for forbidden patterns and fails on any hit. Comments
+# and string literals are blanked first, so prose and log text such as
+# "[hv] PSCI: ..." do not count; #include paths are kept and checked.
 #
-# Fails when:
-#   - a violation is NOT on the allowlist   (new code crossed the boundary)
-#   - an allowlist entry no longer matches  (it was fixed: delete the entry)
-# so the allowlist can only shrink.
+# There is no allowlist: the migration that needed one is finished. The only
+# exceptions are the permanent ones in exempt() below.
 #
-# Usage: sh scripts/check-arch-boundary.sh [allowlist]
+# Usage: sh scripts/check-arch-boundary.sh
 set -eu
 
 ROOT=hypervisor
-ALLOW=${1:-scripts/arch-boundary.allow}
 
 # rule-id  extended-regex (matched against comment-stripped source)
 RULES='
@@ -79,29 +75,15 @@ for f in $files; do
 done
 
 sort -u "$found" -o "$found"
-grep -Ev '^[[:space:]]*(#|$)' "$ALLOW" | awk '{print $1, $2}' | sort -u > "$tmp/allow"
 
-# New violations: found but not allowed.
-comm -23 "$found" "$tmp/allow" > "$tmp/new"
-if [ -s "$tmp/new" ]; then
+if [ -s "$found" ]; then
     echo "FAIL: arch boundary crossed outside hypervisor/arch/:"
     while read -r f id; do
         sed 's/^/  /' "$tmp/$(echo "$f $id" | tr '/ ' '__')"
-    done < "$tmp/new"
+    done < "$found"
     echo "  Move the code into arch/ behind a *_arch_* hook (see CLAUDE.md)."
     status=1
-fi
-
-# Stale entries: allowed but no longer found.
-comm -13 "$found" "$tmp/allow" > "$tmp/stale"
-if [ -s "$tmp/stale" ]; then
-    echo "FAIL: fixed violations still on the allowlist ($ALLOW) - delete them:"
-    sed 's/^/  /' "$tmp/stale"
-    status=1
-fi
-
-if [ "$status" -eq 0 ]; then
-    n=$(wc -l < "$tmp/allow")
-    echo "PASS: arch boundary holds ($n allowlisted violation(s) left)"
+else
+    echo "PASS: arch boundary holds"
 fi
 exit "$status"

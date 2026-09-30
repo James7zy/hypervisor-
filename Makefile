@@ -204,7 +204,7 @@ test-qemu-shell: test-svm-dual-build
 	SVM_BIN2=$(TEST_DUAL_BUILD_DIR)/svm/svm-vm1.bin sh tests/run_shell_test.sh
 
 # Code outside hypervisor/arch/ may reach the architecture only via *_arch_*
-# hooks; scripts/arch-boundary.allow lists the violations not yet migrated.
+# hooks and <arch/xxx.h> (ADR-0015); zero tolerance, no allowlist.
 check-arch-boundary:
 	sh scripts/check-arch-boundary.sh
 
