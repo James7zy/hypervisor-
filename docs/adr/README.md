@@ -117,3 +117,4 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | [0012](0012-physical-gicv3-ownership.md) | Let the hypervisor own the physical GICv3; the guest sees only a virtual GIC | Accepted (M2.5; extended M3.0/M3.2) |
 | [0013](0013-smp-per-cpu-tpidr-guest-driven-bringup.md) | Make EL2 per-CPU via `TPIDR_EL2`, bring secondaries up guest-driven, route IPIs through a kick-SGI | Accepted (M3.5) |
 | [0014](0014-multi-vm-static-partition-el2-console.md) | Objectify the VM, statically partition 2 VMs across 4 pCPUs, move the console under EL2 | Accepted (M5) |
+| [0015](0015-arch-boundary-core-vs-arch.md) | arch/ 以外的代码只能通过 `*_arch_*` 钩子访问架构层 | Accepted (M11 前置);修订 0003 的偏移宏位置 |

@@ -150,6 +150,28 @@ Consequences worth knowing before editing:
 - `docs/superpowers/{specs,plans}/` and `docs/adr/` still cite the pre-split
   `irq/vgic*.c` paths on purpose; they are historical records.
 
+### Arch boundary: core vs arch/ (2026-09-29)
+
+Code **outside `hypervisor/arch/`** (`common/`, `boot/`, `dm/`, `debug/`,
+`lib/`, `include/`) must reach the architecture only through
+`<object>_arch_<verb>` hooks (`cpu_`, `vm_`, `vcpu_`) and `<arch/xxx.h>`
+headers. Forbidden outside `arch/`: inline asm and `.S` files, system register
+names (`*_ELn`, `ICH_*`, `ICC_*`), PSCI, direct `vgic_*`/`stage2_*`/`gic_*`/
+`vtimer_*` calls, `BOARD_*`/`board.h` (except the static VM config table).
+Decision and rejected options: [ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md);
+migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
+
+- **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), not by
+  review alone. Violations not yet migrated are listed in
+  `scripts/arch-boundary.allow`; the check fails on a new violation *and* on
+  an entry that no longer matches — **delete the entry when you fix it**, never
+  add one for new code.
+- Hook prototypes live in the **generic** header; every arch implements them;
+  **no weak defaults**. Add a hook only when a real call site needs it.
+- Device-specific is not arch-specific: an emulated PL011 stays in `dm/`, it
+  just injects via a hook instead of calling the vGIC.
+- The physical GIC / vGIC split above sits *inside* this boundary.
+
 ### Key invariants
 
 - **`-mgeneral-regs-only` is mandatory**: M0 does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
