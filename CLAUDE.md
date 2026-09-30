@@ -152,8 +152,8 @@ Consequences worth knowing before editing:
 
 ### Arch boundary: core vs arch/ (2026-09-29)
 
-Code **outside `hypervisor/arch/`** (`common/`, `boot/`, `dm/`, `debug/`,
-`lib/`, `include/`) must reach the architecture only through
+Code **outside `hypervisor/arch/`** (`common/`, `boot/`, `dm/`, `drivers/`,
+`debug/`, `lib/`, `include/`) must reach the architecture only through
 `<object>_arch_<verb>` hooks (`cpu_`, `vm_`, `vcpu_`) and `<arch/xxx.h>`
 headers. Forbidden outside `arch/`: inline asm and `.S` files, system register
 names (`*_ELn`, `ICH_*`, `ICC_*`), PSCI, direct `vgic_*`/`stage2_*`/`gic_*`/
@@ -176,7 +176,7 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 ### Key invariants
 
 - **`-mgeneral-regs-only` is mandatory**: M0 does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
-- **No magic numbers in `uart_pl011.c`**: driver receives base from `uart_init`.
+- **No magic numbers in `drivers/uart/pl011.c`**: driver receives base from `uart_init`. Which drivers a board links is listed in its `board.mk` (`board-drivers`).
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
 - **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.

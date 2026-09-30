@@ -30,3 +30,5 @@ arch-includes := \
     -Ihypervisor/arch/arm64/timer
 
 arch-ldscript := hypervisor/arch/arm64/board/$(BOARD)/linker.lds
+
+include hypervisor/arch/arm64/board/$(BOARD)/board.mk

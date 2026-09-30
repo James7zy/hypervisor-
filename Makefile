@@ -56,7 +56,7 @@ endif
 CFLAGS  += $(CONFIG_DEFS) $(INCLUDES)
 ASFLAGS += $(CONFIG_DEFS) $(INCLUDES)
 
-ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs))
+ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs) $(board-drivers))
 LD_SCRIPT := $(arch-ldscript)
 
 SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \

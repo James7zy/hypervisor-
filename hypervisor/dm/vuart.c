@@ -2,7 +2,7 @@
 /*
  * PL011 "vuart": per-VM trap-and-emulate console.
  *
- * EL2 now owns the physical PL011 exclusively (see uart_pl011.c / print.c);
+ * EL2 now owns the physical PL011 exclusively (see drivers/uart/pl011.c / print.c);
  * the guest's window at config->vuart_base is punched out of Stage-2
  * (stage2.c) so every guest access traps here instead of touching hardware.
  * TX is forwarded to the physical UART via console_putc (serialized with
