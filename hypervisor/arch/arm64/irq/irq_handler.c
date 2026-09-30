@@ -14,6 +14,7 @@
 #include <vm.h>
 #include <board.h>
 #include <percpu.h>
+#include <cpu.h>
 #include <vgic.h>
 #include <gic_v3.h>
 #include <console.h>
@@ -56,8 +57,7 @@ void el2_irq_handler(void)
         if (current_vcpu()->owner->off) {
             printk("[hv] pCPU%u: VM off, parking\n",
                    (unsigned)current_vcpu_id());
-            for (;;)
-                asm volatile("wfi");
+            cpu_arch_halt();
         }
 
         /* Drain this pCPU's pending SGI bitmap, inject each as a virtual

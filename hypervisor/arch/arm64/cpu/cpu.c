@@ -11,15 +11,10 @@
 /* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
 extern char secondary_entry[];
 
-static u64 read_currentel(void)
-{
-    return SYSREG_READ(CurrentEL);
-}
-
 void cpu_arch_init(void)
 {
-    u64 el = read_currentel();
-    printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name, el);
+    printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name,
+           SYSREG_READ(CurrentEL));
 
     gic_init();
     vtimer_init();

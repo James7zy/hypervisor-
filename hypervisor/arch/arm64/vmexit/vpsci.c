@@ -46,7 +46,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
     v->regs.x[2]     = 0;
     v->regs.x[3]     = 0;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
-    v->arch.hcr_el2       = m->vcpu[0].arch.hcr_el2;       /* mirror vCPU0              */
+    v->arch.hcr_el2  = m->vcpu[0].arch.hcr_el2;  /* mirror vCPU0              */
 
     /* Power on the matching pCPU; it enters secondary_main(pcpu). */
     if (cpu_arch_power_on(pcpu) != 0)
@@ -103,8 +103,7 @@ static void psci_power_down(const char *what)
     asm volatile("dsb ish" ::: "memory");
     psci_kick_vm_other_pcpus(m, caller_pcpu);
 
-    for (;;)
-        asm volatile("wfi");
+    cpu_arch_halt();
 }
 
 /* PSCI_FEATURES: SUCCESS for the calls we implement, else NOT_SUPPORTED. */

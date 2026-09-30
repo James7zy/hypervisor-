@@ -52,15 +52,24 @@ found=$tmp/found
 : > "$found"
 status=0
 
+# record FILE RULE: note a violation; its report lines are read from stdin.
+record() {
+    echo "$1 $2" >> "$found"
+    cat > "$(report_file "$1" "$2")"
+}
+
+report_file() {
+    echo "$tmp/$(echo "$1 $2" | tr '/ ' '__')"
+}
+
 files=$(find "$ROOT" -path "$ROOT/arch" -prune -o -type f \
         \( -name '*.c' -o -name '*.h' -o -name '*.S' \) -print | sort)
 
 for f in $files; do
     case "$f" in
         *.S)
-            echo "$f asm-file" >> "$found"
             printf '%s: asm-file: assembly source outside arch/\n' "$f" \
-                > "$tmp/$(echo "$f asm-file" | tr '/ ' '__')"
+                | record "$f" asm-file
             continue ;;
     esac
     # Blank string literals and comments, keeping every newline so the
@@ -77,8 +86,7 @@ for f in $files; do
         rc=0
         grep -En -- "$re" "$tmp/src" > "$tmp/hits" || rc=$?
         if [ "$rc" -eq 0 ]; then
-            echo "$f $id" >> "$found"
-            sed "s#^#$f: $id: #" "$tmp/hits" > "$tmp/$(echo "$f $id" | tr '/ ' '__')"
+            sed "s#^#$f: $id: #" "$tmp/hits" | record "$f" "$id"
         elif [ "$rc" -ne 1 ]; then
             echo "ERROR: grep failed (rc=$rc) on rule $id for $f" >&2
             exit 2
@@ -97,9 +105,8 @@ if [ -n "${CC:-}" ]; then
             | grep "^$ROOT/arch/" | grep -v "^$ROOT/arch/[^/]*/include/arch/" \
             | sort -u > "$tmp/leak" || true
         if [ -s "$tmp/leak" ]; then
-            echo "$f arch-header" >> "$found"
             sed "s#^#$f: arch-header: includes (transitively) #" "$tmp/leak" \
-                > "$tmp/$(echo "$f arch-header" | tr '/ ' '__')"
+                | record "$f" arch-header
         fi
     done
 fi
@@ -109,7 +116,7 @@ sort -u "$found" -o "$found"
 if [ -s "$found" ]; then
     echo "FAIL: arch boundary crossed outside hypervisor/arch/:"
     while read -r f id; do
-        sed 's/^/  /' "$tmp/$(echo "$f $id" | tr '/ ' '__')"
+        sed 's/^/  /' "$(report_file "$f" "$id")"
     done < "$found"
     echo "  Move the code into arch/ behind a *_arch_* hook (see CLAUDE.md)."
     status=1

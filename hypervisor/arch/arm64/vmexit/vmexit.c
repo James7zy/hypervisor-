@@ -3,6 +3,7 @@
 #include <printk.h>
 #include <vm.h>
 #include <percpu.h>
+#include <cpu.h>
 #include <hypercall.h>
 #include "vpsci.h"
 #include "data_abort.h"
@@ -136,7 +137,6 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     default:
         printk("[hv] unexpected exit cpu%u EC=0x%x ESR=0x%lx ELR=0x%lx\n",
                (unsigned)current_vcpu_id(), (unsigned)ec, esr, regs->elr_el2);
-        for (;;)
-            asm volatile("wfi");
+        cpu_arch_halt();
     }
 }
