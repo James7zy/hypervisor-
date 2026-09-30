@@ -17,7 +17,7 @@ extern char secondary_entry[];
  * vCPU index, author that vCPU's boot state from the guest's args, power on the
  * matching pCPU at secondary_entry, and hand back SUCCESS once it is online.
  */
-static u64 psci_cpu_on_guest(struct vcpu_regs *regs)
+static u64 psci_cpu_on_guest(struct arch_regs *regs)
 {
     struct vm *m = current_vcpu()->owner;
 
@@ -48,7 +48,7 @@ static u64 psci_cpu_on_guest(struct vcpu_regs *regs)
     v->regs.x[2]     = 0;
     v->regs.x[3]     = 0;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
-    v->hcr_el2       = m->vcpu[0].hcr_el2;       /* mirror vCPU0              */
+    v->arch.hcr_el2       = m->vcpu[0].arch.hcr_el2;       /* mirror vCPU0              */
 
     /* Power on the matching pCPU at our EL2 secondary_entry, ctx = pCPU id.
      * Target the physical affinity (== pcpu for QEMU virt GICv3, <16 cores). */
@@ -126,7 +126,7 @@ static u64 psci_features(u32 fn)
     }
 }
 
-void psci_handle(struct vcpu_regs *regs)
+void psci_handle(struct arch_regs *regs)
 {
     u32 fn = (u32)regs->x[0];
 

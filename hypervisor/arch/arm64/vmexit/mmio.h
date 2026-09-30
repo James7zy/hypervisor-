@@ -43,6 +43,6 @@ int mmio_bus_register(u64 base, u64 len, mmio_handler_t handler, void *ctx);
  * success advances regs->elr_el2 past the faulting instruction.
  * Returns 0 if handled (caller erets back), non-zero if unhandled.
  */
-int mmio_handle_data_abort(struct vcpu_regs *regs, u64 esr);
+int mmio_handle_data_abort(struct arch_regs *regs, u64 esr);
 
 #endif /* HV_ARM64_MMIO_H */

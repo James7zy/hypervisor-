@@ -51,7 +51,7 @@ void vgic_inject_spi(struct vcpu *target, u32 intid);
  * pCPU from its own current vCPU's shadow ich_lr[1]. Called unconditionally by
  * the kicked target pCPU (el2_irq_handler's kick-SGI branch) on EVERY kick,
  * including ones that are ordinary SGI/IPI traffic -- it test-and-clears
- * vcpu->spi_shadow_pending and only actually reloads the live register when
+ * vcpu->arch.spi_shadow_pending and only actually reloads the live register when
  * that flag was set by remote vgic_inject_spi since the last consumption.
  * This prevents replaying a stale, already-consumed shadow LR1 on an unrelated
  * later kick. Payload, live write and consumption share spi_lock; caller must

@@ -115,7 +115,7 @@ void secondary_main(u32 id)
     printk("[hv] pCPU%u online, entering guest\n", (unsigned)id);
 
     /* Required order: Stage-2 activate BEFORE vGIC restore, then run (vcpu_run
-     * loads HCR_EL2 from v->hcr_el2 and erets to EL1). */
+     * loads HCR_EL2 from v->arch.hcr_el2 and erets to EL1). */
     stage2_activate(v);
     vgic_restore(v);
 

@@ -2,7 +2,8 @@
 /*
  * Offset regression test: verifies that C struct layout matches the
  * hardcoded numeric offsets used in vmexit_asm.S (#ifdef __ASSEMBLER__
- * block in vm.h). Compiled on the host with plain cc; no cross-toolchain
+ * block in hypervisor/arch/arm64/include/arch/vm.h). Compiled on the host
+ * with plain cc; no cross-toolchain
  * needed. Run via: make check-offsets
  *
  * If a struct field is added/reordered, this file fails to compile with a
@@ -15,21 +16,26 @@
 
 typedef uint64_t u64;
 
-/* Mirror of vm.h structs — must stay in sync with hypervisor/include/vm.h */
-struct vcpu_regs {
+/* Mirror of the vCPU structs — must stay in sync with hypervisor/include/vm.h
+ * (struct vcpu) and hypervisor/arch/arm64/include/arch/vm.h (the rest). */
+struct arch_regs {
     u64 x[31];      /* x0–x30 */
     u64 sp_el1;
     u64 elr_el2;
     u64 spsr_el2;
 };
 
-struct vcpu {
-    struct vcpu_regs regs;   /* MUST be first */
+struct vcpu_arch {
     u64 hcr_el2;
     u64 vttbr_el2;
     u64 ich_hcr_el2;
     u64 ich_vmcr_el2;
     u64 ich_lr[4];
+};
+
+struct vcpu {
+    struct arch_regs regs;   /* MUST be first */
+    struct vcpu_arch arch;
 };
 
 struct hv_ctx {
@@ -38,7 +44,7 @@ struct hv_ctx {
     u64 sp;
 };
 
-/* Assembly macro values from vm.h #ifdef __ASSEMBLER__ block */
+/* Assembly macro values from <arch/vm.h> #ifdef __ASSEMBLER__ block */
 #define VCPU_X0          0x000
 #define VCPU_SP_EL1      0x0F8
 #define VCPU_ELR         0x100
@@ -49,15 +55,15 @@ struct hv_ctx {
 #define HV_SP            0x060
 #define HV_CTX_SIZE      0x068
 
-_Static_assert(offsetof(struct vcpu_regs, x[0])     == VCPU_X0,        "VCPU_X0 mismatch");
-_Static_assert(offsetof(struct vcpu_regs, sp_el1)   == VCPU_SP_EL1,    "VCPU_SP_EL1 mismatch");
-_Static_assert(offsetof(struct vcpu_regs, elr_el2)  == VCPU_ELR,       "VCPU_ELR mismatch");
-_Static_assert(offsetof(struct vcpu_regs, spsr_el2) == VCPU_SPSR,      "VCPU_SPSR mismatch");
-_Static_assert(offsetof(struct vcpu, hcr_el2)       == VCPU_HCR_EL2,   "VCPU_HCR_EL2 mismatch");
-_Static_assert(offsetof(struct vcpu, vttbr_el2)     == VCPU_VTTBR_EL2, "VCPU_VTTBR_EL2 mismatch");
-_Static_assert(offsetof(struct vcpu, ich_hcr_el2)   == 0x120,          "ich_hcr_el2 offset mismatch");
-_Static_assert(offsetof(struct vcpu, ich_vmcr_el2)  == 0x128,          "ich_vmcr_el2 offset mismatch");
-_Static_assert(offsetof(struct vcpu, ich_lr)        == 0x130,          "ich_lr offset mismatch");
+_Static_assert(offsetof(struct arch_regs, x[0])     == VCPU_X0,        "VCPU_X0 mismatch");
+_Static_assert(offsetof(struct arch_regs, sp_el1)   == VCPU_SP_EL1,    "VCPU_SP_EL1 mismatch");
+_Static_assert(offsetof(struct arch_regs, elr_el2)  == VCPU_ELR,       "VCPU_ELR mismatch");
+_Static_assert(offsetof(struct arch_regs, spsr_el2) == VCPU_SPSR,      "VCPU_SPSR mismatch");
+_Static_assert(offsetof(struct vcpu, arch.hcr_el2)       == VCPU_HCR_EL2,   "VCPU_HCR_EL2 mismatch");
+_Static_assert(offsetof(struct vcpu, arch.vttbr_el2)     == VCPU_VTTBR_EL2, "VCPU_VTTBR_EL2 mismatch");
+_Static_assert(offsetof(struct vcpu, arch.ich_hcr_el2)   == 0x120,          "ich_hcr_el2 offset mismatch");
+_Static_assert(offsetof(struct vcpu, arch.ich_vmcr_el2)  == 0x128,          "ich_vmcr_el2 offset mismatch");
+_Static_assert(offsetof(struct vcpu, arch.ich_lr)        == 0x130,          "ich_lr offset mismatch");
 _Static_assert(offsetof(struct hv_ctx, lr)          == HV_LR,          "HV_LR mismatch");
 _Static_assert(offsetof(struct hv_ctx, sp)          == HV_SP,          "HV_SP mismatch");
 _Static_assert(sizeof(struct hv_ctx)                == HV_CTX_SIZE,    "HV_CTX_SIZE mismatch");

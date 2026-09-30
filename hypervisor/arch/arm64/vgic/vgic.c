@@ -19,13 +19,13 @@ void vgic_init(struct vcpu *vcpu)
     /* Per-vCPU virtual interface: enabled, blank VMCR and list registers.
      * The guest programs its own VPMR/VENG1 via ICC_PMR_EL1/ICC_IGRPEN1_EL1.
      * TC=1 traps the guest's ICC_SGI1R_EL1 (IPI) writes to EL2 (M3.5). */
-    vcpu->ich_hcr_el2  = ICH_HCR_EL2_EN | ICH_HCR_EL2_TC;
-    vcpu->ich_vmcr_el2 = 0;
-    vcpu->ich_lr[0] = 0;
-    vcpu->ich_lr[1] = 0;
-    vcpu->ich_lr[2] = 0;
-    vcpu->ich_lr[3] = 0;
-    vcpu->spi_shadow_pending = false;
+    vcpu->arch.ich_hcr_el2  = ICH_HCR_EL2_EN | ICH_HCR_EL2_TC;
+    vcpu->arch.ich_vmcr_el2 = 0;
+    vcpu->arch.ich_lr[0] = 0;
+    vcpu->arch.ich_lr[1] = 0;
+    vcpu->arch.ich_lr[2] = 0;
+    vcpu->arch.ich_lr[3] = 0;
+    vcpu->arch.spi_shadow_pending = false;
 }
 
 void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
@@ -34,7 +34,7 @@ void vgic_inject_sw(struct vcpu *vcpu, u32 vintid, u8 prio)
              ((u64)prio << ICH_LR_PRIO_SHIFT) |
              ((u64)vintid & ICH_LR_VINTID_MASK);
 
-    vcpu->ich_lr[0] = lr;
+    vcpu->arch.ich_lr[0] = lr;
     /* Write the live register; the eret back to EL1 synchronises (no isb). */
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
@@ -46,7 +46,7 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio)
              ((u64)pintid << ICH_LR_PINTID_SHIFT) |
              ((u64)vintid & ICH_LR_VINTID_MASK);
 
-    vcpu->ich_lr[0] = lr;
+    vcpu->arch.ich_lr[0] = lr;
     /* Write the live register; the eret back to EL1 synchronises (no isb). */
     SYSREG_WRITE(ICH_LR0_EL2, lr);
 }
@@ -64,8 +64,8 @@ static u64 vgic_spi_lr_encode(u32 intid)
 /* Requires spi_lock; publishing the payload and pending is one operation. */
 static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
 {
-    vcpu->ich_lr[1] = vgic_spi_lr_encode(intid);
-    vcpu->spi_shadow_pending = true;
+    vcpu->arch.ich_lr[1] = vgic_spi_lr_encode(intid);
+    vcpu->arch.spi_shadow_pending = true;
 }
 
 /* Software SPI injection into LR1 (the vtimer owns LR0 and is re-injected
@@ -82,13 +82,13 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
     bool local = target == current_vcpu();
     u32 pcpu = target->owner->config->pcpu_base + target->vcpu_idx;
 
-    spin_lock(&target->spi_lock);
+    spin_lock(&target->arch.spi_lock);
     vgic_set_spi_shadow_locked(target, intid);
     if (local) {
-        SYSREG_WRITE(ICH_LR1_EL2, target->ich_lr[1]);
-        target->spi_shadow_pending = false;
+        SYSREG_WRITE(ICH_LR1_EL2, target->arch.ich_lr[1]);
+        target->arch.spi_shadow_pending = false;
     }
-    spin_unlock(&target->spi_lock);
+    spin_unlock(&target->arch.spi_lock);
 
     if (!local) {
         asm volatile("dsb ish" ::: "memory");
@@ -107,12 +107,12 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
  * already-handled PL011 interrupt. */
 void vgic_reload_spi_lr(struct vcpu *vcpu)
 {
-    spin_lock(&vcpu->spi_lock);
-    if (vcpu->spi_shadow_pending) {
-        SYSREG_WRITE(ICH_LR1_EL2, vcpu->ich_lr[1]);
-        vcpu->spi_shadow_pending = false;
+    spin_lock(&vcpu->arch.spi_lock);
+    if (vcpu->arch.spi_shadow_pending) {
+        SYSREG_WRITE(ICH_LR1_EL2, vcpu->arch.ich_lr[1]);
+        vcpu->arch.spi_shadow_pending = false;
     }
-    spin_unlock(&vcpu->spi_lock);
+    spin_unlock(&vcpu->arch.spi_lock);
 }
 
 /* Inject a virtual SGI (INTID 0..15) via ICH_LR2. LR0 is the vtimer and LR1 is
@@ -125,7 +125,7 @@ void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid)
              ((u64)0xA0 << ICH_LR_PRIO_SHIFT) |
              ((u64)vintid & ICH_LR_VINTID_MASK);
 
-    vcpu->ich_lr[2] = lr;
+    vcpu->arch.ich_lr[2] = lr;
     SYSREG_WRITE(ICH_LR2_EL2, lr);
 }
 
@@ -133,12 +133,12 @@ void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid)
  * Static pinning never restores on a runtime re-entry. M11 must re-audit. */
 void vgic_restore(struct vcpu *vcpu)
 {
-    SYSREG_WRITE(ICH_HCR_EL2,  vcpu->ich_hcr_el2);
-    SYSREG_WRITE(ICH_VMCR_EL2, vcpu->ich_vmcr_el2);
-    SYSREG_WRITE(ICH_LR0_EL2,  vcpu->ich_lr[0]);
-    SYSREG_WRITE(ICH_LR1_EL2,  vcpu->ich_lr[1]);
-    SYSREG_WRITE(ICH_LR2_EL2,  vcpu->ich_lr[2]);
-    SYSREG_WRITE(ICH_LR3_EL2,  vcpu->ich_lr[3]);
+    SYSREG_WRITE(ICH_HCR_EL2,  vcpu->arch.ich_hcr_el2);
+    SYSREG_WRITE(ICH_VMCR_EL2, vcpu->arch.ich_vmcr_el2);
+    SYSREG_WRITE(ICH_LR0_EL2,  vcpu->arch.ich_lr[0]);
+    SYSREG_WRITE(ICH_LR1_EL2,  vcpu->arch.ich_lr[1]);
+    SYSREG_WRITE(ICH_LR2_EL2,  vcpu->arch.ich_lr[2]);
+    SYSREG_WRITE(ICH_LR3_EL2,  vcpu->arch.ich_lr[3]);
     asm volatile("isb");
 }
 
@@ -147,10 +147,10 @@ void vgic_restore(struct vcpu *vcpu)
  * Future save/restore users must redesign that protocol, not just add a lock. */
 void vgic_save(struct vcpu *vcpu)
 {
-    vcpu->ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
-    vcpu->ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
-    vcpu->ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
-    vcpu->ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
-    vcpu->ich_lr[2] = SYSREG_READ(ICH_LR2_EL2);
-    vcpu->ich_lr[3] = SYSREG_READ(ICH_LR3_EL2);
+    vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
+    vcpu->arch.ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
+    vcpu->arch.ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
+    vcpu->arch.ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
+    vcpu->arch.ich_lr[2] = SYSREG_READ(ICH_LR2_EL2);
+    vcpu->arch.ich_lr[3] = SYSREG_READ(ICH_LR3_EL2);
 }

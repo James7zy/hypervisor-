@@ -10,7 +10,7 @@
  * physical interrupt is taken again rather than lost.
  */
 
-#include <vm.h>       /* VCPU_* offset macros (active in __ASSEMBLER__) */
+#include <arch/vm.h>  /* VCPU_* offset macros (active in __ASSEMBLER__) */
 #include <percpu.h>   /* PERCPU_CUR_VCPU — current vCPU via TPIDR_EL2 */
 
     .section .text

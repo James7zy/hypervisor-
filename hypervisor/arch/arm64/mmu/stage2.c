@@ -97,7 +97,7 @@ void stage2_init(struct vm *m)
     /* Every vCPU of the VM shares the same Stage-2 table / VMID. */
     u64 vttbr = ((u64)m->config->vmid << 48) | (u64)(uintptr_t)l1;
     for (u32 i = 0; i < VCPUS_PER_VM; i++)
-        m->vcpu[i].vttbr_el2 = vttbr;
+        m->vcpu[i].arch.vttbr_el2 = vttbr;
 }
 
 void stage2_activate(const struct vcpu *vcpu)
@@ -112,7 +112,7 @@ void stage2_activate(const struct vcpu *vcpu)
         "msr vttbr_el2, %1\n"
         "isb\n"
         :
-        : "r"((u64)VTCR_EL2_VALUE), "r"(vcpu->vttbr_el2)
+        : "r"((u64)VTCR_EL2_VALUE), "r"(vcpu->arch.vttbr_el2)
         : "memory"
     );
 }

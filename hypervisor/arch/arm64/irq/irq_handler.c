@@ -74,7 +74,7 @@ void el2_irq_handler(void)
          * Called unconditionally on EVERY kick-SGI, including ordinary
          * SGI/IPI traffic that has nothing to do with the console -- safe
          * because vgic_reload_spi_lr() internally test-and-clears
-         * vcpu->spi_shadow_pending and only actually reloads the live
+         * vcpu->arch.spi_shadow_pending and only actually reloads the live
          * register when remote vgic_inject_spi() armed it since the last
          * reload/inject. Without that gate this call would blindly replay a
          * stale (possibly already-consumed-by-the-guest) shadow LR1 on any

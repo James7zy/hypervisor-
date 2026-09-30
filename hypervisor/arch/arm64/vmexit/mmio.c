@@ -69,7 +69,7 @@ static u64 mmio_faulting_ipa(void)
     return ((hpfar & 0xFFFFFFFFFFF0ULL) << 8) | (far & 0xFFFULL);
 }
 
-int mmio_handle_data_abort(struct vcpu_regs *regs, u64 esr)
+int mmio_handle_data_abort(struct arch_regs *regs, u64 esr)
 {
     u32 iss = (u32)(esr & 0x01FFFFFFU);
 

@@ -21,7 +21,7 @@
  * helper.
  */
 
-#include <vm.h>       /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */
+#include <arch/vm.h>  /* VCPU_* and HV_* macros (active only in __ASSEMBLER__ block) */
 #include <percpu.h>   /* PERCPU_CUR_VCPU, NR_CPUS, PERCPU_SIZE */
 
     .section .bss
@@ -164,7 +164,7 @@ el1_sync_handler:
     mrs     x1, spsr_el2
     str     x1, [x0, #VCPU_SPSR]
 
-    /* handle_exit(struct vcpu_regs *regs, u64 esr) */
+    /* handle_exit(struct arch_regs *regs, u64 esr) */
     mrs     x1, esr_el2
     bl      handle_exit
 

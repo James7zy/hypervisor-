@@ -11,7 +11,7 @@
 /* Defined in vmexit_asm.S; does not return */
 extern void hv_restore(void);
 
-static void handle_hvc(struct vcpu_regs *regs)
+static void handle_hvc(struct arch_regs *regs)
 {
     u32 func_id = (u32)regs->x[0];
     u8  svc     = (u8)(func_id >> 24);
@@ -50,7 +50,7 @@ static void handle_hvc(struct vcpu_regs *regs)
  * ISS layout: Op0[21:20] Op2[19:17] Op1[16:14] CRn[13:10] Rt[9:5] CRm[4:1]
  * Direction[0] (0 = write).
  */
-static void handle_sysreg_trap(struct vcpu_regs *regs, u64 esr)
+static void handle_sysreg_trap(struct arch_regs *regs, u64 esr)
 {
     u32 iss = (u32)(esr & 0x1FFFFFFU);
     u32 op2 = (iss >> 17) & 0x7U;
@@ -119,7 +119,7 @@ static void handle_sysreg_trap(struct vcpu_regs *regs, u64 esr)
     regs->elr_el2 += 4ULL;
 }
 
-void handle_exit(struct vcpu_regs *regs, u64 esr)
+void handle_exit(struct arch_regs *regs, u64 esr)
 {
     u32 ec = (u32)(esr >> 26) & 0x3FU;
 

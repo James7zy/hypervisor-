@@ -61,10 +61,10 @@ for f in $files; do
             continue ;;
     esac
     # Blank string literals and comments, keeping every newline so the
-    # reported line numbers are the real ones. #include lines are kept
-    # verbatim: their "path" is code, not prose.
+    # reported line numbers are the real ones. #include paths are kept
+    # verbatim: a quoted path is code, not prose.
     perl -0777 -pe '
-        s{(^[ \t]*\#[ \t]*include[^\n]*)|("(?:\\.|[^"\\\n])*")|(\x27(?:\\.|[^\x27\\\n])*\x27)|(/\*.*?\*/)|(//[^\n]*)}{
+        s{(^[ \t]*\#[ \t]*include[ \t]*[<"][^>"\n]*[>"])|("(?:\\.|[^"\\\n])*")|(\x27(?:\\.|[^\x27\\\n])*\x27)|(/\*.*?\*/)|(//[^\n]*)}{
             defined $1 ? $1 : defined $2 ? q("") : defined $3 ? $3 :
             do { (my $c = $4 // q()) =~ s/[^\n]//g; $c }
         }gsme' "$f" > "$tmp/src"
