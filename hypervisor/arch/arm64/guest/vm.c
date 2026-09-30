@@ -62,3 +62,9 @@ void vcpu_arch_load(struct vcpu *v)
     stage2_activate(v);
     vgic_restore(v);
 }
+
+void vcpu_arch_inject_irq(struct vcpu *v, u32 irq)
+{
+    /* The only injection source outside arch/ today is the vuart's SPI. */
+    vgic_inject_spi(v, irq);
+}

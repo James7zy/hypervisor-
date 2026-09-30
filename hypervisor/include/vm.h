@@ -86,6 +86,9 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg);
 /* Load `v` onto this pCPU's virtualization hardware (arm64: VMPIDR_EL2,
  * Stage-2, vGIC list registers). */
 void vcpu_arch_load(struct vcpu *v);
+/* Raise virtual interrupt `irq` for vCPU `v`; callable from any pCPU (arm64:
+ * vGIC SPI injection, kicking v's pCPU if remote). */
+void vcpu_arch_inject_irq(struct vcpu *v, u32 irq);
 /* Enter the guest on this pCPU; returns on an exit that needs the caller. */
 void vcpu_arch_run(struct vcpu *v);
 #endif /* !__ASSEMBLER__ */

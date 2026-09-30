@@ -3,7 +3,7 @@
  * PL011 "vuart": per-VM trap-and-emulate console.
  *
  * EL2 now owns the physical PL011 exclusively (see uart_pl011.c / print.c);
- * the guest's IPA window at BOARD_UART_BASE is punched out of Stage-2
+ * the guest's window at config->vuart_base is punched out of Stage-2
  * (stage2.c) so every guest access traps here instead of touching hardware.
  * TX is forwarded to the physical UART via console_putc (serialized with
  * printk under the same lock); RX is filled by EL2's IRQ handler draining the
@@ -15,11 +15,10 @@
  */
 #include <types.h>
 #include <printk.h>
-#include <board.h>
 #include <percpu.h>
 #include <vm.h>
 #include <mmio.h>
-#include <vgic.h>
+#include "vm_config.h"   /* vuart_base / vuart_irq */
 #include "vuart.h"
 #include "console.h"   /* console_focus */
 
@@ -148,12 +147,24 @@ static int vuart_mmio_handler(struct mmio_access *acc, void *ctx)
 
 void vuart_bus_init(void)
 {
-    int r = mmio_bus_register(BOARD_UART_BASE, 0x1000ULL, vuart_mmio_handler, NULL);
+    /* One global registration serves every VM: the handler resolves the VM
+     * per access, and all VMs share one guest address map (ADR-0014). */
+    uintptr_t base = vm[0].config->vuart_base;
+    for (u32 i = 1; i < (u32)NR_VMS; i++) {
+        if (vm[i].config->vuart_base != base) {
+            printk("[hv] BUG: vuart: VM%u base 0x%lx != VM0 base 0x%lx\n",
+                   (unsigned)i, (unsigned long)vm[i].config->vuart_base,
+                   (unsigned long)base);
+            return;
+        }
+    }
+
+    int r = mmio_bus_register(base, 0x1000ULL, vuart_mmio_handler, NULL);
     if (r != 0)
         printk("[hv] vuart: bus full, registration failed\n");
     else
         printk("[hv] vuart: PL011 0x%lx/0x1000 registered\n",
-               (unsigned long)BOARD_UART_BASE);
+               (unsigned long)base);
 }
 
 bool vuart_rx_has_room(struct vm *m)
@@ -184,5 +195,5 @@ void vuart_rx(struct vm *m, u8 ch)
     spin_unlock(&u->lock);
     /* Mask decision linearizes at the snapshot; no retroactive unmask delivery. */
     if (notify)
-        vgic_inject_spi(&m->vcpu[0], BOARD_PL011_IRQ);
+        vcpu_arch_inject_irq(&m->vcpu[0], m->config->vuart_irq);
 }

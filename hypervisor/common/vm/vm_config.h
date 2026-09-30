@@ -15,13 +15,21 @@ struct vm_config {
     uintptr_t dtb_ipa;     /* guest IPA where the DTB is visible (x0)    */
     u8        pcpu_base;   /* first pCPU of the VM's static slot; vCPU i
                               runs on pCPU pcpu_base + i */
+    uintptr_t vuart_base;  /* guest-physical base of the emulated console
+                              UART (dm/vuart.c); same in every VM (unified
+                              guest address map, ADR-0014) */
+    u32       vuart_irq;   /* virtual INTID the vuart raises in this VM */
 };
+
+/* Every VM's console: the PL011 window and SPI the guest DTS describes. */
+#define VM_VUART_CONFIG .vuart_base = BOARD_UART_BASE, .vuart_irq = BOARD_PL011_IRQ
 
 #ifdef CONFIG_GUEST_SVM
 static const struct vm_config vm_configs[NR_VMS] = {
     [0] = { .vmid = 1, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM_MEM_BASE, .mem_size = BOARD_SVM_MEM_SIZE,
-            .dtb_ipa = 0, .pcpu_base = 0 },
+            .dtb_ipa = 0, .pcpu_base = 0,
+            VM_VUART_CONFIG },
 #if CONFIG_NR_VMS > 1
     /*
      * VM1's SVM guest: SAME guest-visible IPA as VM0 (entry/mem_base =
@@ -34,7 +42,8 @@ static const struct vm_config vm_configs[NR_VMS] = {
      */
     [1] = { .vmid = 2, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM2_RAM_PA, .mem_size = BOARD_SVM_MEM_SIZE,
-            .dtb_ipa = 0, .pcpu_base = VCPUS_PER_VM },
+            .dtb_ipa = 0, .pcpu_base = VCPUS_PER_VM,
+            VM_VUART_CONFIG },
 #endif
 };
 #else
@@ -43,7 +52,8 @@ static const struct vm_config vm_configs[NR_VMS] = {
             .entry = BOARD_LINUX_IMAGE_PA - BOARD_LINUX_RAM_PA + BOARD_LINUX_RAM_IPA,
             .mem_base = BOARD_LINUX_RAM_IPA, .ram_pa = BOARD_LINUX_RAM_PA,
             .mem_size = BOARD_LINUX_RAM_SIZE, .dtb_ipa = BOARD_LINUX_DTB_IPA,
-            .pcpu_base = 0 },
+            .pcpu_base = 0,
+            VM_VUART_CONFIG },
 #if CONFIG_NR_VMS > 1
     /*
      * VM1's Linux guest: SAME guest-visible IPA map as VM0 (entry/mem_base/
@@ -55,7 +65,8 @@ static const struct vm_config vm_configs[NR_VMS] = {
             .entry = BOARD_LINUX2_IMAGE_PA - BOARD_LINUX2_RAM_PA + BOARD_LINUX_RAM_IPA,
             .mem_base = BOARD_LINUX_RAM_IPA, .ram_pa = BOARD_LINUX2_RAM_PA,
             .mem_size = BOARD_LINUX_RAM_SIZE, .dtb_ipa = BOARD_LINUX_DTB_IPA,
-            .pcpu_base = VCPUS_PER_VM },
+            .pcpu_base = VCPUS_PER_VM,
+            VM_VUART_CONFIG },
 #endif
 };
 #endif
