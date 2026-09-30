@@ -20,7 +20,6 @@
 #include <arch/sysreg.h>
 #include <gic_v3.h>
 #include <vgic.h>
-#include "../mmu/stage2.h"
 
 static inline void mmio_write32(unsigned long addr, u32 val)
 {
@@ -98,10 +97,6 @@ void secondary_main(u32 id)
     struct vcpu *v = &m->vcpu[id % VCPUS_PER_VM];
     vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
 
-    /* Virtual MPIDR for this vCPU: Aff0 = VM-local vCPU index. */
-    SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
-    asm volatile("isb");
-
     /* This core's current vCPU (asm entry path reads it via TPIDR_EL2). */
     percpu[id].cur_vcpu = v;
 
@@ -114,10 +109,9 @@ void secondary_main(u32 id)
 
     printk("[hv] pCPU%u online, entering guest\n", (unsigned)id);
 
-    /* Required order: Stage-2 activate BEFORE vGIC restore, then run (vcpu_arch_run
-     * loads HCR_EL2 from v->arch.hcr_el2 and erets to EL1). */
-    stage2_activate(v);
-    vgic_restore(v);
+    /* VMPIDR + Stage-2 + vGIC, in the required order (guest/vm.c), then run
+     * (vcpu_arch_run loads HCR_EL2 from v->arch.hcr_el2 and erets to EL1). */
+    vcpu_arch_load(v);
 
     for (;;)
         vcpu_arch_run(v);

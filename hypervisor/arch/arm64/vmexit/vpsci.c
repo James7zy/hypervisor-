@@ -7,9 +7,7 @@
 #include <arch/psci.h>
 #include "vpsci.h"
 #include <gic_v3.h>
-
-/* secondary_entry (head.S): EL2 PA the secondary core is powered on at. */
-extern char secondary_entry[];
+#include <cpu.h>
 
 /*
  * Guest-driven CPU_ON (M3.5 Slice 4). The guest's Linux issues PSCI CPU_ON to
@@ -50,10 +48,8 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
     v->arch.hcr_el2       = m->vcpu[0].arch.hcr_el2;       /* mirror vCPU0              */
 
-    /* Power on the matching pCPU at our EL2 secondary_entry, ctx = pCPU id.
-     * Target the physical affinity (== pcpu for QEMU virt GICv3, <16 cores). */
-    s64 ret = psci_cpu_on((u64)pcpu, (u64)(uintptr_t)secondary_entry, (u64)pcpu);
-    if (ret != (s64)PSCI_RET_SUCCESS)
+    /* Power on the matching pCPU; it enters secondary_main(pcpu). */
+    if (cpu_arch_power_on(pcpu) != 0)
         return PSCI_RET_INVALID_PARAMETERS;
 
     /* Wait (bounded) for the secondary to publish online before returning
