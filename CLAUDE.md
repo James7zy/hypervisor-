@@ -35,6 +35,12 @@ Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-
   DTB at `0x82000000`). A full arm64 `defconfig` Image is ~37 MB and overruns the
   DTB; trim unused subsystems (NET/PCI/USB/DRM/DEBUG_INFO, keep PL011 + virtio +
   devtmpfs + initramfs) to get under budget.
+  A known-good config (4.7 MB Image, Linux 6.12, two VMs boot to shells) is
+  checked in as `guest/linux-6.12-qemu_virt.config` — a **full** `.config`,
+  not a savedefconfig: it starts from `allnoconfig`, so a defconfig-style diff
+  would re-enable defaults on restore. Use it with
+  `cp guest/linux-6.12-qemu_virt.config <linux>/.config && make olddefconfig && make Image`
+  (ARCH/CROSS_COMPILE set).
 - **The Makefile does not track header dependencies** — after editing any header
   (e.g. `board.h`), run `make clean` or stale `.o`s relink with old values.
 
