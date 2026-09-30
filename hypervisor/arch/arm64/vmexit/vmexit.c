@@ -5,7 +5,7 @@
 #include <percpu.h>
 #include <hypercall.h>
 #include "vpsci.h"
-#include "mmio.h"
+#include "data_abort.h"
 #include <vgic_sgi.h>
 
 /* Defined in vmexit_asm.S; does not return */

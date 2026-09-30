@@ -18,7 +18,7 @@
 #include <board.h>
 #include <percpu.h>
 #include <vm.h>
-#include "../arch/arm64/vmexit/mmio.h"
+#include <mmio.h>
 #include <vgic.h>
 #include "vuart.h"
 #include "console.h"   /* console_focus */

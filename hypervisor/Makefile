@@ -6,6 +6,7 @@ hv-objs := \
     lib/print.o \
     common/vm/vm.o \
     common/percpu.o \
+    common/io/mmio.o \
     dm/vuart.o \
     dm/console.o \
     dm/hv_shell.o

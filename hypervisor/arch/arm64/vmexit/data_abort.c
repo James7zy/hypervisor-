@@ -2,46 +2,8 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
-#include "mmio.h"
-
-/*
- * Fixed-size MMIO bus. M3.x needs only a handful of regions:
- * GICD, GICR, and one or two virtio-mmio frames. 8 is ample headroom.
- */
-#define MMIO_MAX_REGIONS 8
-
-struct mmio_region {
-    u64            base;
-    u64            len;
-    mmio_handler_t handler;
-    void          *ctx;
-};
-
-static struct mmio_region mmio_regions[MMIO_MAX_REGIONS];
-static u32 mmio_region_count;
-
-int mmio_bus_register(u64 base, u64 len, mmio_handler_t handler, void *ctx)
-{
-    if (mmio_region_count >= MMIO_MAX_REGIONS)
-        return -1;
-
-    mmio_regions[mmio_region_count].base    = base;
-    mmio_regions[mmio_region_count].len     = len;
-    mmio_regions[mmio_region_count].handler = handler;
-    mmio_regions[mmio_region_count].ctx     = ctx;
-    mmio_region_count++;
-    return 0;
-}
-
-static struct mmio_region *mmio_bus_lookup(u64 ipa)
-{
-    for (u32 i = 0; i < mmio_region_count; i++) {
-        struct mmio_region *r = &mmio_regions[i];
-        if (ipa >= r->base && ipa < r->base + r->len)
-            return r;
-    }
-    return NULL;
-}
+#include <mmio.h>
+#include "data_abort.h"
 
 /* ESR_EL2 ISS fields for a Data Abort (EC = 0x24). */
 #define ISS_ISV(iss)  (((iss) >> 24) & 0x1U)   /* Instruction Syndrome Valid */
@@ -82,16 +44,11 @@ int mmio_handle_data_abort(struct arch_regs *regs, u64 esr)
         return -1;
     }
 
-    u64 ipa = mmio_faulting_ipa();
-    struct mmio_region *r = mmio_bus_lookup(ipa);
-    if (r == NULL)
-        return -1;   /* caller logs DFSC + parks */
-
     u32 srt = ISS_SRT(iss);
 
     struct mmio_access acc;
-    acc.ipa      = ipa;
-    acc.offset   = ipa - r->base;
+    acc.addr     = mmio_faulting_ipa();
+    acc.offset   = 0;   /* filled in by mmio_bus_dispatch */
     acc.size     = mmio_sas_to_bytes(ISS_SAS(iss));
     acc.is_write = (ISS_WNR(iss) != 0U);
     acc.data     = 0;
@@ -101,7 +58,8 @@ int mmio_handle_data_abort(struct arch_regs *regs, u64 esr)
         acc.data = (srt == 31U) ? 0ULL : regs->x[srt];
     }
 
-    if (r->handler(&acc, r->ctx) != 0)
+    /* No region, or the device failed: caller logs DFSC + parks. */
+    if (mmio_bus_dispatch(&acc) != 0)
         return -1;
 
     if (!acc.is_write && srt != 31U) {
