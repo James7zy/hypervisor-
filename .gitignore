@@ -17,15 +17,16 @@ build/
 .idea/
 *~
 
+# Local scratch notes
+.scratch/
+
 # Superpowers brainstorm sessions
 .superpowers/
 
-# Claude Code local settings and locally installed skills; only the
-# project's own skills are tracked (add a !.claude/skills/<name>/ line each)
+# Claude Code local settings and locally installed skills.
 .claude/*
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/roadmap/
 
 # Vendored agent skills (installed tooling, not project code)
 .agents/
