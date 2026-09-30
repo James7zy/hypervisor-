@@ -115,7 +115,7 @@ static void cmd_help(const char *arg)
  *
  * STATE says "halted", not "off", even though it reads vm->off: that flag
  * means "some vCPU of this VM called CPU_OFF/SYSTEM_OFF/SYSTEM_RESET, so all
- * of the VM's pCPUs are parked in wfi" (psci.c psci_power_down). "off" would
+ * of the VM's pCPUs are parked in wfi" (vpsci.c psci_power_down). "off" would
  * imply an orderly whole-VM shutdown, which is not what the flag guarantees.
  *
  * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),

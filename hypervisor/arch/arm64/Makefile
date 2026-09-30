@@ -4,11 +4,13 @@ arch-objs := \
     arch/arm64/boot/vectors.o \
     arch/arm64/cpu/cpu.o \
     arch/arm64/cpu/secondary.o \
+    arch/arm64/cpu/psci.o \
     arch/arm64/board/$(BOARD)/board.o \
     arch/arm64/mmu/stage2.o \
     arch/arm64/vmexit/vmexit.o \
     arch/arm64/vmexit/vmexit_asm.o \
     arch/arm64/vmexit/mmio.o \
+    arch/arm64/vmexit/vpsci.o \
     arch/arm64/vgic/vgic.o \
     arch/arm64/vgic/vgic_sgi.o \
     arch/arm64/vgic/vgic_v3_mmio.o \

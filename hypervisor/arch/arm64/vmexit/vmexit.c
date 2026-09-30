@@ -4,7 +4,7 @@
 #include <vm.h>
 #include <percpu.h>
 #include <hypercall.h>
-#include <psci.h>
+#include "vpsci.h"
 #include "mmio.h"
 #include <vgic_sgi.h>
 

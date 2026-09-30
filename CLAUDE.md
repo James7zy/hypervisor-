@@ -96,7 +96,7 @@ Test: *would it still hold on another machine, for another person?*
 
 ## Known defects (found, not yet fixed)
 
-- **`CPU_OFF` kills the whole VM** (`hypervisor/common/psci/psci.c`, found
+- **`CPU_OFF` kills the whole VM** (`hypervisor/arch/arm64/vmexit/vpsci.c`, found
   2026-07-25): `PSCI_CPU_OFF` shares `psci_power_down()` with `SYSTEM_OFF`/
   `SYSTEM_RESET`, so it sets the per-VM `vm->off` flag and parks *every* pCPU of
   the VM. Per the PSCI spec `CPU_OFF` must stop only the calling vCPU. A guest
@@ -142,7 +142,7 @@ Consequences worth knowing before editing:
   `dm/console.c` (`console_rx_drain()`), which owns `console_focus` and the
   Ctrl-T/shell/vuart routing decision.
 - **Kicking a VM's pCPUs for power-down is PSCI policy**, not vGIC work — it
-  is `psci_kick_vm_other_pcpus()` in `common/psci/psci.c`.
+  is `psci_kick_vm_other_pcpus()` in `arch/arm64/vmexit/vpsci.c`.
 - **Do not create a shared `gic_regs.h`.** Both directories describe the same
   ARM spec but take disjoint subsets for opposite purposes — `gic_v3.h` holds
   registers EL2 *writes*, `vgic_v3_mmio.h` holds the `VGICD_`/`VGICR_` offsets

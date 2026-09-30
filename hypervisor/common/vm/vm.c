@@ -5,7 +5,7 @@
 #include <percpu.h>
 #include <uart.h>
 #include <vuart.h>
-#include <psci.h>
+#include <arch/psci.h>
 #include "vm_config.h"
 #include "stage2.h"
 #include <vgic.h>
@@ -28,7 +28,7 @@ void vm_init(void)
 
         /*
          * secondary_main derives (VM, vCPU) for a woken pCPU structurally as
-         * (id / VCPUS_PER_VM, id % VCPUS_PER_VM), while psci.c/vgic_sgi.c
+         * (id / VCPUS_PER_VM, id % VCPUS_PER_VM), while vpsci.c/vgic_sgi.c
          * derive the pCPU for a given (VM, vCPU) as config->pcpu_base + idx.
          * These two derivations only agree if pcpu_base == vmi * VCPUS_PER_VM
          * for every configured VM. Nothing else checks that at compile time

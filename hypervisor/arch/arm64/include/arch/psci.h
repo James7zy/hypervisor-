@@ -1,8 +1,14 @@
 /* SPDX-License-Identifier: TBD */
-#ifndef HV_PSCI_H
-#define HV_PSCI_H
+#ifndef HV_ARCH_PSCI_H
+#define HV_ARCH_PSCI_H
 
-#include <vm.h>   /* struct vcpu_regs */
+#include <types.h>
+
+/*
+ * Arm PSCI (DEN0022), shared by both directions:
+ *   - cpu/psci.c    EL2 as PSCI *client*: smc to firmware to power on a pCPU
+ *   - vmexit/vpsci.c EL2 as PSCI *server*: emulates PSCI for guest HVCs
+ */
 
 /* PSCI function IDs (Arm DEN0022; SMC32 unless suffixed _64). */
 #define PSCI_VERSION       0x84000000U
@@ -23,14 +29,9 @@
 #define PSCI_RET_INTERNAL_FAILURE    (~5ULL)        /* -6 */
 #define PSCI_RET_ALREADY_ON          (~3ULL)        /* -4 */
 
-/* Dispatch a PSCI call. regs->x[0] holds the function ID on entry; the
- * result (for calls that return) is written back into regs->x[0]. The
- * power-down calls (CPU_OFF/SYSTEM_OFF/SYSTEM_RESET) do not return. */
-void psci_handle(struct vcpu_regs *regs);
-
 /* Issue a physical PSCI CPU_ON (smc) to QEMU firmware to power on a secondary
  * pCPU at `entry` (an EL2 PA, since EL2 runs MMU-off) with x0 = ctx_id.
  * `target_mpidr` is the affinity of the target pCPU. Returns the PSCI status. */
 s64 psci_cpu_on(u64 target_mpidr, u64 entry, u64 ctx_id);
 
-#endif /* HV_PSCI_H */
+#endif /* HV_ARCH_PSCI_H */
