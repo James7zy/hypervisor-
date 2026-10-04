@@ -53,8 +53,8 @@ CONFIG_DEFS := $(shell \
     sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' .config)
 endif
 
-CFLAGS  += $(CONFIG_DEFS) $(INCLUDES)
-ASFLAGS += $(CONFIG_DEFS) $(INCLUDES)
+CFLAGS  += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
+ASFLAGS += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 
 ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs) $(board-drivers))
 LD_SCRIPT := $(arch-ldscript)

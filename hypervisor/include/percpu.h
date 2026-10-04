@@ -12,11 +12,16 @@
  * controlled offset coupling that supersedes the "first field of first field"
  * trick (see ADR-0003); the _Static_assert below makes a drift a build error.
  *
- * NR_CPUS is a compile-time constant: the M3.5 build assumes physical =
- * virtual = 2, statically 1:1 pinned, no scheduler.
+ * NR_CPUS is the physical core count, a board fact: each board's board.mk
+ * passes -DCONFIG_NR_CPUS=N so both C and the asm that sizes per-CPU stacks
+ * and contexts see it. No generic default -- a board that forgets it must
+ * fail the build, not silently inherit another board's count.
  */
 
-#define NR_CPUS 4
+#ifndef CONFIG_NR_CPUS
+#error "CONFIG_NR_CPUS undefined: the board's board.mk must set it in board-cflags"
+#endif
+#define NR_CPUS CONFIG_NR_CPUS
 
 /*
  * Byte offset of cur_vcpu within struct percpu, consumed by the asm entry

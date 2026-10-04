@@ -120,9 +120,12 @@ static void cmd_help(const char *arg)
  *
  * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),
  * so the columns are aligned with literal spaces in the format strings. That
- * is sound only because every value here is a single digit: NR_VMS <= 2 and
- * NR_CPUS == 4 by static assert (vm.h), so ids and pCPU numbers never widen.
+ * is sound only because every value here is a single digit. VM ids and
+ * pCPU numbers are both bounded by NR_CPUS (vm.h asserts NR_VMS *
+ * VCPUS_PER_VM <= NR_CPUS), a board value, so pinning NR_CPUS covers both.
  */
+_Static_assert(NR_CPUS <= 10, "vm_list aligns columns assuming single-digit pCPU ids");
+
 static void cmd_vm_list(const char *arg)
 {
     (void)arg;

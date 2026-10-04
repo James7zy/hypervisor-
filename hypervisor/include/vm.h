@@ -16,7 +16,7 @@
 #define CONFIG_NR_VMS 1
 #endif
 #define NR_VMS       CONFIG_NR_VMS
-#define VCPUS_PER_VM 2   /* static 2-vCPU VMs; NR_CPUS = NR_VMS * VCPUS_PER_VM */
+#define VCPUS_PER_VM 2   /* static 2-vCPU VMs; must fit NR_CPUS, see below */
 
 /*
  * secondary_main derives a woken pCPU's (VM, vCPU) purely from its pCPU id
@@ -27,8 +27,8 @@
  * future CONFIG_NR_VMS bump without a matching NR_CPUS bump) at compile time
  * instead of silently indexing percpu[]/sgi_pending[] out of bounds.
  *
- * NR_CPUS (percpu.h) is a fixed PLATFORM constant sized for the largest build
- * profile (4, since M5 slice 3: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
+ * NR_CPUS (percpu.h) is the board's physical core count (board.mk; 4 on
+ * qemu_virt: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
  * intentionally NOT required to equal NR_VMS * VCPUS_PER_VM: single-VM build
  * profiles (HV_GUEST=svm, NR_VMS=1, the pre-slice-3 SVM regression
  * tests) only ever PSCI CPU_ON pCPUs 0/1 -- pCPUs 2/3 are simply never woken
