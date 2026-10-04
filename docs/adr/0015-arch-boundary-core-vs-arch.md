@@ -2,6 +2,9 @@
 
 > **Status:** Accepted. **Milestone:** M11 前置重构(arch-boundary)。修订
 > [[0003-asm-c-vcpu-offset-coupling]] 中"偏移宏放在哪个头文件"这一点。
+> **2026-10-04:** 迁移按 spec 范围完成,检查零容忍通过。**多架构可移植性尚未
+> 证明**:仓库里只有 arm64 一个 arch,没有第二个架构编译过通用代码;剩余的语义
+> 耦合见文末"已知语义耦合"。
 
 这个 hypervisor 的目标是多架构:现在是 ARM64(QEMU `virt`,之后 RK3588),将来
 要能加入 x86 等架构。目录仿照 ACRN 分成 `arch/` 和 `common/`,但到 M10 为止这个
@@ -84,3 +87,22 @@ flowchart TB
 - M11 调度器新增的运行状态放进通用 `struct vcpu`,EL1 系统寄存器块放进
   `struct vcpu_arch`。
 - 历史 spec、plan、ADR 中引用的旧路径(`common/psci/` 等)不做修改。
+
+## 已知语义耦合
+
+2026-10-04 复查迁移结果时,在 arch 以外找到的、检查脚本抓不到的耦合。每项都已
+定性,新架构移植时从这张表开始看:
+
+| 位置 | 耦合 | 定性 |
+|---|---|---|
+| `include/percpu.h` | `cur_vcpu` 必须是第一个字段、`PERCPU_SIZE` 固定:arch 汇编直接按偏移读通用结构 | **接受**。这是"arch 汇编读通用结构"的契约本身,由 `_Static_assert` 钉住;新 arch 的入口汇编遵守同一契约即可 |
+| `common/vm/vm_config.h` | `dtb_ipa` 对应 arm64 Linux 启动协议(x0 传 DTB) | **接受**。是启动协议数据,不是架构调用;改成中性名(如 `boot_info_ipa`)可选,等第二个架构需要时再做 |
+| `common/vm/vm_config.h` | `vuart_base`/`vuart_irq` 默认 vuart 是 PL011 | **接受**。设备相关不等于架构相关(Decision 第 6 条) |
+| `struct vm.off` | 通用字段,只有 arm64 guest PSCI(`vmexit/vpsci.c`)写它;读它的是 arm64 `irq/irq_handler.c`(kick 后停车)和通用的 `dm/hv_shell.c` | **交给 M11**:被每 vCPU 运行状态取代(M11 S2) |
+| `VCPUS_PER_VM`、`secondary_main` | 静态 1:1 绑定,由 pCPU id 推出 (VM, vCPU) | **交给 M11**:调度器引入后映射不再是结构性的 |
+
+原先第一项还包括 `NR_CPUS` 写死在通用头文件里,已在同日改为由各板 `board.mk`
+提供(`-DCONFIG_NR_CPUS=N`)。
+
+持续验证的办法:M11 新增的每个钩子都要在 M11 spec 里回答"x86/RISC-V 能否实现",
+见该 spec 的"ADR-0015 后的对齐"一节。`arch/x86` stub 构建仍然推迟到钩子稳定后。

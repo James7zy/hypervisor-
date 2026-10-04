@@ -182,7 +182,9 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
   `include/vm.h` (`vm_arch_init/devices_init`,
   `vcpu_arch_reset/load/run/inject_irq`). arm64 implements them in
   `arch/arm64/{cpu,guest}/` and `<arch/*.h>`. Board data reaches common code
-  through `include/board_info.h`; the MMIO bus is `common/io/`.
+  through `include/board_info.h`; compile-time board constants (e.g.
+  `CONFIG_NR_CPUS`, also needed by asm) come from `board-cflags` in the
+  board's `board.mk`; the MMIO bus is `common/io/`.
 - Hook prototypes live in the **generic** header; every arch implements them;
   **no weak defaults**. Add a hook only when a real call site needs it.
 - Device-specific is not arch-specific: an emulated PL011 stays in `dm/`, it
