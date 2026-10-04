@@ -104,5 +104,5 @@ flowchart TB
 原先第一项还包括 `NR_CPUS` 写死在通用头文件里,已在同日改为由各板 `board.mk`
 提供(`-DCONFIG_NR_CPUS=N`)。
 
-持续验证的办法:M11 新增的每个钩子都要在 M11 spec 里回答"x86/RISC-V 能否实现",
-见该 spec 的"ADR-0015 后的对齐"一节。`arch/x86` stub 构建仍然推迟到钩子稳定后。
+持续验证的办法:M11 新增的每个钩子都要回答"x86/RISC-V 能否实现",记在
+`docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md` 的钩子可移植性表里。`arch/x86` stub 构建仍然推迟到钩子稳定后。
