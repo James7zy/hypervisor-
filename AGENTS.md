@@ -28,9 +28,13 @@ make clean              # remove build/
 ```
 
 Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-walkthrough.md`):
-- **`scripts/run-qemu.sh` uses `-m 2G` and this is required** — guest RAM is backed
-  at the 1 GB-aligned PA `0x80000000` (so the Stage-2 L1 1 GB block can map it),
-  which is only inside QEMU `virt` DRAM when more than 1 GB is present (ADR-0004).
+- **`scripts/run-qemu.sh` uses `-m 4G` and this is required** — VM0's RAM is
+  backed at the 1 GB-aligned PA `0x80000000` and VM1's at `0xC0000000` (so the
+  Stage-2 L1 1 GB block can map each), and VM1's block ends at `0x100000000`,
+  inside QEMU `virt` DRAM only with ≥3 GB beyond its `0x40000000` base
+  (ADR-0004). Its `-smp` is not hard-coded: it is the board's
+  `board-nr-cpus` (`board.mk`), exported by the Makefile as `HV_NR_CPUS`, so
+  run the script through `make run` / `make test`, not directly.
 - **The kernel `Image` must fit the address budget** (~31 MB: Image at PA `0x80080000`,
   DTB at `0x82000000`). A full arm64 `defconfig` Image is ~37 MB and overruns the
   DTB; trim unused subsystems (NET/PCI/USB/DRM/DEBUG_INFO, keep PL011 + virtio +

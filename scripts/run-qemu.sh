@@ -21,6 +21,9 @@ set -eu
 #   initrd  @ PA 0xC4000000  (guest IPA 0x44000000, VM1)     -- SAME initrd file, reloaded
 # VM1's backing block requires DRAM extending through 0x100000000 (-m 4G).
 HYPERVISOR_ELF="${HYPERVISOR_ELF:-build/hypervisor.elf}"
+# pCPU count comes from the board's board.mk via the Makefile; run this
+# script through make (make run / make test) rather than directly.
+HV_NR_CPUS="${HV_NR_CPUS:?HV_NR_CPUS unset: run via make (it comes from the board's board.mk)}"
 
 if [ -n "${SVM_BIN:-}" ] && [ -n "${LINUX_IMAGE:-}" ]; then
   echo "ERROR: set only one of SVM_BIN or LINUX_IMAGE."
@@ -60,9 +63,9 @@ fi
 
 exec qemu-system-aarch64 \
   -machine virt,virtualization=on,gic-version=3 \
-  -cpu cortex-a72 -smp 4 -m 4G \
-  `# -smp 4 (M5 slice 3): QEMU must create pCPU0..3 -- 2 statically pinned to` \
-  `# VM0, 2 to VM1 -- for the hypervisor to PSCI CPU_ON each VM's pCPUs. Each` \
+  -cpu cortex-a72 -smp "${HV_NR_CPUS}" -m 4G \
+  `# -smp = NR_CPUS (4 on qemu_virt): QEMU must create pCPU0..3 -- 2 statically` \
+  `# pinned to VM0, 2 to VM1 -- for the hypervisor to PSCI CPU_ON each VM's pCPUs. Each` \
   `# guest's own DTB only ever describes ITS 2 vCPUs (cpu@0/cpu@1); a VM never` \
   `# sees the other VM's physical cores.` \
   `# -m 4G is REQUIRED: VM0's RAM is backed at PA 0x80000000 and VM1's at PA` \

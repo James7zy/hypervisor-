@@ -56,6 +56,10 @@ endif
 CFLAGS  += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 ASFLAGS += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 
+# scripts/run-qemu.sh sizes -smp from this, so QEMU's pCPU count can never
+# drift from the NR_CPUS the hypervisor was built with.
+export HV_NR_CPUS := $(board-nr-cpus)
+
 ALL_OBJS  := $(addprefix $(OBJ_DIR)/, $(hv-objs) $(arch-objs) $(board-drivers))
 LD_SCRIPT := $(arch-ldscript)
 
