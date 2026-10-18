@@ -12,10 +12,16 @@
 
 ---
 
-## 1. 背景
+## 1. 背景与阅读约定
 
-当前代码（`hypervisor/arch/arm64/mmu/stage2.c`）已经能用 Stage-2 页表启动 UP Linux
-guest。它的 Stage-2 表**极简**——整张 L1 表只填两个表项，且都是 1 GB 的 block：
+**当前实现**已经是 per-VM L1 + L2 表：GIC 的 index 64 和 PL011 的 index 72 均为
+invalid，分别进入 vGIC / vuart 模拟。真实源码路径见第 9 节。
+
+第 2–8 节保留“先拆 L2、只挖 GIC、当时保留 PL011 直通”的分步教学对照，**不是今天
+PL011 的行为**。其中 `l1_table[n]` / `l2_dev[n]` 均简写某一个 VM 的表项；真实数组
+多一层 VM id。当前完整地址图见 [stage2.md](stage2.md)。
+
+最初启动 UP Linux 时（旧编号 M3.0，现 M5），Stage-2 表只有两个 1 GB block：
 
 ```c
 /* IPA 0x00000000–0x3FFFFFFF → PA identity: Device (covers PL011 @ 0x09000000) */
@@ -46,9 +52,9 @@ identity 直通进来了，导致 guest 访问 GIC 时直接命中**物理 GIC**
 在本仓库的 4 KB 粒度、`SL0=1`（从 L1 起步）配置下，**L1 表的每个表项覆盖 1 GB IPA**
 （推导见 [stage2.md §2](stage2.md)）。一个 L1 表项可以是两种描述符之一：
 
-- **L1 block descriptor**（本仓库现状用的）：直接给出一段 1 GB 物理区间的输出基址，
-  **翻译到此结束**，不再往下走。`l1_table[0]`、`l1_table[1]` 都是 block。
-- **L1 table descriptor**：不直接给 PA，而是**指向下一级（L2）表**，翻译继续往 L2 走。
+- **L1 block descriptor**：直接给出一段 1 GB 物理区间的输出基址，翻译到此结束。
+  当前 RAM 的 `l1_table[1]` 仍用它。
+- **L1 table descriptor**：指向下一级 L2 表；当前设备区的 `l1_table[0]` 用它。
 
 「L1 映射」在本文里特指**用 L1 block descriptor 一次性映射 1 GB**这种粗粒度方式。
 
@@ -105,10 +111,9 @@ VTTBR_EL2 ──▶ L1 表
 
 L1 block 的「1 GB 全有或全无」在两类需求下会卡住，必须下沉到 L2（甚至 L3）：
 
-1. **局部 trap（本仓库的真实动因）**：guest 的 GICD/GICR 落在 `l1_table[0]` 这个 1 GB
-   Device block 里。我们想让 guest 访问 GIC 时**陷入 EL2**做影子模拟，但又想让同一个
-   1 GB 里的 PL011（`0x09000000`）继续直通。L1 做不到「这 1 GB 里只有 GIC 那一小段
-   trap、其余直通」——必须拆 L2，把 GIC 所在的 2 MB 单独设 invalid。
+1. **局部 trap（最初的真实动因）**：GICD/GICR 与 PL011 同落低 1 GB，当时要让 GIC
+   trap、PL011 直通，因此必须拆 L2。M10 又把 PL011 的 entry 72 设 invalid；
+   同一机制支持两个 hole，而不必让整个低 1 GB 都 trap。
 
 2. **细粒度权限 / 不同内存属性**：若 1 GB 内既有需要 Device-nGnRE 的 MMIO，又有需要
    Normal-WB 且只读的区段，L1 单一属性无法表达，需要拆到 L2 按 2 MB 分别设
@@ -145,7 +150,7 @@ flowchart TD
     Punch["3. 挖洞: l2_dev[64]=0 (invalid)<br/>覆盖 GICD+GICR 0x08000000-0x081FFFFF"]
     Relink["4. l1_table[0] 改 table desc<br/>(低2位 0b01 block → 0b11 table) 指向 l2_dev"]
     Keep["5. l1_table[1]/VTTBR/VTCR 不变"]
-    Done["guest 访问 GIC → 命中 invalid L2 → Stage-2 fault<br/>→ mmio_bus_lookup → vgic_v3_mmio 影子模拟"]
+    Done["guest 访问 GIC → 命中 invalid L2 → Stage-2 fault<br/>→ mmio_bus_dispatch → vgic_v3_mmio 影子模拟"]
 
     Start --> Alloc --> Fill --> Punch --> Relink --> Keep --> Done
 ```
@@ -259,7 +264,7 @@ GIC 占 index **64**、PL011 占 index **72**，相差 8 个 2 MB 块——所�
 512 个 L2 entry，各映射 2 MB」。这是纯结构拆分，**映射结果对绝大多数地址不变**，只是
 把粒度从 1 GB 降到 2 MB，为后续挖洞做准备。
 
-### 转换前（现状：纯 L1 block）
+### 转换前（教学对照：最初的纯 L1 block）
 
 - **页表结构**：`l1_table[0]` = block descriptor，翻译在 L1 结束。
 - **IPA→PA**：IPA `[0x00000000, 0x40000000)` identity 映射到 PA 同址（Device-nGnRE）。
@@ -390,42 +395,35 @@ flowchart TD
 
 ---
 
-## 9. 代码路径说明
+## 9. 当前代码路径
 
-> L1→L2 punch-hole **已实现**（commit `feat(stage2): punch-hole GICD/GICR …`）。以下都是
-> 现状代码，可直接在仓库中找到。
+### 9.1 建表与首次激活
 
-### 9.1 建表侧（`hypervisor/arch/arm64/mmu/stage2.c`）
+`common/vm/vm.c` 调用通用钩子，`arch/arm64/guest/vm.c` 才访问 Stage-2：
 
-- **`stage2_init(struct vcpu *, u32 vmid, u64 ram_pa)`**：现在把 `l1_table[0]` 建成
-  **table descriptor 指向 `l2_dev`**（不再是 1 GB block）。具体：
-  - 宏 `S2_TABLE = 0x3ULL`（table descriptor，低 2 位 `0b11`）。
-  - 静态表 `static u64 l2_dev[512] __attribute__((aligned(4096)))`。
-  - 一个 `for` 循环把 512 个 L2 entry 填成 2 MB identity Device block（输出基址 `i << 21`）。
-  - `u32 gic_l2_idx = BOARD_GIC_DIST_BASE >> 21;` 算出挖洞索引；若 `BOARD_GIC_RDIST_BASE >> 21`
-    与之不同则 `printk` 告警（地址布局变更的早期信号）；然后 `l2_dev[gic_l2_idx] = 0`（invalid）。
-  - 最后 `l1_table[0] = (u64)(uintptr_t)l2_dev | S2_TABLE`。
-  - `l1_table[1]`（RAM 的 1 GB block）与 `vttbr_el2` 赋值不变。
-- **`stage2_activate(const struct vcpu *)`**（同文件）：把 `VTCR_EL2`/`VTTBR_EL2` 写入硬件，
-  含 `dsb ish`/`isb`。punch-hole 不改这个函数（建表在首次 `eret` 进 guest 前，无需额外 TLBI）。
-- **没有独立的「L1→L2 转换函数」**：是在 `stage2_init` 内**一次性建表**（直接建成带 L2 的
-  形态），并非运行时把已有 L1 block 动态拆分。所以仓库里**没有** `stage2_split_block()`
-  之类的函数，不必去找。
+- `vm_arch_init(m) → stage2_init(struct vm *m)`：按 `m->id` 选取
+  `l1_table[NR_VMS][512]` / `l2_dev[NR_VMS][512]`，每行 4 KB 对齐。
+- 填 512 个 identity Device block，清 `BOARD_GIC_DIST_BASE >> 21`（64）和
+  `BOARD_UART_BASE >> 21`（72）两项。GICD/GICR 不同属一个 L2 entry 时仍只告警，
+  不会自动扩展 hole，板级布局改变必须重新检查。
+- `l1[0] = (u64)(uintptr_t)l2 | S2_TABLE`；RAM `l1[1]` 使用 `m->config->ram_pa`。
+  VMID 与 L1 地址组成 VTTBR，写入该 VM 每个 vCPU 的 `arch.vttbr_el2`。
+- `vcpu_arch_load(v) → stage2_activate(v)`：写 VTCR/VTTBR，保留 `dsb ish` / `isb`，
+  **在 vGIC restore 之前**执行。
 
-### 9.2 trap 接收侧（已就绪，与本改动解耦）
+没有独立的运行时 split 函数：首次进入前直接建成 L2 形态。若将来在线修改活跃表，
+必须重新设计更新、屏障和 TLB 失效流程，不能只复制初始化代码。
 
-guest 访问被挖洞的 GIC 地址 → Stage-2 fault 后，由这条既有链路处理：
+### 9.2 trap 接收侧
 
-- `hypervisor/arch/arm64/vmexit/vmexit.c` → `handle_exit()`：`case 0x24` 分流 Data Abort。
-- `hypervisor/arch/arm64/vmexit/mmio.c` → `mmio_handle_data_abort()` / `mmio_bus_lookup()`：
-  解析 ISS、按 IPA 查 MMIO 总线。
-- `hypervisor/arch/arm64/vgic/vgic_v3_mmio.c` → `vgicd_mmio_handler()` / `vgicr_mmio_handler()`，
-  经 `vgicv3_mmio_init()` 注册到 MMIO 总线。
+1. `arch/arm64/vmexit/vmexit.c` 的 `handle_exit()` 按 EC `0x24` 分流。
+2. `arch/arm64/vmexit/data_abort.c` 解码 ISS、重建 IPA，调用 `mmio_bus_dispatch()`。
+3. `common/io/mmio.c` 查注册区域，填 offset，调用设备 handler。
+4. `arch/arm64/vgic/vgic_v3_mmio.c` 模拟 GICD/GICR；`dm/vuart.c` 模拟 PL011。
+   注册是全局一次，设备状态通过 `current_vcpu()->owner` 按 VM 选择。
 
-> 这条接收链在 punch-hole 之前就存在，只是当时 GIC 访问从不 fault、handler 从未被调用
-> （[investigation 文档](2026-06-21-gicd-gicr-trap-investigation.md) 实证「命中 0 次」）。
-> punch-hole 落地后，真实 boot 实证这两个 handler 现在会被命中（`off=0xffe8`，即 Linux
-> GICv3 驱动探测时读的 GICD/GICR_PIDR2）。
+这里的源码路径相对 `hypervisor/`。原来的 `vmexit/mmio.c` 已不存在；解码与总线
+边界的完整说明见 [handle-exit-dispatch.md](handle-exit-dispatch.md)。
 
 ---
 
@@ -452,7 +450,8 @@ A：能，但本场景不需要——GIC 所在的 2 MB 内没有其它需直通
 **Q：改了 L1 entry 类型需要刷 TLB 吗？**
 A：本场景不需要。建表发生在**首次** `eret` 进 guest 之前，此前没有该 VMID 的有效
 Stage-2 翻译被缓存；`stage2_activate` 的 `dsb ish`/`isb` 已保证写表对 MMU 可见。
-（若将来要**运行时**改活跃的 Stage-2 表，则必须配 `TLBI` —— 那是 M3.5+ 的话题。）
+（若将来要**运行时**改活跃的 Stage-2 表，必须配套正确的屏障 / `TLBI`；当前静态绑核
+不包含这种更新流程。）
 
 **Q：`l2_dev` 为什么必须 4 KB 对齐？**
 A：L1 table descriptor 的「下一级表基址」字段要求低 12 位为 0（表必须页对齐），与

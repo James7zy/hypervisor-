@@ -1,165 +1,142 @@
-# vGIC 中断注入逻辑
+# vGIC 中断注入与跨核交付
 
-本文解释 hypervisor 怎么把一个中断「注入」进 guest，让 guest 在 EL1 看到并处理它。
-源码：
+注入是把虚拟中断写进本 pCPU 的 `ICH_LR<n>_EL2`，由硬件虚拟 CPU 接口呈现给 guest。
+但**远程目标不能直接写本核 LR**：需要先发布目标 vCPU 的影子状态，再通知其所属 pCPU。
 
-- `hypervisor/arch/arm64/vgic/vgic.c` — 三个注入函数 + save/restore。
-- `hypervisor/arch/arm64/vgic/vgic.h` — `ICH_LR<n>_EL2` 列表寄存器位定义。
-- `hypervisor/arch/arm64/irq/irq_handler.c` — EL2 物理 IRQ → 选哪种注入。
+源码入口：
 
-配套阅读：物理 IRQ 怎么进到 EL2 见 [vcpu-run-world-switch.md](vcpu-run-world-switch.md)；
-为什么 vtimer 只 priority-drop 不 deactivate 见 ADR-0001
-（`docs/adr/0001-vtimer-hardware-forwarding.md`）。
+- `hypervisor/arch/arm64/vgic/vgic.c`：四种注入、SPI 远程交付、save/restore。
+- `hypervisor/arch/arm64/vgic/vgic_sgi.c`：guest IPI 解析与 pending bitmap。
+- `hypervisor/arch/arm64/irq/irq_handler.c`：物理 IRQ 分发。
+- `hypervisor/arch/arm64/guest/vm.c`：通用 `vcpu_arch_inject_irq()` 的 arm64 实现。
+- `hypervisor/dm/console.c` / `vuart.c`：控制台 RX 仲裁与虚拟设备状态。
 
-常见疑问：
+## 1. LR 与状态归属
 
-1. 「注入一个中断给 guest」到底是写什么？
-2. `vgic_inject_sw` / `vgic_inject_hw` / `vgic_inject_spi` 三者区别？
-3. 为什么有的注入要带物理 INTID（HW=1）？
-
----
-
-## 1. 注入 = 写一个 List Register（ICH_LR）
-
-GICv3 的虚拟化靠 **List Registers（`ICH_LR0..3_EL2`）**：硬件维护一个虚拟 CPU
-接口，guest 在 EL1 读 `ICC_IAR1_EL1`、写 `ICC_EOIR1_EL1` 时，实际命中的是 List
-Register 里描述的虚拟中断（硬件把 `ICC_*` 重定向到 `ICV_*`）。
-
-所以「**注入一个中断**」就是：**在某个 `ICH_LR<n>_EL2` 里填一条 64 位描述符**，标明
-这个虚拟中断的 INTID、优先级、组、状态（Pending）。下一次 `eret` 回 EL1 时，硬件就
-按 PMR / Group enable 把它呈现给 guest，触发 guest 的 IRQ 向量。
-
-一条 LR 描述符的关键字段（`vgic.h`）：
+一条 LR 描述符的关键字段（定义在 `vgic/vgic.h`）：
 
 | 字段 | 位 | 含义 |
-|------|----|------|
-| State | [63:62] | `0b01` = Pending（`ICH_LR_STATE_PENDING`） |
-| HW | [61] | 0=纯软件注入；1=硬件转发，链一个物理 INTID |
-| Group1 | [60] | 走 Group 1（NS） |
+| --- | --- | --- |
+| State | [63:62] | `0b01` = Pending |
+| HW | [61] | 0 = 软件注入；1 = 链接物理 INTID |
+| Group1 | [60] | Group 1 |
 | Priority | [55:48] | 虚拟优先级 |
-| pINTID | [44:32] | HW=1 时的物理 INTID |
-| vINTID | [31:0] | guest 看到的虚拟 INTID |
+| pINTID | [44:32] | HW=1 时关联的物理 INTID |
+| vINTID | [31:0] | guest 看到的 INTID |
 
-vCPU 结构里有一份 `ich_lr[0..3]` 影子拷贝；注入函数**同时写影子和实时寄存器**，
-影子供 `vgic_save/restore` 在上下文切换时搬运。
+影子位于 **`vcpu->arch.ich_lr[4]`**，与 `spi_lock` / `spi_shadow_pending` 一起定义在
+`arch/arm64/include/arch/vm.h`。影子不是硬件 LR 的持续镜像：guest 消费中断会改变
+live LR，内存不自动回写。远程 SPI 发布期间则可能是内存比 live LR 更新。
 
----
+当前固定分配 LR0=timer、LR1=vuart SPI、LR2=SGI，LR3 未用于注入；没有通用 LR 分配器。
 
-## 2. 三种注入函数
+## 2. 四种注入
 
-### 2.1 `vgic_inject_sw` —— 纯软件注入（HW=0），用 LR0
+| 函数 | LR | HW | 当前用途 |
+| --- | --- | --- | --- |
+| `vgic_inject_sw(v, vintid, prio)` | LR0 | 0 | secondary 启动早期的 timer 回退路径 |
+| `vgic_inject_hw(v, vintid, pintid, prio)` | LR0 | 1 | guest vGIC 已启用后的 timer PPI 27 |
+| `vgic_inject_spi(target, intid)` | LR1 | 0 | vuart RX，支持本核或远程目标，固定优先级 0xA0 |
+| `vgic_inject_sgi(v, vintid)` | LR2 | 0 | 在目标核注入 guest IPI，固定优先级 0xA0 |
 
-```c
-u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
-         (prio << ICH_LR_PRIO_SHIFT) | (vintid & ICH_LR_VINTID_MASK);
-vcpu->ich_lr[0] = lr;
-SYSREG_WRITE(ICH_LR0_EL2, lr);
+sw/hw/sgi 路径更新影子并写**当前核**的 live LR，调用方必须保证目标在本核。
+SPI 路径自行判断 `target == current_vcpu()`，远程时只更新影子并 kick。
+
+arch 外唯一的注入调用方目前是 vuart：
+
+`vuart_rx → vcpu_arch_inject_irq(&vm->vcpu[0], config->vuart_irq) → vgic_inject_spi`。
+
+通用钩子声明在 `include/vm.h`，当前 arm64 实现**只支持这条 shared peripheral IRQ
+用途**，不是通用 SGI/PPI 注入 API。每个 VM 的控制台 IRQ 固定送它的 vCPU0。
+
+## 3. timer：为什么 HW 转发只 drop，不 deactivate
+
+电平触发的 PPI 27 在 guest 处理定时器前可能一直拉高。若 EL2 过早 deactivate，
+它会立即重新 pending，使 guest 得不到处理机会。
+
+稳态路径用 `vgic_inject_hw(..., 27, 27, 0xA0)`，EL2 **只做 priority-drop**，保持
+物理 Active。guest 对虚拟 IRQ 的 deactivate 经 LR 的 HW 链接释放物理中断。
+这是 [ADR-0001](../../adr/0001-vtimer-hardware-forwarding.md) 的核心约束。
+
+例外是 secondary 启动早期 `ICH_VMCR_EL2.VENG1 == 0`：guest 还不能接收 Group 1
+虚拟 IRQ，不能让 HW 链接永远卡在 Active。因此改用 LR0 软件 pending，同时 drop、
+deactivate 并屏蔽物理 PPI。guest 之后写虚拟 PPI-27 enable 时，
+`vgicr_write_sgi → gic_ppi_set_enable()` 重新启用物理 PPI。
+
+## 4. SPI：锁、发布与跨核通知
+
+物理 PL011 由 EL2 独占。`console_rx_drain()` 排物理 FIFO，并按 shell / 焦点 VM
+把字节送给 `hv_shell_rx()` 或 `vuart_rx()`；物理 UART IRQ 随后 drop + deactivate。
+虚拟 UART IRQ 为 **HW=0**，guest 完成它不应再次释放物理 IRQ。
+
+`vuart_rx()` 的设备锁保护 FIFO、RIS 和 IMSC 快照；**先释放设备锁，再调用注入钩子**。
+IMSC 判断在快照时生效，当前没有“以后 unmask 就补送已有 RX”的逻辑。
+
+SPI 的 payload、pending 和本核完成动作由同一把 `target->arch.spi_lock` 保护：
+
+- **本地**：锁内更新 LR1 shadow / pending，写 live LR1，再清 pending。
+- **远程**：锁内更新 shadow / pending，解锁后 `dsb ish`，再
+  `gic_kick_pcpu(pcpu_base + vcpu_idx)`。
+- **目标核**：kick 分支调用 `vgic_reload_spi_lr(current_vcpu())`，锁内仅在 pending
+  为真时写 live LR1 并清除标志。
+
+普通 IPI 也会进入 kick 分支，因此 pending gate 必须保留；否则已经消费的旧 shadow
+会被一次无关 kick 重放。
+
+```mermaid
+sequenceDiagram
+    participant D as vuart_rx（通常 pCPU0）
+    participant V as vgic_inject_spi(target)
+    participant K as gic_kick_pcpu
+    participant T as 目标 pCPU IRQ handler
+    participant R as vgic_reload_spi_lr
+    D->>D: 设备锁内写 FIFO/RIS、快照 IMSC，解锁
+    D->>V: vcpu_arch_inject_irq（仅 notify 为真）
+    V->>V: spi_lock 内发布 LR1 shadow + pending
+    V->>V: 解锁，dsb ish
+    V->>K: kick 目标物理核
+    K->>T: 物理 SGI
+    T->>T: drop + deactivate，检查 owner->off
+    T->>T: vgic_sgi_drain（独立的 IPI 状态）
+    T->>R: 重载本核当前 vCPU 的 SPI
+    R->>R: spi_lock 内检查 pending
+    opt 有新的远程发布
+        R->>R: 写本核 ICH_LR1_EL2，清 pending
+    end
+    R-->>T: 返回
+    Note over T: IRQ 汇编恢复寄存器，直接 eret 回 guest
 ```
 
-最简单的一种：纯虚拟中断，guest 内部 deactivate 后就结束，**不牵连任何物理中断**。
-M2 的 HVC 测试钩子用它。注意写完不需要 `isb`——回 EL1 的 `eret` 本身就是同步点。
-
-### 2.2 `vgic_inject_hw` —— 硬件转发注入（HW=1），用 LR0
-
-```c
-u64 lr = ... | ICH_LR_HW | (pintid << ICH_LR_PINTID_SHIFT) | vintid;
-```
-
-比 sw 版多了 `ICH_LR_HW` 位和 **pINTID**。HW=1 的语义：guest 在 EL1 写
-`ICC_DIR_EL1` **deactivate 这个虚拟中断时，硬件会顺着 LR 的链接自动 deactivate 对应
-的物理中断**。
-
-为什么需要这个？**电平触发（level-sensitive）的物理线**——比如虚拟定时器 PPI 27——
-只要条件还在，物理线会一直拉高。如果 hypervisor 在 EL2 就把它 deactivate，guest 还
-没处理完，线会立刻重新 pending，风暴打死 guest。HW 链接让「物理中断的释放时机」交给
-**guest 处理完那一刻**，正好对齐。详见 ADR-0001。
-
-### 2.3 `vgic_inject_spi` —— SPI 注入，固定用 LR1
-
-```c
-u64 lr = ICH_LR_STATE_PENDING | ICH_LR_GROUP1 |
-         (0xA0 << ICH_LR_PRIO_SHIFT) | (intid & ICH_LR_VINTID_MASK);
-vcpu->ich_lr[1] = lr;
-SYSREG_WRITE(ICH_LR1_EL2, lr);
-```
-
-给 SPI（INTID ≥ 32）用，**固定占 LR1**，原因写在源码注释里：vtimer 每个 tick 都重新
-注入、独占 LR0，如果 SPI 也用 LR0，会在 guest 取走前被 vtimer 覆盖掉。两类中断分占
-LR0 / LR1 互不踩。
-
-纯软件注入（HW=0），与 `vgic_inject_sw` 同形状，只是固定用 LR1、优先级固定 0xA0。
-M5 slice 2 之前，PL011 RX 曾经用 HW=1/LR1（guest 直通物理 UART，deactivate 虚拟中断
-经 LR 链接顺带释放物理线）。现在 EL2 独占物理 PL011（`irq_handler.c` 的
-`BOARD_PL011_IRQ` 分支）：EL2 自己排干物理 FIFO 并调用 `gic_priority_drop` **和**
-`gic_deactivate`，物理侧不再留 Active 状态给 LR 链接去释放——继续用 HW=1 会造成
-物理/虚拟状态不一致（几次注入后卡死）。因此改为纯软件注入：HW=0、Group1、Pending。
-`vgic.h` 把它注释成「software (HW=0) 的瘦封装」这一点，现在与实现一致，不再是文档
-漂移。
-
----
-
-## 3. 谁来决定用哪种注入：`el2_irq_handler`
-
-物理 IRQ 被 `HCR_EL2.IMO=1` 路由到 EL2（走 Lower-EL IRQ 向量），保存 guest 现场后
-调到 `el2_irq_handler`，它按 INTID 分流：
-
-```c
-u32 intid = gic_ack_irq();               /* 读 ICC_IAR1_EL1 */
-
-if (intid == BOARD_VTIMER_IRQ) {         /* PPI 27 虚拟定时器 */
-    vgic_inject_hw(current_vcpu(), 27, 27, 0xA0);
-    gic_priority_drop(intid);            /* 只 EOIR1，保留 Active（ADR-0001） */
-} else if (intid == BOARD_PL011_IRQ) {   /* SPI，EL2 独占物理 UART（M5 slice 2） */
-    while (vuart_rx_has_room(&vm[0])) {
-        int c = uart_getc();
-        if (c < 0) break;
-        vuart_rx(&vm[0], (u8)c);         /* 内部按需调 vgic_inject_spi（HW=0） */
-    }
-    gic_priority_drop(intid);
-    gic_deactivate(intid);               /* 物理侧当场释放，没有 guest 驱动直读硬件 */
-} else {
-    gic_priority_drop(intid);            /* 未预期 / 1023 伪中断 */
-    gic_deactivate(intid);              /* 直接 drop + deactivate */
-}
-```
-
-要点：**只有 HW=1 转发的中断（当前仅 vtimer PPI 27）在 EL2 只 `gic_priority_drop`
-（EOIR1）、绝不 `gic_deactivate`**，deactivate 留给 guest 在 EL1 完成，通过 LR 的 HW
-链接传导到物理侧——这正是 2.2 节说的电平线防风暴机制。PL011 RX 不再走这条路：EL2
-在这里把物理 FIFO 排空、灌进 vuart 模型后，直接 `gic_priority_drop` **加**
-`gic_deactivate`，因为 guest 已经没有直接读物理寄存器的驱动了，不存在「guest 处理完
-才能释放」的时序需求。「未预期中断」同样直接 drop + deactivate。
-
-此外，**纯模拟设备**（无物理 GIC 线）也会注入：M3.3 的 virtio-mmio 在
-`dm/virtio_mmio.c:58` 用 used-buffer 事件直接调 `vgic_inject_spi`，路径不经过物理
-IRQ handler，而是在 MMIO trap-and-emulate 处理 guest 的 kick 时触发。
+## 5. IRQ 分发与模块边界
 
 ```mermaid
 flowchart TD
-    P["物理 IRQ → EL2<br/>el2_irq_handler"] --> A["gic_ack_irq()"]
-    A --> B{INTID?}
-    B -->|"vtimer PPI 27"| C["vgic_inject_hw（HW=1, LR0）<br/>+ priority_drop（保留 Active）"]
-    B -->|"PL011 SPI"| D["排干物理 FIFO → vuart_rx()<br/>→ vgic_inject_spi（HW=0, LR1）<br/>+ priority_drop + deactivate（当场释放）"]
-    B -->|"其它/1023"| E["drop + deactivate"]
-    V["virtio 设备 used 事件<br/>（无物理线）"] --> F["vgic_inject_spi（HW=0）"]
-    C --> G["eret 回 EL1<br/>guest 取 ICC_IAR1，处理，写 ICC_DIR"]
-    D --> G
-    F --> G
-    C --> H["guest deactivate vIRQ<br/>→ HW 链接释放物理中断（仅 vtimer）"]
+    P["物理 IRQ → el2_irq_handler"] --> A["gic_ack_irq"]
+    A --> K["kick SGI<br/>drop + deactivate"]
+    K --> OFF{"所属 VM off?"}
+    OFF -->|"是"| HALT["cpu_arch_halt"]
+    OFF -->|"否"| RELOAD["drain SGI bitmap<br/>+ reload SPI pending"]
+    A --> TIMER{"timer PPI 27<br/>guest VENG1?"}
+    TIMER -->|"是"| HW["HW=1 LR0<br/>只 priority-drop"]
+    TIMER -->|"否"| SW["HW=0 LR0<br/>drop + deactivate + mask PPI"]
+    A --> UART["PL011 SPI 33<br/>console_rx_drain<br/>drop + deactivate"]
+    UART --> DM["dm: shell / vuart 路由"]
+    DM --> HOOK["需要虚拟 IRQ 时<br/>vcpu_arch_inject_irq → vGIC"]
+    A --> OTHER["其它（含 1023）<br/>当前实现 drop + deactivate"]
 ```
 
----
+`irq/gic_v3.c` 只拥有物理控制器；`irq_handler.c` 做分发；`vgic/` 拥有虚拟中断状态；
+`dm/console.c` 拥有 RX 仲裁。旧文档里的 EL2 virtio used-buffer 注入路径已经不存在，
+virtio 后端计划在 M14 的用户态 Device Model 实现。
 
-## 4. save / restore
+## 6. save / restore 不是现成的调度协议
 
-`vgic_save` / `vgic_restore` 把 `ICH_HCR_EL2 / ICH_VMCR_EL2 / ICH_LR0..3` 在 vCPU
-结构和实时寄存器间整体搬运。M2 单 vCPU 不重调度，第一个真实用户是 M2.5 的定时器
-上下文切换。M3.5 没有 scheduler：vCPU0/vCPU1 静态 1:1 绑定到各自 pCPU，每个核心
-只保存/恢复自己的 vGIC 状态。若未来加入 vCPU 迁移或 overcommit，每次切换仍必须走
-这对函数，否则 LR 里的待处理中断会跨 vCPU 串台。
+- `vgic_restore()` 由 `vcpu_arch_load()` 在首次进入 guest 前调用；静态绑核期间不会
+  在每次 IRQ / MMIO 后 restore。
+- **`vgic_save()` 当前没有调用方**。它读取 live LR 覆盖 shadow，可能抹掉另一个核
+  刚发布但尚未交付的 SPI；仅加锁也不能解决“live 比 shadow 旧”的状态语义。
+- M11 必须设计完整的离核状态与远程注入协议，并补齐完整 CPU 上下文；不能简单把
+  现有 save/restore 包在时间片循环外就宣称支持调度。
 
----
-
-> 配套阅读：物理 IRQ 进 EL2 的路径见 [vcpu-run-world-switch.md](vcpu-run-world-switch.md)；
-> MMIO 模拟（virtio kick → 注入）见 [handle-exit-dispatch.md](handle-exit-dispatch.md)；
-> 电平线防风暴的完整论证见 ADR-0001（`docs/adr/0001-vtimer-hardware-forwarding.md`）。
+`make test-qemu-vspi` 覆盖 RX、IPI 压力及无关 kick 不重放旧 SPI；完整回归为
+`make test`。调试开关的实际覆盖范围见 [vgic-debug-logging.md](vgic-debug-logging.md)。

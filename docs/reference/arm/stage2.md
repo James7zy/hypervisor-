@@ -1,6 +1,11 @@
-# Stage-2 页表与 IPA 范围解析（M3.0）
+# Stage-2 页表与 IPA 范围解析
 
-本文解释 `hypervisor/arch/arm64/mmu/stage2.c` 中 Stage-2 映射的几个常见疑问：
+本文对应当前 M10 多 VM 实现与 arch 边界重构。源码为
+`hypervisor/arch/arm64/mmu/stage2.c`，由 `arch/arm64/guest/vm.c` 的钩子调用。
+实际页表是 `l1_table[NR_VMS][512]` / `l2_dev[NR_VMS][512]`；下文推导中的
+`l1_table[n]` / `l2_dev[n]` 简写均指**某一个 VM 的表项**。
+
+常见疑问：
 
 1. `l1_table[0]` 覆盖的 IPA 范围 `0x00000000 – 0x3FFFFFFF` 是怎么来的？
 2. L0/L1/L2/L3 是什么？
@@ -114,91 +119,82 @@ l1_table[2]  → IPA [0x80000000, 0xC0000000)  ...
 
 所以 `0x3FFFFFFF` 就是**第 0 项的末地址 = 1GB − 1 = 0x40000000 − 1**。它不是为对齐某个设备选的边界，而是 L1 entry[0] 的天然边界。
 
-### 只用了 L1：为什么没有 L2/L3
+### 当前用了哪些级别
 
-`SL0=1` 让翻译从 L1 开始；而 `l1_table[0]` 和 `l1_table[1]` 都是 **block descriptor（`S2_BLOCK`）**，不是指向下级表的 table descriptor。因此翻译**在 L1 就结束**，每个表项直接覆盖一整个 1GB block，根本没有 L2/L3 表。
+`SL0=1` 让翻译从 L1 开始，但不要求所有访问在 L1 结束。现在 entry[0] 是
+**table descriptor**，设备访问继续查 L2；entry[1] 才是 RAM 的 **block descriptor**。
 
-用 1GB block 而非细分到页，是因为 M3.0 只需要“一整块 Device + 一整块 RAM”，两个表项就够，最省事。
-
-| 级别 | 粒度（4KB配置） | M3.0 是否用到 |
-|------|----------------|--------------|
-| L0 | 512 GB | 否（SL0=1 跳过） |
-| **L1** | **1 GB** | ✅ 用 block 直接结束翻译 |
-| L2 | 2 MB | 否 |
-| L3 | 4 KB | 否 |
+| 级别 | 粒度（4KB 配置） | 当前用途 |
+| --- | --- | --- |
+| L0 | 512 GB | 不用（SL0=1 跳过） |
+| L1 | 1 GB | entry[0] 指向 L2，entry[1] 直接映射 RAM |
+| L2 | 2 MB | 低 1 GB 的 Device block，GIC 与 PL011 所在 entry 为 invalid |
+| L3 | 4 KB | 不用 |
 
 ---
 
-## 4. 两个 block 的语义
+## 4. 设备表与 RAM block
 
-### entry[0]：Device 恒等映射（`stage2.c`）
+### entry[0]：L2 Device 表，包含两个 hole
 
-```c
-/* IPA 0x00000000–0x3FFFFFFF → PA identity: Device (covers PL011 @ 0x09000000) */
-l1_table[0] = 0x00000000UL | S2_BLOCK | S2_MEMATTR_DEV | S2_S2AP_RW | S2_SH_OSH | S2_AF | S2_XN;
-```
+`stage2_init(struct vm *m)` 取本 VM 的 `l1` / `l2`，先填 512 个 2 MB identity
+Device-nGnRE + XN block，再将两项置零：
 
-- 真正意图：**覆盖 QEMU `virt` 的低地址外设**——PL011 UART @ `0x09000000`、GIC @ `0x08000000` 等全部落在第一个 1GB 内。
-- **identity（恒等）映射**：输出地址写 `0x00000000`，块输出地址 = IPA 基址，故 IPA `0x09000000` → PA `0x09000000`，把物理 PL011 直通给 guest，Linux earlycon 可直接写真实 UART（M3.0 目标）。
-- 属性 **Device-nGnRE + XN**：MMIO 区域不可缓存、不可取指执行。
+| L2 index | IPA 区间（右端不含） | 当前行为 |
+| --- | --- | --- |
+| 64 | `[0x08000000, 0x08200000)` | GICD/GICR hole → vGIC MMIO 模拟 |
+| 72 | `[0x09000000, 0x09200000)` | PL011 hole → `dm/vuart.c` |
+| 其它 | 低 1 GB 的其余 2 MB block | 仍按 IPA == PA 映射 Device |
+
+`l1[0] = (u64)(uintptr_t)l2 | S2_TABLE` 指向这张表。**earlycon 也访问 vuart，
+不是直通物理 PL011。** hole 覆盖整个 2 MB，而 handler 只接设备窗口，洞中未注册
+地址会走 MMIO 未命中后的 fail-stop。
 
 ### entry[1]：guest RAM（Normal WB）
 
 ```c
-/* IPA 0x40000000–0x7FFFFFFF → PA ram_pa: Normal WB (guest RAM) */
-l1_table[1] = (ram_pa & 0xFFFFC0000000UL) | S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
+l1[1] = (ram_pa & 0xFFFFC0000000UL) |
+        S2_BLOCK | S2_MEMATTR_NORM | S2_S2AP_RW | S2_SH_ISH | S2_AF;
 ```
 
-- 第 2 个 GB（`0x40000000–0x7FFFFFFF`）**非恒等地**映射到 `ram_pa`，属性 Normal WB。
-- 这也是 Linux 启动协议里 guest `mem_base` 落在 `0x40000000` 的原因。
+两台 Linux VM 都看到 IPA `[0x40000000, 0x80000000)` 的 1 GB 映射，但 backing 不同：
 
-### 恒等映射 vs 非恒等映射
+| VM | VMID | pCPU | RAM block PA（右端不含） |
+| --- | --- | --- | --- |
+| VM0 | 1 | 0–1 | `[0x80000000, 0xC0000000)` |
+| VM1 | 2 | 2–3 | `[0xC0000000, 0x100000000)` |
 
-**核心一句话：看“输入地址（IPA）”和“输出地址（PA）”是否相等。**
-
-- **恒等映射（identity）**：IPA == PA，地址不变，原样穿过页表。entry[0] 就是——块描述符的输出基址写成 `0x00000000`，等于该 block 的 IPA 基址，于是 `IPA + offset → PA + offset`，数值完全一致。目的是把**真实的物理外设**（PL011、GIC）按原地址直通给 guest，guest 用 `0x09000000` 访问 UART，硬件上就是真的 `0x09000000`。
-- **非恒等映射（non-identity）**：IPA != PA，页表把 guest 看到的地址**搬运**到另一段物理内存。entry[1] 就是——guest 以为自己的 RAM 在 `0x40000000`，实际被映射到 hypervisor 分配的 `ram_pa`（如 `0x80000000`）。guest 完全感知不到这层搬运，这正是 Stage-2 做内存隔离/重定位的手段。
+DTS / `mem_size` 宣告的可用 RAM 仍为 **256 MB**；当前 Stage-2 映射粒度是 1 GB，
+没有按 `mem_size` 收紧到 256 MB。各 VM 的两个 vCPU 共享该 VM 的表和 VMID，
+`stage2_init()` 将相同 VTTBR 值写入它们的 `arch.vttbr_el2`。
 
 ```mermaid
-graph LR
-    subgraph Guest["Guest 视角 (IPA)"]
-        I0["0x09000000<br/>(PL011)"]
-        I1["0x40000000<br/>(RAM 基址)"]
-    end
-
-    subgraph PA["物理地址 (PA)"]
-        P0["0x09000000<br/>真实 PL011 寄存器"]
-        P1["ram_pa = 0x80000000<br/>hypervisor 分配的 DRAM"]
-    end
-
-    I0 -->|"entry[0] 恒等<br/>IPA == PA"| P0
-    I1 -->|"entry[1] 非恒等<br/>IPA != PA, 搬运"| P1
-
-    style I0 fill:#e1f5e1
-    style P0 fill:#e1f5e1
-    style I1 fill:#ffe1e1
-    style P1 fill:#ffe1e1
+flowchart LR
+    G0["VM0 RAM IPA 0x40000000"] --> T0["VMID 1 / L1 entry 1"] --> P0["PA 0x80000000"]
+    G1["VM1 RAM IPA 0x40000000"] --> T1["VMID 2 / L1 entry 1"] --> P1["PA 0xC0000000"]
+    DEV["任一 VM 的 GIC / PL011 IPA"] --> HOLE["本 VM 的 L2 entry 64 / 72<br/>invalid"]
+    HOLE --> AB["Stage-2 Data Abort"] --> BUS["common MMIO bus"]
+    BUS --> MODEL["current_vcpu()->owner<br/>选择 vGIC / vuart 状态"]
 ```
 
-**为什么外设要恒等、RAM 可以非恒等？**
+**恒等**只表示 IPA == PA，**非恒等**表示二者不同；设备 PA 固定并不要求它的 IPA
+相同，恒等映射是一种配置选择，而非硬件强制。当前 GIC 与 PL011 根本没有直接 PA
+映射，不能再拿它们当作“恒等直通”的现状示例。
 
-| | entry[0] Device | entry[1] RAM |
-|---|---|---|
-| 目标 | 物理 MMIO 寄存器（位置固定，由 SoC 决定） | 一块普通 DRAM（放哪都行） |
-| 地址能否搬动 | **不能**——`0x09000000` 是硬件焊死的 UART 位置，改 PA 就指不到真寄存器了 | **能**——只要 guest 内部自洽，物理上放在哪一段 DRAM 都无所谓 |
-| 所以选择 | 恒等：IPA 直接当 PA 用 | 非恒等：guest 看到 `0x40000000`，实际落到 `ram_pa` |
-
-形象地说：**恒等映射像“透明玻璃”**，guest 透过它看到的就是底层真实硬件地址；**非恒等映射像“转发邮局”**，guest 寄到 `0x40000000` 的信，被悄悄转投到 `ram_pa`，收发双方都不知道中间换过地址。
-
-> 注意：entry[1] 的输出基址必须 1GB 对齐（`ram_pa & 0xFFFFC0000000`），因为 L1 block 的输出地址低 30 位被架构强制为 0——这是 1GB-block 的硬约束，不是“凑整”。
+> Linux backing 必须 1 GB 对齐。掩码不是合法化任意地址的取整操作；SVM 测试配置
+> 把 entry 所在 PA 交给同一个掩码得到 block 基址，不能照搬成动态内存分配规则。
+> 低地址设备区域仍广泛映射，也没有 SMMU；当前不是面向不可信 guest 的完整设备隔离方案。
 
 ---
 
-## 5. 与 M3.1 的衔接
+## 5. hole 与 MMIO 的衔接
 
-注释说 entry[0] “covers PL011”，但同一个 Device block 其实也把 GIC（`0x08000000`）恒等映射了进来。M3.0 设计为 guest 一访问 GIC 就 stall（尚无 trap 框架）。
+GIC hole 和 M10 的 PL011 hole 均已落地。链路为：
 
-M3.1 引入 MMIO trap 后，GIC 那段地址需要从这个直通 block 里“挖洞”：把 entry[0] 这个 1GB block 拆成下一级表（L2 / L3），让 GIC 那一小段单独不映射，从而触发 Stage-2 data abort → trap-and-emulate。届时 L2/L3 才会真正登场。
+`Data Abort → vmexit/data_abort.c → common/io/mmio.c → vGIC / vuart handler`。
+
+L1→L2 的粒度推导与历史前后对照见 [stage2-l1-to-l2.md](stage2-l1-to-l2.md)。
+页表在首次进入前直接建成带 L2 的形态，没有运行时拆分函数。
 
 ---
 
@@ -209,14 +205,15 @@ M3.1 引入 MMIO trap 后，GIC 那段地址需要从这个直通 block 里“�
 ### 6.1 hyp 镜像的 PA：链接脚本硬编码，无运行时分配
 
 hypervisor 自身的 PA **不是分配出来的，而是在链接脚本里写死的**。
-`hypervisor/arch/arm64/board/qemu_virt/linker.lds` 第一行：
+`hypervisor/arch/arm64/board/qemu_virt/linker.lds` 的 `SECTIONS` 起点：
 
 ```ld
 . = 0x40080000;
 ```
 
-这就是 hypervisor 镜像的链接/加载基址，也是 `_start` 入口。QEMU 把 `hypervisor.bin`
-加载到 PA `0x40080000`（`virt` 的默认 kernel load 地址），链接脚本从这里往上顺序铺开各段：
+这就是 hypervisor 镜像的链接/加载基址，也是 `_start` 入口。`make run` 让 QEMU
+加载 `hypervisor.elf`，其加载 PA 为 `0x40080000`（`virt` 的默认 kernel load 地址），
+链接脚本从这里往上顺序铺开各段：
 
 ```
 0x40080000  .text    (_start, vectors, 代码)
@@ -237,26 +234,21 @@ hypervisor 直接跑在物理地址上。
 
 | 类别 | 分配方式 | 例子 |
 |------|----------|------|
-| **hyp 自身镜像** | 链接脚本固定基址 `0x40080000` + 16KB 固定栈 | `linker.lds` |
-| **运行时结构体 / 页表** | 全部是 `static` 全局变量，落在 `.bss`，编译期就分配好 | `l1_table[512]`（`aligned(4096)` 保证 VTTBR_EL2[11:0]=0）、`g_vgicd`、`g_vgicr`、`g_console`、`mmio_regions[]` |
-| **guest RAM** | board.h 里写死的固定 PA 窗口，**不是 hyp 分配的**，只是约定的物理区间 | `BOARD_LINUX_RAM_PA = 0x80000000`（256MB，1GB 对齐），靠物理布局保证不与 hyp（`0x40080000`）重叠 |
+| **hyp 自身镜像** | 链接脚本固定基址 + 16 KB boot 栈；secondary 栈静态留在 BSS | `linker.lds`、`boot/head.S` 的 `secondary_stacks` |
+| **运行时结构体 / 页表** | 静态存储期，编译期确定容量，无运行时分配 | per-VM `l1_table` / `l2_dev`（4 KB 对齐）、`g_vgicd` / `g_vgicr`、`vm[]`、`percpu[]`、`mmio_regions[]` |
+| **guest RAM** | 板级 PA 窗口，经 `vm_configs.c` 填入配置表 | Linux VM0 `0x80000000`、VM1 `0xC0000000`；每 VM 宣告 256 MB，实际映射 1 GB block |
 
-`l1_table[1]` 把 guest 的 IPA `0x40000000` 映射到 `BOARD_LINUX_RAM_PA`，就是第 4 节
-entry[1] 那条非恒等映射。
+每 VM 的 `l1_table[1]` 将相同 IPA `0x40000000` 映射到各自 backing，就是第 4 节
+的非恒等映射。
 
 ### 6.3 为什么这样设计 / 代价
 
-这是学习型 hypervisor 的有意取舍，和项目“small, fast iterations + 单 VM 单 vCPU”的
-哲学一致：
+VM 数量和布局编译期已知，静态数组已经支撑了 M9 SMP 与 M10 双 VM，不需要因为
+“多核”本身就引入 allocator。共享的 vGIC / vuart 状态仍然需要锁，静态分配不消除并发。
 
-- 目标只跑**一个**固定的 UP Linux guest，VM 数量与内存布局编译期全知道，无需动态分配。
-- 没有 allocator → 没有碎片、没有 OOM、没有锁、没有分配失败路径，复杂度大幅降低，
-  便于先把 Stage-2 / vGIC / virtio 这些核心机制跑通。
-
-**代价 / 后续暴露点**：到 **M3.5（SMP）** 和 **M4（RK3588 port）** 时，多 vCPU、
-每 pCPU 状态、多 VM 会需要真正的页分配器与动态 VM 内存管理；目前“一切 static +
-链接脚本写死”的方案撑不到那时，届时大概率要引入一个早期 page allocator——这是那两个
-里程碑要补的第一个子系统。
+代价是容量固定、RAM 映射粗；不能动态创建任意大小的 VM 或按需回收页。未来 VM
+生命周期或板级内存布局提出新要求时再设计分配与映射接口，不能把未实现的 allocator
+写成当前功能。
 
 ---
 
@@ -275,9 +267,9 @@ hypervisor 配置的 Stage-2 表，才得到真 PA。这就是 ARMv8 的**两阶
 | 寄存器 | 谁设置 | 作用 |
 |--------|--------|------|
 | **`TTBR0_EL1` / `TCR_EL1`** | **guest (Linux EL1)** 自己设 | **Stage-1**：guest 的 **VA → IPA**（guest 以为这是物理地址，到此为止） |
-| **`HCR_EL2.VM`** | hypervisor（开 EL2 时） | Stage-2 **总开关**：置 1 才启用第二阶段翻译，guest 的“物理地址”才会被再翻一次 |
-| **`VTTBR_EL2`** | **hypervisor**（`stage2.c:53/65`） | **Stage-2 页表基址**：`(vmid<<48) \| l1_table基址`，指向那张 4KB 的 `l1_table` |
-| **`VTCR_EL2`** | **hypervisor**（`stage2.c:64`） | **Stage-2 翻译参数**：`T0SZ=25`(39位IPA)、`SL0=1`(从 L1 起步)、`TG0=0`(4KB 粒度)、`PS=2`(40位PA) |
+| **`HCR_EL2.VM`** | `vcpu_arch_run` 从 `v->arch.hcr_el2` 加载 | Stage-2 总开关，进入 guest 前启用 |
+| **`VTTBR_EL2`** | `stage2_activate`，由 `vcpu_arch_load` 调用 | `(vmid<<48) \| 本 VM 的 L1 表基址` |
+| **`VTCR_EL2`** | 同上 | `T0SZ=25`（39 位 IPA）、`SL0=1`（L1 起步）、`TG0=0`（4 KB）、`PS=2`（40 位 PA） |
 
 > 注意：Stage-1（`TTBR0_EL1`）是 guest 的事，hypervisor 完全不碰；hypervisor 只负责
 > Stage-2（`VTTBR_EL2`/`VTCR_EL2`），且在 `stage2_activate()` 里一次性写好后，每次访存
@@ -295,7 +287,7 @@ hypervisor 配置的 Stage-2 表，才得到真 PA。这就是 ARMv8 的**两阶
    - `l1_table[1]` 是 **block descriptor**（1GB block），翻译就此结束，输出基址
      = `0x80000000`；
    - 真 PA = block 基址 + IPA 低 30 位偏移 = `0x80000000 + 0x80000` = **PA 0x80080000**。
-3. **真访存**：CPU 拿 PA `0x80080000` 访问 DRAM——正是 QEMU 在 `-m 2G` 的 DRAM 里、用
+3. **真访存**：以 VM0 为例，CPU 拿 PA `0x80080000` 访问 DRAM——正是 QEMU 在 `-m 4G` 的 DRAM 里、用
    `-device loader,addr=0x80080000` 预先写好 Image 的地方，取到指令。✓
 
 后续命中时还有 **TLB**：Stage-1+Stage-2 合并后的结果缓存进 TLB，下次同地址直接出 PA，
@@ -322,7 +314,7 @@ flowchart TD
         HCR -->|是| VTTBR --> VTCR --> IDX --> L1E --> CALC
     end
 
-    subgraph P["物理 DRAM (QEMU -m 2G: [0x40000000, 0xC0000000))"]
+    subgraph P["物理 DRAM (QEMU -m 4G: [0x40000000, 0x140000000))"]
         MEM["PA 0x80080000<br/>QEMU loader 预先写入的<br/>guest Image"]
     end
 
@@ -342,8 +334,8 @@ flowchart TD
 guest 用 **`TTBR0_EL1`** 做 VA→IPA（它以为到此为止），硬件再用 hypervisor 设的
 **`VTTBR_EL2`**（指向 `l1_table`）+ **`VTCR_EL2`**（`SL0=1` / 4KB）做 IPA→PA：取 IPA
 bit[38:30]=1 命中 `l1_table[1]` 这个 1GB block，加偏移得真 PA `0x80080000`，最终落在
-`-m 2G` 的真实 DRAM 里（见第 6 节：这个目标 PA 必须命中 `-m` 划出的 DRAM 区间）。两阶段
-对 guest 完全透明，隔离与重定位都发生在 Stage-2 这一层。
+`-m 4G` 的真实 DRAM 里。VM1 的相同 IPA 则映射到 `0xC0080000`；4 GB 配置使其
+整个 backing block 也在 DRAM 内。两阶段对 guest 透明，RAM 重定位发生在 Stage-2。
 
 ---
 
@@ -355,15 +347,15 @@ bit[38:30]=1 命中 `l1_table[1]` 这个 1GB block，加偏移得真 PA `0x80080
 设置分**两步**——一处“算出值并存起来”，另一处“真正写进硬件寄存器”。这是典型的
 **配置与生效分离**。
 
-### 8.1 值在哪里算：`hypervisor/common/vm/vm.c:42`
+### 8.1 值在哪里算：`hypervisor/arch/arm64/guest/vm.c`
 
-VM 初始化时把 `HCR_EL2` 的值算好，存进 vCPU 结构体的**软件副本** `vcpu->hcr_el2`
-（`vm.h:18`，offset `0x110`）：
+`vcpu_arch_reset()` 为 boot vCPU 设置 `v->arch.hcr_el2`；guest CPU_ON 路径在
+`vmexit/vpsci.c` 将同 VM 的 boot vCPU 配置复制给 secondary。
+该字段相对 vCPU 的汇编偏移仍为 `0x110`，定义已移到 `<arch/vm.h>`。
 
 ```c
-/* HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC). */
-g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
-                    (1ULL << 31);
+v->arch.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
+                  (1ULL << 31);
 ```
 
 各 bit 含义：
@@ -379,9 +371,9 @@ g_vm.vcpu.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
 
 此处只写**内存里的结构体字段**，还没碰真硬件。
 
-### 8.2 真正写进硬件：`hypervisor/arch/arm64/vmexit/vmexit_asm.S:41`
+### 8.2 真正写进硬件：`hypervisor/arch/arm64/vmexit/vmexit_asm.S`
 
-每次切进 guest（world switch）前，在汇编里把软件副本加载进真正的 `HCR_EL2` 系统寄存器：
+`vcpu_arch_run()` 在汇编里把软件副本加载进真正的 `HCR_EL2` 系统寄存器：
 
 ```asm
 /* 2. Configure HCR_EL2 for this vCPU */
@@ -394,9 +386,9 @@ msr     hcr_el2, x1                // 写入硬件 HCR_EL2 —— 到这一句�
 
 ### 8.3 为什么分两步
 
-`HCR_EL2` 是 **per-vCPU** 的状态：在初始化期由 `vm.c` 算一次存进结构体；在**每次进入
-guest 前**由 `vmexit_asm.S` 从结构体加载到硬件。这样将来 **M3.5 多 vCPU** 时，world
-switch 切到哪个 vCPU 就加载哪个 vCPU 的 `hcr_el2`，天然支持每 vCPU 不同配置。
+初始化配置保存在每个 vCPU 的 arch 状态里，只有 arch 实现负责写硬件；通用 VM
+代码不再知道 HCR 的位定义。正常 IRQ / 同步退出直接 `eret` 回同一个 vCPU，不重跑
+`vcpu_arch_run()`，也不代表已经完成 M11 的调度上下文切换。
 
 ### 8.4 别和 `ICH_HCR_EL2` 混淆
 

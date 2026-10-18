@@ -1,197 +1,153 @@
-# vcpu_run 与 EL2↔EL1 世界切换（world switch）
+# vcpu_arch_run 与 EL2↔EL1 世界切换（world switch）
 
-本文解释 `hypervisor/arch/arm64/vmexit/vmexit_asm.S` 中三段汇编的职责，重点是
-`vcpu_run` 到底在做什么，以及它在完整的 world-switch 闭环里的位置。
+当前入口名是 **`vcpu_arch_run`**，旧文档里的 `vcpu_run` 已随 arch 边界重构改名。
+本文解释现有的静态绑核路径，不是 M11 的完整 vCPU 上下文切换方案。
 
-常见疑问：
+源码：
 
-1. `vcpu_run` 是干什么的？
-2. 为什么 `eret` 之前**不能**解开 EL2 的 IRQ 屏蔽？
-3. 进 guest（`vcpu_run`）、出 guest（`el1_sync_handler`）、彻底退出（`hv_restore`）三者怎么闭合？
+- `hypervisor/common/vm/vm.c`：boot CPU 的 `vm_run()`。
+- `hypervisor/arch/arm64/cpu/secondary.c`：其它 pCPU 的 `secondary_main()`。
+- `hypervisor/arch/arm64/guest/vm.c`：首次进入前的 `vcpu_arch_load()`。
+- `hypervisor/arch/arm64/vmexit/vmexit_asm.S`：进入、同步异常、返回 C 现场。
+- `hypervisor/arch/arm64/irq/irq_handler_asm.S`：物理 IRQ 的保存与恢复。
+- `hypervisor/arch/arm64/include/arch/vm.h`：arch 结构体与汇编偏移。
 
----
+## 1. 进入前：先 load，再 run
 
-## 1. 一句话概括
-
-`vcpu_run(struct vcpu *vcpu)` 是整个 hypervisor 的核心动作：**从 EL2（hypervisor）
-切换到 EL1（guest），让 guest 跑起来**。它是 world switch 的「进入 guest」这一半——
-把当前 hypervisor 的执行现场存起来，把 guest 的寄存器 / 系统状态全部装载到 CPU 上，
-然后 `eret` 跳进 guest 的 EL1 开始执行。
-
-入参：`x0 = vcpu*`，指向 guest 的寄存器快照 `struct vcpu`（其首字段是 GPR 数组，
-所以 `[x0 + 0x00]` 就是 guest x0）。
-
----
-
-## 2. vcpu_run 的四步
-
-### 第 1 步 —— 保存 hypervisor 自己的现场（26–37 行）
-
-```asm
-adrp/add x9, g_hv_ctx
-stp x19, x20, [x9, #0x00]   ... str x30, [x9, #HV_LR]
-mov x10, sp;  str x10, [x9, #HV_SP]
-```
-
-把 hypervisor 的 **callee-saved 寄存器（x19–x29）、返回地址 x30（LR）、栈指针 SP**
-存进全局 `g_hv_ctx`。
-
-为什么只存 callee-saved？因为 `vcpu_run` 是个普通 C 函数调用，按 AAPCS 调用约定，
-caller-saved 的寄存器调用方早已处理；hypervisor 只需保证被恢复后能「接着原来的 C
-代码往下跑」。这份现场后面由 `hv_restore()` 取回。
-
-### 第 2 步 —— 配置 Stage-2 / trap 行为（39–42 行）
-
-```asm
-ldr x1, [x0, #VCPU_HCR_EL2];  msr hcr_el2, x1;  isb
-```
-
-把这个 vCPU 的 `HCR_EL2` 写进硬件。`HCR_EL2` 决定 guest 运行时的虚拟化行为——
-VM 位（开 Stage-2 翻译）、IMO/FMO（IRQ/FIQ 路由到 EL2）、各种 trap 使能等。
-`isb` 保证这个配置在 `eret` 前生效。
-
-### 第 3 步 —— 装载 guest 的系统寄存器（44–50 行）
-
-```asm
-msr elr_el2,  guest PC      ← eret 之后从这里开始执行
-msr spsr_el2, guest PSTATE  ← eret 之后恢复成这个处理器状态（含 EL1、中断屏蔽位等）
-msr sp_el1,   guest SP
-```
-
-`ELR_EL2` 和 `SPSR_EL2` 是 `eret` 的两个关键：`eret` 会跳到 `ELR_EL2` 指的地址，
-并把 `SPSR_EL2` 还原为 PSTATE（其中的 EL 字段决定落到 EL1）。
-
-### 第 4 步 —— 装载 guest 的通用寄存器 x0–x30（52–69 行）
-
-```asm
-ldr x1, [x0, #0x08]
-ldp x2, x3, [x0, #0x10]
-...
-ldr x0, [x0, #0x00]   /* x0 最后装 */
-```
-
-把 guest 上次的 31 个 GPR 全部恢复。**x0 故意最后装**——因为 x0 此刻还是「指向
-vcpu 的指针」，要先用它把 x1–x30 都读出来，最后一步才用 `[x0 + 0x00]` 把 x0 自己
-覆盖掉。
-
-### 最后 —— `eret`（80 行）
-
-跳进 guest。CPU 立即从 `ELR_EL2`（guest PC）在 EL1 继续执行，PSTATE 变成
-`SPSR_EL2`。从此 hypervisor 不再占用 CPU，guest 在跑。
-
----
-
-## 3. 为什么 eret 之前不能解开 EL2 IRQ 屏蔽
-
-71–79 行的注释很关键：**绝不能在 `eret` 之前 `daifclr` 解开 EL2 的 IRQ 屏蔽**。
-
-- `HCR_EL2.IMO=1` 时，guest（EL1）运行期间来的物理 IRQ **本来就会被送到 EL2**
-  （走 Lower-EL IRQ 向量 `+0x480`），它只受 EL2 的 PSTATE.I 门控，而在 EL1 运行时
-  那个门控不适用。所以定时器 PPI 照样会被取到，不需要也不应该提前解屏蔽。
-- 若提前解开，就出现一条指令的窗口——IRQ 在 **EL2 当前级**被取到，而 `vectors.S`
-  把 current-EL 的 IRQ 入口指向 `panic_vector`，直接 panic。
-
-这正是 M3 首次真机启动时踩到的三个 bug 之一，详见
-`docs/debug/m3-boot-debug-walkthrough.md`（Bug 3）。
-
----
-
-## 4. 在完整 world-switch 循环里的位置
-
-`vcpu_run` 只是「进 guest」这一半。它的调用方是 `common/vm/vm.c` 里的 `vm_run()`，
-**一个永不退出的稳态引擎**：
+通用接口声明在 `include/vm.h`。每个 pCPU 首先设置 `percpu[id].cur_vcpu` 与本核指针
+（arm64 为 `TPIDR_EL2 = &percpu[id]`），然后：
 
 ```c
-void vm_run(void)                 /* vm.c:58 */
-{
-    stage2_activate(&g_vm.vcpu);
-    vgic_restore(&g_vm.vcpu);
-    for (;;) {
-        vcpu_run(&g_vm.vcpu);     /* 进 guest；某些 exit 后会 return 回这里，循环再进 */
-    }
-}
+/* 省略 CPU 启动、UART 等步骤；这是每个已准备好 vCPU 的进入顺序。 */
+vcpu_arch_load(v);
+for (;;)
+    vcpu_arch_run(v);
 ```
 
-配套的三段汇编：
+`vcpu_arch_load(v)` 由 `arch/arm64/guest/vm.c` 实现，顺序为：
 
-- **`vcpu_run`**（25 行）：EL2 → EL1，进 guest。
-- **`el1_sync_handler`**（86 行）：guest 触发**同步异常**（HVC、Stage-2 data
-  abort、MMIO trap 等）时，硬件经 `VBAR_EL2` 跳到这里；它把 guest 寄存器存回
-  `g_vm.vcpu.regs`，再调用 C 函数 `handle_exit()` 做分发。
-- **`hv_restore`**（160 行）：从 `g_hv_ctx` 取回第 1 步存的 hypervisor 现场，`ret`
-  回到**最近一次** `vcpu_run` 调用点（即 `vm_run` 的 for 循环体内）。
+1. `VMPIDR_EL2 = v->vcpu_idx`，向 guest 呈现 VM 内 CPU 编号。
+2. `stage2_activate(v)` 写 `VTCR_EL2` / `VTTBR_EL2`，含 `dsb ish` / `isb`。
+3. `vgic_restore(v)` 恢复虚拟 CPU 接口和 LR。
 
-### 4.1 三条「回 EL2 / 续跑」路径
+当前每个 pCPU 固定运行一个 vCPU，load 只在首次进入前执行，**不是每次 IRQ 后执行**。
+不能把这个一次性初始化序列当成可直接复用的调度器切换协议。
 
-退出 guest 后**到底走哪条路回去**，取决于这次是什么 exit。一共三条：
+## 2. vcpu_arch_run 的四步
 
-| 路径 | 触发 | 落点 | 是否回 C 的 `for` 循环 |
-|------|------|------|----------------------|
-| **A. eret 回 guest** | MMIO data abort、PSCI、未知 HVC 等同步异常 | `el1_sync_handler` 末尾 `eret`（128–154 行）→ 直接续跑 guest | **否**，全程在汇编里，不回 `vm_run` |
-| **B. return 回 for** | 定时器 IRQ exit（物理 IRQ → EL2） | `vcpu_run` 正常返回 → `for` 体末尾 → 循环再 `vcpu_run` 进 guest | **是**，靠 for 重新进 guest，让连续 PPI 推进 guest 时间 |
-| **C. hv_restore** | `HC_GUEST_DONE`（M2 调试 HVC） | `ret` 回到**最近一次** `vcpu_run` 调用点 = for 体内 → 循环再进 guest | **是**（落点同 B） |
+入参 `x0 = struct vcpu *`。通用 `struct vcpu` 的首字段是 `struct arch_regs regs`，
+其首字段又是 `x[31]`，所以 `[x0 + 0]` 就是 guest x0。后续 arch 状态在 `v->arch` 中。
+
+### 第 1 步：保存本核 hypervisor 的 C 调用现场
+
+```asm
+hv_ctx_slot                       /* x9 = &g_hv_ctx[本 pCPU id] */
+stp x19, x20, [x9, #0x00]          /* 继续保存 x21..x29 */
+str x30, [x9, #HV_LR]
+mov x10, sp
+str x10, [x9, #HV_SP]
+```
+
+保存的是 callee-saved x19–x29、返回地址 x30 和 SP。它们足以在 `hv_restore()` 时
+按 AAPCS64 返回 C 调用点；caller-saved 由调用方负责。
+
+`g_hv_ctx` 是汇编 BSS 中的 **`NR_CPUS` 个 slot**，不能共用一个槽，否则双 VM 同时退出
+会恢复到另一个 pCPU 的栈。`hv_ctx_slot` 用 `(TPIDR_EL2 - percpu) / PERCPU_SIZE`
+计算物理核编号，与 C 的 `current_vcpu_id()` 必须一致。
+
+### 第 2 步：加载 HCR_EL2
+
+```asm
+ldr x1, [x0, #VCPU_HCR_EL2]
+msr hcr_el2, x1
+isb
+```
+
+加载 `v->arch.hcr_el2`，启用 Stage-2（VM）、物理中断路由（IMO/FMO/AMO）、AArch64
+EL1（RW）等。页表基址和 vGIC 已在前面的 load 阶段准备好。
+
+### 第 3 步：加载异常返回状态
+
+- `v->regs.elr_el2 → ELR_EL2`：guest PC。
+- `v->regs.spsr_el2 → SPSR_EL2`：guest PSTATE。
+- `v->regs.sp_el1 → SP_EL1`：guest 栈。
+
+这**不是全部 guest 系统状态**。当前没有完整保存 EL1 系统寄存器块，也没有 FP/SIMD
+保存；静态 1:1 绑定让未切走的状态一直留在所属 pCPU，M11 必须补齐。
+
+### 第 4 步：加载 GPR，然后 eret
+
+恢复 x1–x30 后最后加载 x0，避免过早覆盖 vCPU 指针。`eret` 用 `ELR_EL2` /
+`SPSR_EL2` 返回 EL1，从 guest PC 执行。
+
+## 3. 同步退出与 IRQ 都直接返回 guest
+
+两种异常入口都经 `TPIDR_EL2 → percpu.cur_vcpu` 找到本核 vCPU，保存 GPR、SP_EL1、
+ELR_EL2、SPSR_EL2，再调用 C handler。没有 `g_vm.vcpu` 的全局硬编码。
+
+| 路径 | 处理与返回 | 回 C 运行循环？ |
+| --- | --- | --- |
+| MMIO、可返回的 PSCI、sysreg trap、未知 HVC | `el1_sync_handler → handle_exit → 恢复 → eret` | 否 |
+| timer、PL011、普通 kick IRQ | `el1_irq_handler_asm → el2_irq_handler → 恢复 → eret` | 否 |
+| 调试 HVC `HC_GUEST_DONE` | `handle_hvc → hv_restore → ret` | 是，回本核最近的 `vcpu_arch_run` 调用点 |
+| 电源关闭、未处理的同步异常 | `cpu_arch_halt()` 停车 | 否 |
+
+**纠正旧说明：定时器 IRQ 不会让 `vcpu_arch_run()` 返回 C。** 连续 tick 由 IRQ 汇编
+末尾的 `eret` 续跑 guest；不是靠 `vm_run()` 的 `for` 循环每 tick 重入。
 
 ```mermaid
 sequenceDiagram
-    participant C as vm_run() loop (C, EL2)
-    participant R as vcpu_run (asm)
-    participant G as Guest (EL1)
-    participant H as el1_sync_handler (asm, EL2)
-    participant E as handle_exit() (C, EL2)
-    participant I as el2_irq_handler (IRQ, EL2)
+    participant C as vm_run / secondary_main 的 C 循环
+    participant R as vcpu_arch_run (asm)
+    participant G as Guest EL1
+    participant S as el1_sync_handler (asm)
+    participant E as handle_exit (C)
+    participant I as el1_irq_handler_asm
+    participant Q as el2_irq_handler (C)
     participant V as hv_restore (asm)
-
-    C->>R: vcpu_run(vcpu)
-    R->>R: 存 HV 现场 → g_hv_ctx
-    R->>G: eret (进 EL1)
-
-    alt 路径 A：同步异常（MMIO / PSCI / 未知 HVC）
-        G->>H: VBAR_EL2 +0x400
-        H->>E: handle_exit(regs, esr)
-        E-->>H: 返回（已推进 ELR）
-        H->>G: eret 回 guest 续跑（不回 C）
-    else 路径 B：定时器 IRQ
-        G->>I: VBAR_EL2 +0x480（物理 IRQ）
-        I->>I: 注入 vtimer PPI + priority-drop
-        I-->>R: 返回
-        R-->>C: vcpu_run return
-        Note over C: for 循环再次 vcpu_run（回到顶部）
-    else 路径 C：HC_GUEST_DONE（M2 遗留钩子）
-        G->>H: HVC
-        H->>E: handle_exit → handle_hvc
-        E->>V: hv_restore()（不返回）
-        V-->>C: ret 到最近 vcpu_run 调用点 = for 体内
-        Note over C: for 循环再次 vcpu_run（落点同 B）
+    C->>R: vcpu_arch_run(v)
+    R->>R: 保存本核 g_hv_ctx，加载 guest 状态
+    R->>G: eret
+    alt 可返回的同步异常
+        G->>S: Lower-EL sync 向量 +0x400
+        S->>E: handle_exit(regs, esr)
+        E-->>S: 返回
+        S->>G: 恢复寄存器，eret（不回 C 循环）
+    else 物理 IRQ（包括 timer）
+        G->>I: Lower-EL IRQ 向量 +0x480
+        I->>Q: el2_irq_handler()
+        Q-->>I: 完成注入 / 设备处理 / EOI
+        I->>G: 恢复寄存器，eret（不回 C 循环）
+    else HC_GUEST_DONE
+        G->>S: HVC
+        S->>E: handle_exit → handle_hvc
+        E->>V: hv_restore()，不返回 handler
+        V-->>C: 恢复本核 SP/LR/callee-saved，ret
+        Note over C: for 循环再次进入同一个 vCPU
     end
 ```
 
-### 4.2 这个 for 会退出吗？CPU 会被抢走吗？
+`HC_GUEST_DONE` 用于裸机 SVM 回归，真实 Linux 不使用它。它不是 VM 销毁操作，也不会
+让 `vm_run()` 整体返回。双 VM 各自仍有固定的 pCPU 和运行循环，没有抢占或迁移。
 
-**当前（M3.5，单 VM、双 vCPU 静态 1:1 绑定、无调度器）：每个 pCPU 上的 `for`
-都不会退出，vCPU 也不会被抢走或迁移。**
+## 4. 为什么 eret 之前不能解开 EL2 IRQ 屏蔽
 
-- 路径 A 全程在汇编里 `eret` 回 guest，根本不碰 `for`。
-- 路径 B / C 都落回 `for` 体内，循环立刻再进 guest。
-- 没有抢占、没有时间片；vCPU0 固定在 pCPU0、vCPU1 固定在 pCPU1。每个 pCPU
-  永远在「自己的 guest vCPU 跑(EL1)」⇄「EL2 处理一次 exit 再回 guest」之间循环。
-- `main.c:36` 的 `for(;;) cpu_wfi()` 只是 `vm_run` 万一返回时的兜底，**当前永不触达**。
+`vectors.S` 的 current-EL IRQ 入口仍指向 `panic_vector`。若在 `eret` 前执行
+`daifclr`，pending IRQ 可能在那一条指令的窗口被当作 **EL2 当前级 IRQ** 接走并 panic。
 
-路径 C 的 `HC_GUEST_DONE` 是 M2 的调试 HVC 钩子，**真实 Linux guest 不会发它**
-（见 [handle-exit-dispatch.md](handle-exit-dispatch.md) §4），所以这条路径跑 Linux
-时不会触发。M3.5 没有 scheduler；若未来加入 vCPU overcommit/迁移，才需要让这个
-固定循环把控制权交给调度器。
+保持 EL2 的 IRQ mask，直接 `eret` 即可：`HCR_EL2.IMO=1` 会把 guest 运行期间的物理
+IRQ 路由到 Lower-EL IRQ 向量 `+0x480`。guest 的虚拟 IRQ 是否可见则另受 guest PSTATE
+和虚拟 GIC 接口控制，不能把这两类屏蔽混为一谈。
 
----
+这个约束同时适用于 `vcpu_arch_run`、同步退出和 IRQ 退出的 `eret` 前路径。
+历史调试过程见 [启动排错](../../debug/m3-boot-debug-walkthrough.md)。
 
-## 5. 一个值得注意的设计细节（UP → SMP）
+## 5. 修改布局时的验证
 
-M3.5 已去掉异常入口对 `g_vm.vcpu` 的硬编码。每个 pCPU 把 `&percpu[id]` 写入
-`TPIDR_EL2`，汇编入口通过 `PERCPU_CUR_VCPU` 取本核的 current-vCPU 指针，因此
-vCPU0/vCPU1 的寄存器帧不会互相覆盖。`vcpu_run(vcpu*)` 的入口参数和异常入口取到的
-current-vCPU 现在指向同一份 per-vCPU 状态。
-
----
-
-> 配套阅读：Stage-2 翻译见 [stage2.md](stage2.md)；中断硬件转发的来龙去脉见
-> ADR-0001（`docs/adr/0001-*`）；首次真机启动的三个 bug 见
-> `docs/debug/m3-boot-debug-walkthrough.md`。
+- `arch_regs` 必须是 vCPU 的首字段；`VCPU_*` / `HV_*` 随 arch 类型放在同一个头文件。
+- `PERCPU_CUR_VCPU` / `PERCPU_SIZE` 仍在通用 `include/percpu.h`，由 `_Static_assert`
+  固定，供 arm64 入口汇编读取。
+- 改头文件后清理旧构建，再运行 `make test` 的 host/target offset 检查和 QEMU 场景。
+- M11 需要重新设计 vGIC 保存与远程发布的关系，不能直接在这个循环里插入现有
+  `vgic_save()`。见 [vGIC 注入](vgic-injection.md) 与
+  [M11 边界对齐说明](../../superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)。

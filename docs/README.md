@@ -18,16 +18,20 @@
 
 ## 新读者从哪里读
 
-1. [`CLAUDE.md`](../CLAUDE.md) — 项目现状、构建与验证、物理 GIC / vGIC 边界、已知缺陷。
-2. `roadmap` skill(`.claude/skills/roadmap/SKILL.md`)— M0–M15 里程碑状态与
-   2026-08-10 的编号重排对照表。**历史文档里的里程碑号多为旧编号**(如 M5 = 现在的
-   M10),读前先查这张表。
-3. [`reference/arm/target-architecture.md`](reference/arm/target-architecture.md) — 目标
-   形态(ACRN 模型)与当前实现的差距。
-4. [`adr/README.md`](adr/README.md) — 14 条架构决策的索引。
+1. [`README.md`](../README.md) — 项目状态、构建与验证入口。
+2. [`reference/arm/current-architecture.md`](reference/arm/current-architecture.md) —
+   **当前实现**：双 VM 静态分区、arch 钩子、对象归属、启动与控制台时序。
+3. [`AGENTS.md`](../AGENTS.md#milestone-roadmap) — M0–M15 路线图与编号重排表；
+   **历史文档多用旧编号**（如 M5 = 现在的 M10）。本地 `roadmap` skill 已不由仓库维护。
+4. [`reference/arm/target-architecture.md`](reference/arm/target-architecture.md) —
+   **目标形态**（ACRN 模型）与当前实现的差距。
+5. [`CLAUDE.md`](../CLAUDE.md) — 修改代码时遵守的边界、构建约束和已知缺陷。
+6. [`adr/README.md`](adr/README.md) — 15 条架构决策；最近的 ADR-0015 规定 arch 边界。
 
-> `reference/arm/2026-06-21-architecture-zoom-out.md` 是 **M3 时代(单 VM)的历史快照**,
-> 不反映当前多 VM 实现,计划在 M11 完成后重写。
+> `reference/arm/2026-06-21-architecture-zoom-out.md` 和同日的 GIC trap 调查保留为
+> 历史快照，不反映当前多 VM 实现；现在的调用链看 `current-architecture.md`。
+> M11 仍未实现，后续工作须同时读原设计与
+> [arch 边界对齐补充](superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)。
 
 ## debug/ 调试实录
 

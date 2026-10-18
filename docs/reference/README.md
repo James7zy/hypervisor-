@@ -17,6 +17,8 @@
 
 ## 通用(根目录)
 
+- [superpowers.md](superpowers.md) — Claude Code 本地 skills 与 pi 项目包的
+  Superpowers 安装、使用、验证与更新；Claude 不使用插件，不全局启用。
 - [mermaid-gotchas.md](mermaid-gotchas.md) — Mermaid 避坑清单:如何用
   `mermaid.parse()`+jsdom 本地验证图,以及三个实测坑(participant id 撞关键字如
   `Loop`、`as` 别名加双引号、`box` 泳道在本地 `mermaid@11` 报 `Option is not defined`)。
@@ -24,15 +26,18 @@
 
 ## ARM64(`arm/`)— 实现基座
 
+- [arm/current-architecture.md](arm/current-architecture.md) — **当前实现入口**：M10 双 VM
+  与 arch 边界重构；模块关系图、VM/vCPU 类图、启动和跨核控制台时序。
+  说明已落地的钩子、board CPU 数量单一来源及仍未实现的 M11 能力。
 - [arm/2026-06-21-architecture-zoom-out.md](arm/2026-06-21-architecture-zoom-out.md) —
   架构鸟瞰:一次「拉高一层」的整体梳理,从顶层调用链 → GIC 子系统 → 一次键盘输入
   端到端 trace,三层逐步放大,把各模块与调用者串成一张图。配套
   [[adr-0012]](物理 GICv3 独占)。**历史快照(M3 时代,单 VM)**,不反映 M10 多 VM
-  现状,不再作为新读者入口;计划在 M11 完成后重写。
+  现状，保留原文；当前入口见 `current-architecture.md`。
 - [arm/target-architecture.md](arm/target-architecture.md) — **目标架构**(ACRN 模型,
   M12–M15):Service VM + 用户态 Device Model 的终点形态,两张 Mermaid 图(顶层系统图、
   特权层次图)+「与当前实现的差距」对照表。原为 `CLAUDE.md` 里的两块 ASCII 大图,
-  2026-09-14 迁出重画。**非当前实现**——现状看 `CLAUDE.md` 与 ADR 索引;
+  2026-09-14 迁出重画。**非当前实现**——现状看 `arm/current-architecture.md`；
   x86 对位版本见 [[x86/architecture-x86]] §1、§2。
 - [arm/2026-06-21-gicd-gicr-trap-investigation.md](arm/2026-06-21-gicd-gicr-trap-investigation.md) —
   一次从提问到实证的查证:「客户机访问 GICD/GICR 怎么到 EL2?」带 instrumentation 的
@@ -40,40 +45,31 @@
   客户机经 `l1_table[0]` 的 identity Device block **直通物理 GICR**(`found redistributor`
   为铁证),两个 vgic handler 命中 0 次。含两处被推翻的错误解释及修法建议。配套
   [[adr-0012]]、[[stage2]]、[[handle-exit-dispatch]]。
-- [arm/stage2.md](arm/stage2.md) — Stage-2 页表与 IPA 范围解析:granule/level 位拆分、
-  两个静态 1 GB block 描述符的由来与 IPA→PA 推导。配套 [[adr-0004]]
-  (`docs/adr/0004-stage2-static-1gb-block-mapping.md`)。
+- [arm/stage2.md](arm/stage2.md) — 页表粒度与 IPA→PA 推导；当前 per-VM L1/L2、GIC/
+  PL011 hole、Linux RAM backing、静态内存分配，以及 HCR/VTCR/VTTBR 的设置位置。
 - [arm/stage2-l1-to-l2.md](arm/stage2-l1-to-l2.md) — Stage-2 L1→L2 映射转换:为什么以及怎样把
   一个 1 GB 的 L1 block 拆成 L2 table + 512 个 2 MB entry,从而能单独给 GICD/GICR 那
-  2 MB「挖洞」(invalid → fault → vgic 影子模拟)而让同 1 GB 内的 PL011 继续直通。含 L1
-  vs L2 粒度/描述符/权限对比、两组「转换前/后」例子与 Mermaid 图。**注**:punch-hole
-  代码尚未落地,文档第 9 节如实区分「现状/TODO」。续 [[stage2]]、配套 [[adr-0012]]。
-- [arm/guest-initramfs.md](arm/guest-initramfs.md) — 用户自备的 busybox initramfs 配方
-  (静态 aarch64 busybox + `/init` → 交互式 shell);地址布局、`console=ttyAMA0`
-  vs `hvc0` 的取舍。M3.4 启动到 shell 用。
-- [arm/vcpu-run-world-switch.md](arm/vcpu-run-world-switch.md) — `vcpu_run` 与 EL2↔EL1
-  世界切换:进 guest(`vcpu_run`)/ 出 guest(`el1_sync_handler`)/ 彻底退出
-  (`hv_restore`)三段汇编如何闭合;为何 `eret` 前不能解开 EL2 IRQ 屏蔽。
-- [arm/handle-exit-dispatch.md](arm/handle-exit-dispatch.md) — `handle_exit` 退出分发:
-  按 `ESR_EL2` 的 EC 分流 HVC(hypercall / PSCI)与 Data Abort;MMIO
-  trap-and-emulate 如何解析 ISS、查 MMIO 总线、替 guest 模拟一条 load/store。
-  续 [[vcpu-run-world-switch]]。
-- [arm/vgic-injection.md](arm/vgic-injection.md) — vGIC 中断注入:注入 = 写 `ICH_LR<n>_EL2`
-  列表寄存器;`vgic_inject_sw` / `_hw` / `_spi` 三者区别(HW 位、pINTID、LR0/LR1
-  分配);`el2_irq_handler` 按 INTID 选注入方式,以及为何 HW 转发只 drop 不
-  deactivate。配套 [[adr-0001]]。
-- [arm/vgic-debug-logging.md](arm/vgic-debug-logging.md) — 内置 vGIC 调试日志开关
-  `CONFIG_DEBUG_VGIC`(默认关、零开销):怎么开、4 个打印点(GICD/GICR 寄存器影子
-  访问 + timer PPI / PL011 SPI 注入)的字段含义、典型 boot 片段怎么读、怎么据此判断
-  punch-hole / 注入链是否正常。续 [[vgic-injection]]、配套 [[adr-0012]]。
+  2 MB「挖洞」（invalid → fault → 影子模拟）。保留最初 GIC-only 的教学对照；
+  **当前 GIC 与 PL011 hole 均已落地**，第 9 节给出重构后的代码链路。
+- [arm/guest-initramfs.md](arm/guest-initramfs.md) — 静态 aarch64 busybox + 仓库维护的
+  `/init`；双 VM 加载地址、`hv.vm=` 提示符与 emulated PL011 控制台。
+- [arm/vcpu-run-world-switch.md](arm/vcpu-run-world-switch.md) — `vcpu_arch_load/run`、
+  per-pCPU `g_hv_ctx`、同步异常与 IRQ 直接 `eret`、调试 HVC 返回 C 的区别；
+  `eret` 前保持 EL2 IRQ mask 的原因。
+- [arm/handle-exit-dispatch.md](arm/handle-exit-dispatch.md) — HVC / sysreg / Data Abort
+  分发；arch 解码与 common MMIO 总线的职责边界、错误处理和当前限制。
+- [arm/vgic-injection.md](arm/vgic-injection.md) — 四种注入与 LR0/1/2 分工；timer
+  HW 转发、SPI 锁与 pending 发布、远程 kick；为什么现有 save/restore 不能直接用于调度。
+- [arm/vgic-debug-logging.md](arm/vgic-debug-logging.md) — `CONFIG_DEBUG_VGIC` 的开启、
+  当前 3 个打印点（GICD/GICR + timer HW 注入）及诊断限制；没有 SPI/SGI 日志点。
 
 ## x86-64(`x86/`)— 对照参考
 
-- [x86/architecture-x86.md](x86/architecture-x86.md) — 架构对照:把 `CLAUDE.md` 里的 ASCII
-  大图换成 **x86-64 VT-x 基座**重画(顶层系统图、特权层次图),外加 6 张 Mermaid
+- [x86/architecture-x86.md](x86/architecture-x86.md) — 架构对照：把目标 ACRN 架构
+  换成 **x86-64 VT-x 基座**重画（顶层系统图、特权层次图），外加 6 张 Mermaid
   对照图与逐项术语表(EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC/APICv、PSCI↔ACPI+
   VMCALL、SMMU↔VT-d)。用途是读 `../acrn-hypervisor` 时能把概念映射回来,以及判断
   本仓库某个设计属于「通用虚拟化结构」还是「ARM 特有细节」——第 8 节给出 arch/common/dm
-  三层的可复用性映射。**非移植计划**,路线图不变。
+  三层在 ADR-0015 下的当前边界。**非移植计划**，也不是多架构可移植性证明。
 
 > 实测启动到 shell 的完整过程见 `docs/debug/m3-boot-debug-walkthrough.md`。

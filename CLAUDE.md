@@ -5,6 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The architecture documentation should include sequence diagrams, class diagrams, and diagrams showing the 
 relationships between modules, all represented using Mermaid. A picture is worth a thousand words.
 
+## 本地 Superpowers skills
+
+若 `.claude/skills/using-superpowers/SKILL.md` 存在，会话开始先用 `Skill` 加载
+`using-superpowers`。本工程使用本地 skills，不使用 Claude 插件；上游文档里的
+`superpowers:<name>` 对应本地 `<name>`（例如 `brainstorming`），不要调用插件命名空间。
+安装与更新见 [操作说明](docs/reference/superpowers.md)；本工程的架构与验证约束优先。
+
 ## Project Overview
 
 A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then Rockchip RK3588. Inspired by ACRN, Xvisor, bao-hypervisor. The directory layout
@@ -22,7 +29,7 @@ core chain is proven on QEMU.
 ```sh
 make defconfig          # copy configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
-make test               # offset checks + basic/vtimer/dual-VM/EL2-shell/vSPI QEMU scenarios
+make test               # arch boundary + host/target offsets + five QEMU scenarios
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 make clean              # remove build/
 ```
@@ -63,8 +70,10 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
 
 ## Verification (no CI; local automated integration tests)
 
-1. **Automated suite**: `make test` builds a separate SVM-mode hypervisor under
-   `build/test-svm/`, checks C/assembly struct offsets, and runs the `basic`
+1. **Automated suite**: `make test` checks the arch boundary (including
+   transitive headers), compiles and links the generic code for x86_64
+   against the `arch/x86` stub (`test-x86-stub`), builds a separate SVM-mode hypervisor under
+   `build/test-svm/`, checks host/target C/assembly struct offsets, and runs the `basic`
    (HVC/PSCI round trip) and `vtimer` (HW-forwarded PPI 27) QEMU scenarios,
    plus the dual-VM (`test-qemu-dual`), EL2-shell and vSPI scenarios on
    `NR_VMS=2` builds.
@@ -75,8 +84,8 @@ Exit QEMU with `Ctrl-A x`. GDB attach:
      `tests/run_svm_test.sh`. A new scenario is a new case file + expect file
      + one Makefile target — **do not add another `tests/svmN/` directory**.
      (`tests/vspi/` predates this and is still separate.)
-   - `tests/run_shell_test.sh` is the only scenario that **writes** to the QEMU
-     serial stdin (the rest run `</dev/null`). It drives `Ctrl-T`, `vm_list`,
+   - `tests/run_shell_test.sh` and `tests/run_vspi_test.sh` both **write** to QEMU
+     serial stdin; the shared SVM runner uses `</dev/null`. The shell test drives `Ctrl-T`, `vm_list`,
      `help`, `vm_console`, the error paths, and backspace line editing. It
      needs `NR_VMS=2` but no guest OS, so it uses the bare-metal SVM guests and
      finishes in seconds instead of a ~25s Linux boot. Input timing is a fixed
@@ -121,7 +130,19 @@ Test: *would it still hold on another machine, for another person?*
   makes the cause visible before you attach.
 
 
+## Architecture
+
+Read [current-architecture.md](docs/reference/arm/current-architecture.md) for
+current module boundaries, object ownership and boot/console sequences.
+[target-architecture.md](docs/reference/arm/target-architecture.md) describes
+the future ACRN model, not implemented functionality.
+
 ### Board vs Driver separation
+
+`arch/arm64/board/<board>/board.mk` selects `board-drivers` and supplies
+`board-nr-cpus` to both the C/asm build and QEMU. Runtime board data reaches
+common code through `include/board_info.h`; PL011 lives in `drivers/uart/`
+and receives its base through `uart_init()`.
 
 ### Physical GIC vs vGIC separation (2026-09-08)
 
@@ -185,7 +206,12 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
   `include/spinlock.h` (`atomic_arch_fetch_inc_u32`, `cpu_arch_relax`),
   `include/vm.h` (`vm_arch_init/devices_init`,
   `vcpu_arch_reset/load/run/inject_irq`). arm64 implements them in
-  `arch/arm64/{cpu,guest}/` and `<arch/*.h>`. Board data reaches common code
+  `arch/arm64/{cpu,guest}/`, `vmexit/vmexit_asm.S` and `<arch/*.h>`.
+  `arch/x86/` is a **link-check stub** (empty hooks in `stub/hooks.c`, never
+  run): a new hook without an x86 stub fails `make test-x86-stub` at link
+  time. Arch-only codegen flags (`-mstrict-align` etc.) live in each arch
+  Makefile's `arch-cflags`.
+  Board data reaches common code
   through `include/board_info.h`; compile-time board constants (e.g.
   `CONFIG_NR_CPUS`, also needed by asm) come from `board-cflags` in the
   board's `board.mk`; the MMIO bus is `common/io/`.
@@ -197,7 +223,7 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 
 ### Key invariants
 
-- **`-mgeneral-regs-only` is mandatory**: M0 does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
+- **`-mgeneral-regs-only` is mandatory**: the current static-pinning implementation still does not save FP/SIMD state. Never add code that forces the compiler to emit FP/SIMD instructions.
 - **No magic numbers in `drivers/uart/pl011.c`**: driver receives base from `uart_init`. Which drivers a board links is listed in its `board.mk` (`board-drivers`).
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
@@ -209,7 +235,7 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 
 ```
 -ffreestanding -nostdlib -nostartfiles
--fno-pic -fno-stack-protector
+-fno-pic -fno-stack-protector -fno-strict-aliasing
 -mgeneral-regs-only -mstrict-align
 -Wall -Wextra -Werror -O2 -g
 ```
@@ -217,18 +243,22 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 ### Boot sequence
 
 ```
-QEMU → _start (head.S)
-  1. Park non-boot CPUs (MPIDR_EL1.Aff0 != 0 → secondary_park / wfi)
-  2. Assert CurrentEL == 0b1000; else → panic_early (emits "!EL\n" directly to PL011 DR)
-  3. Set SP_EL2 = __stack_top
-  4. Clear BSS (memset)
-  5. VBAR_EL2 = hv_vectors (panic stubs)
-  6. DAIF mask, dsb/isb
-  7. bl hypervisor_main(dtb_phys)
-     → uart_init(board_uart_base)            (include/board_info.h)
-     → cpu_arch_init()   "[hv] Hello from EL2 on <board>, CurrentEL=..."; GIC + vtimer
-     → vm_init() → vm_run()                   (never returns; guests run)
-     → cpu_arch_halt()
+QEMU → _start (arch/arm64/boot/head.S, boot pCPU0 only)
+  → park unexpected non-boot entrants at boot_core_park
+  → check CurrentEL, boot stack, clear BSS, install hv_vectors, mask DAIF
+  → hypervisor_main(dtb_phys) (boot/main.c; DTB currently unused)
+    → uart_init(board_uart_base)
+    → cpu_arch_init(): banner + physical GIC + vtimer
+    → vm_init(): per-VM arch init + boot-vCPU reset; register vGIC/vuart MMIO
+    → vm_run(): set percpu[0] + current pointer; vcpu_arch_load(VM0 vCPU0)
+      → enable physical UART RX IRQ; cpu_arch_power_on(other VMs' boot pCPUs)
+      → loop: vcpu_arch_run(VM0 vCPU0)
+
+Physical CPU_ON → secondary_entry → secondary_main
+  → per-pCPU stack/current pointer/vectors, GIC/timer init
+  → select VM/vCPU, publish online, vcpu_arch_load, loop: vcpu_arch_run
+  VM1 vCPU0 is HV-started; each VM's vCPU1 is guest-PSCI-started.
+  Normal sync/IRQ handling erets directly; timer IRQ does not return to the C loop.
 ```
 
 ### Load address
@@ -237,9 +267,11 @@ QEMU → _start (head.S)
 
 ## Milestone Roadmap
 
-See the `roadmap` skill (`.claude/skills/roadmap/SKILL.md`) for the full M0-M15
-milestone table, the 2026-08-10 renumbering map, and the ACRN-model strategy
-decisions.
+See [AGENTS.md](AGENTS.md#milestone-roadmap) for the full M0–M15 table,
+renumbering map and ACRN-model strategy. The former local `roadmap` skill is
+not tracked. For M11 work, also read the
+[arch-boundary alignment](docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)
+alongside the original scheduler spec; the scheduler is still unimplemented.
 
 Each milestone gets its own spec in `docs/superpowers/specs/` and plan in `docs/superpowers/plans/`.
 

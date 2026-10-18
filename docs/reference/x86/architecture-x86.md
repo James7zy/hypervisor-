@@ -1,17 +1,19 @@
 # 架构对照：x86 基座版 / Architecture on an x86 Baseline
 
 > **本文性质**：这是一份**对照文档**，不是实现计划。本仓库的代码基座是 ARM64 EL2
-> （`hypervisor/arch/arm64/`），本文把 `CLAUDE.md` 里那几张 ASCII 大图逐张换成
+> （`hypervisor/arch/arm64/`），本文把目标 ACRN 架构的 ARM 底座换成
 > **x86-64 VT-x** 基座重画，并给出 ARM↔x86 的术语与机制对照，用途是：
 >
 > 1. 读 `../acrn-hypervisor`（x86 Type-1，本仓库的结构灵感来源）时能把它的概念映射回来；
 > 2. 判断本仓库某个设计是「体系结构无关的通用虚拟化结构」还是「ARM 特有的实现细节」——
 >    凡是两栏能一一对上的，通常属于前者，抽象层就该切在那里。
 >
-> 本文不改变路线图。RK3588（M10）之外没有 x86 移植计划；roadmap 见 `CLAUDE.md`。
+> 本文不改变路线图。RK3588 是 M15，尚无 x86 移植里程碑。`arch/x86/` 目前只是链接检查用的
+> stub（`make test-x86-stub`）：它证明通用代码能用 x86_64 编译和链接，不能运行。
 
-配套阅读：`CLAUDE.md`（ARM 版原图）、[2026-06-21-architecture-zoom-out.md](../arm/2026-06-21-architecture-zoom-out.md)
-（ARM 版端到端 trace）、`docs/adr/`（各项决策依据）。
+配套阅读：[当前 ARM 架构](../arm/current-architecture.md)、
+[目标架构](../arm/target-architecture.md)、
+[ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md)。
 
 ---
 
@@ -35,7 +37,7 @@
 
 ## 1. 顶层系统图（x86 基座）
 
-对应 `CLAUDE.md` 的第一张 ASCII 大图。ACRN 模型的形状不变——Service VM 里跑用户态
+对应 [目标架构](../arm/target-architecture.md) 的顶层图。ACRN 模型的形状不变——Service VM 里跑用户态
 Device Model，User VM 用 virtio 前端——变的只是底座那一层。
 
 ```
@@ -125,7 +127,7 @@ Device Model，User VM 用 virtio 前端——变的只是底座那一层。
 
 ## 2. 特权层次图（x86 基座）
 
-对应 `CLAUDE.md` 的 "Layering" 图。**这是两个体系结构差异最大的一张图**：ARM 的 EL0–EL3
+对应 [目标架构](../arm/target-architecture.md) 的特权层次图。**这是两个体系结构差异最大的一张图**：ARM 的 EL0–EL3
 是一条线性的特权阶梯，hypervisor 住在比 guest 内核**更高的一级**；x86 的 VMX root/non-root
 是**正交于 ring 0–3 的一个新维度**，hypervisor 和 guest 内核都在 ring 0，靠"哪一侧"区分。
 
@@ -162,7 +164,7 @@ Device Model，User VM 用 virtio 前端——变的只是底座那一层。
 
 > **易错点**：ACRN 的 Device Model 是 Service VM 里的**用户态**程序，所以它在
 > `VMX non-root, ring 3`——它并不比 User VM 更特权。它的权力来自 hypervisor 认可它的
-> **hypercall 权限**（M7 里的 "Service VM privilege concept"），不来自 CPU 特权级。
+> **hypercall 权限**（M12 里的 "Service VM privilege concept"），不来自 CPU 特权级。
 > ARM 侧同理：Service VM 的 DM 在 EL0，靠 hypervisor 的 VM 角色标记而非 EL 取得特权。
 > **这一点是体系结构无关的**，两边都成立。
 
@@ -186,15 +188,16 @@ flowchart LR
 
 **为什么这个差别对代码有影响**：ARM 侧 hypervisor 有一整套**属于自己的**系统寄存器
 （`VBAR_EL2`、`SP_EL2`、`TTBR0_EL2`……），guest 的 EL1 寄存器在硬件上是分离的一组，
-所以 `vcpu_run` 世界切换里只需要手动搬运"共享"的那部分（通用寄存器、FP/SIMD）。x86 侧
+但这不提供同核两个 vCPU 之间的隔离。当前 `vcpu_arch_run` 只搬运 GPR 和少量返回状态，
+没有 FP/SIMD 保存；M11 还必须切换 EL1 系统寄存器、timer、vGIC 等状态。x86 侧
 hypervisor 和 guest **共用同一组**架构寄存器（`RIP`、`RSP`、`CR3`、段寄存器……），
 只能靠 VMCS 的 host-state / guest-state area 让硬件在每次 VM entry/exit 时整体换掉。
 
 ---
 
-## 3. 世界切换：ARM `vcpu_run` vs x86 `VMRESUME`
+## 3. 世界切换：ARM `vcpu_arch_run` vs x86 `VMRESUME`
 
-对应 [vcpu-run-world-switch.md](../arm/vcpu-run-world-switch.md)。本仓库 `vcpu_run` 的三段式
+对应 [vcpu-run-world-switch.md](../arm/vcpu-run-world-switch.md)。本仓库 `vcpu_arch_run` 的三段式
 （进 guest 汇编 / 出 guest 异常向量 / 彻底退出）在 x86 上塌缩成**一条指令边界**。
 
 ```mermaid
@@ -228,12 +231,12 @@ sequenceDiagram
 | `FAR_EL2` + `HPFAR_EL2` 重建 IPA | `guest_physical_address` 字段（VMCS 直接给 GPA） | **x86 更省事**：不用拼接，硬件直接给出错的 GPA |
 | ISS 解码访问宽度/寄存器/方向 | **无**——x86 必须**软件反汇编** guest 指令 | **x86 更麻烦**：变长指令集，ARM 的定长指令让硬件能把这些填进 ISS |
 | `ELR_EL2 += 4` 推过出错指令 | `guest_rip += VMCS.exit_instruction_length` | 同构，但 x86 长度由硬件给（指令变长） |
-| 手动 save/restore 几乎全部状态 | VMCS 自动切换大部分；只有 GPR 要手动 | ARM 的 `-mgeneral-regs-only`「不保存 FP/SIMD」这类假设在 x86 上同样存在（`XSAVE` 状态也要手动管） |
+| 当前仅保存 GPR/返回状态，完整 vCPU 状态待 M11 | VMCS 自动切换一部分，GPR/扩展状态仍需软件处理 | 静态绑核不保存 FP/SIMD 的假设不能直接用于同核调度；x86 也需处理 `XSAVE` 等状态 |
 
-> **对本仓库抽象层的启示**：`handle_exit` 的"读一个硬件给的原因码 → 查表 → 调 handler →
-> 推进 PC"这套骨架是**跨体系结构通用的**，可以作为 arch 无关层；而 ISS 解码
-> （`hypervisor/arch/arm64/vmexit/mmio.c` 里那段）**必须**留在 arch 层——x86 在这里
-> 需要的是一个完全不同的东西（指令反汇编器）。
+> **当前边界**：相似的流程不等于共同接口。`handle_exit` 解释 ARM EC/sysreg/PSCI，
+> 仍在 `arch/arm64/vmexit/vmexit.c`；ISS 解码在同目录 `data_abort.c`。
+> 只有 `mmio_access` 和 `common/io/mmio.c` 总线是架构无关的。x86 需要自己的退出
+> 解码器，再把设备访问交给通用总线，不应让通用代码认识 ESR 或 VMCS 字段。
 
 ---
 
@@ -267,9 +270,9 @@ flowchart TD
 | L1 block（1 GB）/ L2 block（2 MB）/ L3 page（4 KB） | 1 GB / 2 MB / 4 KB EPT 页 | **粒度完全一致**（都是 4 级 4 KB granule 页表） |
 | "punch hole"：把 1 GB block 拆成 L2 table 再置某项无效 | 同样操作：拆 1 GB EPT 项为 2 MB 表，把目标项权限清空 | **ADR-0004 的整套推导在 x86 上逐字成立** |
 
-> **结论**：Stage-2 是本仓库里**移植成本最低**的子系统。页表格式的位域布局不同（EPT 项的
-> R/W/X 是独立三位，且 EPT 天然支持"可读不可执行"这类 ARM Stage-2 也支持的组合），但
-> `stage2_map()` / `stage2_activate()` / punch-hole 的**接口和调用时机一字不改**。
+> **可复用的是职责，不是寄存器接口**：页表格式、TLB 失效与激活流程需要各 arch
+> 实现。当前通用代码经 `vm_arch_init()` / `vcpu_arch_load()` 进入 ARM Stage-2，
+> 不直接调用 `stage2_*`；本仓库没有通用 `stage2_map()` API。移植成本尚未实证。
 
 ---
 
@@ -286,8 +289,8 @@ sequenceDiagram
     participant HV as 〔root〕Hypervisor
     participant G as 〔non-root〕Guest 内核
 
-    Note over DEV,G: ARM 路径 本仓库现状
-    DEV->>IC: SPI / PPI 到 GICv3
+    Note over DEV,G: ARM 稳态 timer 路径（PL011 不走 HW 转发）
+    DEV->>IC: timer PPI 27 到 GICv3
     IC->>HV: 物理 IRQ 陷入 EL2 el2_irq_handler
     HV->>HV: vgic_inject_hw 写 ICH_LR n EL2 列表寄存器
     HV->>G: eret 进 guest 虚拟 IRQ 由 LR 呈现
@@ -307,40 +310,40 @@ sequenceDiagram
 | GICv3 Redistributor（GICR，每 CPU 一个） | **LAPIC**（每 CPU 一个） | 逐个对应，含 per-CPU 私有中断 |
 | PPI（每 CPU 私有，如 timer） | LAPIC 本地中断源（LVT timer 等） | 逐个对应 |
 | SPI（共享外设中断） | IOAPIC 引脚 / MSI | 逐个对应 |
-| SGI（软件生成，核间） | **IPI**（Inter-Processor Interrupt，写 ICR） | 逐个对应；M3.5 的 SGI 虚拟化在 x86 = IPI 虚拟化 |
-| **列表寄存器 `ICH_LR<n>_EL2`**（本仓库靠它注入） | **virtual-APIC page 的 VIRR 位图** | **模型不同**：ARM 是"最多 N 个待注入槽位"（本仓库用 LR0/LR1），x86 是"256 位的完整待决位图"——**x86 没有槽位耗尽问题** |
-| HW 位 + pINTID（硬件转发，EOI 直达物理） | **Posted Interrupt**（中断不经 VM exit 直接投给运行中的 guest） | 目的相同（省退出），机制不同 |
+| SGI（软件生成，核间） | **IPI**（Inter-Processor Interrupt，写 ICR） | 逐个对应；M9 的 SGI 虚拟化在 x86 = IPI 虚拟化 |
+| **列表寄存器 `ICH_LR<n>_EL2`**（本仓库靠它注入） | **virtual-APIC page 的 VIRR 位图** | **模型不同**：ARM 是"最多 N 个待注入槽位"（本仓库固定用 LR0/LR1/LR2），x86 是"256 位的完整待决位图"——**x86 没有槽位耗尽问题** |
+| HW 位 + pINTID（guest deactivate 释放物理 Active） | Posted Interrupt 可把中断直接投给运行中的 guest | 不能直接等同：当前 ARM timer 仍先陷入 EL2，HW 链接主要管理完成时机 |
 | `vgicv3_mmio_init()` 陷入模拟 GICD/GICR | vLAPIC 陷入模拟（APICv 关时）/ APIC-access page（APICv 开时） | 同构：都是 trap-and-emulate 一组寄存器 |
 
-> **移植含义**：本仓库 `vgic_inject_sw` / `_hw` / `_spi` 三个入口的**语义**（软件注入 /
-> 硬件转发 / 外设中断）在 x86 上仍然成立，但内部实现要从"分配一个 LR 槽位"改成
-> "置一个 VIRR 位"。**LR 槽位分配逻辑（本仓库的 LR0/LR1 固定分配）是纯 ARM 产物**，
-> 抽象层不该把它泄漏出去。这是设计接口时值得注意的一条界线。
+> **当前接口**：`vgic_inject_sw/hw/spi/sgi` 都是 ARM 内部实现，LR0/1/2 分配不跨
+> arch 边界。vuart 只请求 `vcpu_arch_inject_irq(target, irq)`；当前 arm64 只实现
+> vuart SPI 用途。未来 x86 实现需要定义该请求如何交付，不能照搬 HW/pINTID 语义。
 
 ---
 
 ## 6. 电源与固件接口：PSCI vs ACPI + hypercall
 
-对应本仓库 `hypervisor/common/psci/psci.c`、M1.5。
+guest 服务端在 `hypervisor/arch/arm64/vmexit/vpsci.c`；平台 SMC 客户端在
+`arch/arm64/cpu/psci.c`。通用代码通过 `cpu_arch_power_on()` 启动物理核，不认识 PSCI。
 
 | ARM64 | x86-64 | 说明 |
 | --- | --- | --- |
 | PSCI over `HVC`（`PSCI_VERSION`/`CPU_ON`/`CPU_OFF`/`SYSTEM_OFF`） | 无统一等价物：拆成 **ACPI**（S 状态、`_S5` 关机）+ **INIT-SIPI-SIPI**（启动 AP 核） | **x86 更零碎**：ARM 用一个 SMC/HVC 接口统一了"开核/关核/关机/重启" |
-| `CPU_ON`（M3.5 用它拉起第二个 vCPU） | guest 发 **INIT-SIPI-SIPI** IPI 序列，hypervisor 陷入并模拟 | 同一目的，但 x86 要模拟一个三步握手时序 |
+| `CPU_ON`（M9 用它拉起第二个 vCPU） | guest 发 **INIT-SIPI-SIPI** IPI 序列，hypervisor 陷入并模拟 | 同一目的，但 x86 要模拟一个三步握手时序 |
 | `SYSTEM_OFF` / `SYSTEM_RESET` | guest 写 ACPI PM1a 控制端口（PIO 陷入）或三重故障 | x86 走 PIO 陷入路径 |
-| HVC 作为 hypercall 载体（M7 的 hypercall ABI） | **`VMCALL`** | 完全同构；ACRN 的 hypercall 就走 `VMCALL` |
+| HVC 作为 hypercall 载体（计划 M12 的 hypercall ABI） | **`VMCALL`** | 完全同构；ACRN 的 hypercall 就走 `VMCALL` |
 
 > **已知缺陷的对照**：`CLAUDE.md` 记录的 `CPU_OFF` 缺陷（`PSCI_CPU_OFF` 误用
 > `psci_power_down()` 把整个 VM 拉下线，应只停调用者 vCPU）在 x86 上是**同一个 bug 类**——
-> "per-vCPU 关断状态 vs per-VM 关断状态"是体系结构无关的状态建模问题。M6 重写状态管理时
+> "per-vCPU 关断状态 vs per-VM 关断状态"是体系结构无关的状态建模问题。M11 重写状态管理时
 > 该按 per-vCPU 建模，这个结论两边通用。
 
 ---
 
 ## 7. 控制台与 I/O：一处 x86 独有的复杂度
 
-本仓库 M5 的决策（ADR-0014）是：**EL2 独占物理 PL011，每个 VM 看到一个 trap-and-emulate
-的 vuart，`Ctrl-T` 切换 RX 焦点**。这套设计在 x86 上**整体成立**，但有一个必须加的分支：
+本仓库 M10 的决策（ADR-0014）是：**EL2 独占物理 PL011，每个 VM 看到一个
+trap-and-emulate vuart；`Ctrl-T` 进入 EL2 shell，用 `vm_console` 选择 RX 焦点**。这套设计在 x86 上**整体成立**，但有一个必须加的分支：
 
 ```mermaid
 flowchart TD
@@ -349,52 +352,52 @@ flowchart TD
     Q -->|"传统 PIO 0x3F8 COM1"| P["IN OUT 指令 → I/O bitmap 陷入<br/>ARM 没有这条路"]
     M --> V["vuart 模拟层"]
     P --> V
-    V --> F{"是否持有 console focus"}
-    F -->|"是"| TX["写物理 UART"]
-    F -->|"否"| BUF["写入本 VM 环形缓冲"]
+    V -->|"TX，与焦点无关"| TX["写物理 UART"]
+    RX["物理 UART RX"] --> F["console 仲裁：shell 或焦点 VM"]
+    F -->|"guest 输入"| BUF["焦点 VM 的 RX FIFO"]
+    BUF --> V
 ```
 
 **PIO 是 x86 的第二 I/O 空间**：guest 用 `IN`/`OUT` 访问 `0x3F8`（COM1）这类端口，
 不经过 EPT，靠 VMCS 的 **I/O bitmap** 按端口号决定是否陷入。ARM 侧没有任何对应物——
 所有设备寄存器都是 MMIO，因此 Stage-2 一条路管完。
 
-> **对本仓库的启示**：`hypervisor/dm/vuart.c` 的 vuart 状态机（FIFO、LSR/LCR 寄存器语义、
-> focus 切换）是**可复用的**；变的只是**前面挂哪条陷入通路**。这正好印证 ADR-0006 的
-> MMIO 总线设计——把"设备模型"和"陷入解码"分开是对的，x86 只需要在总线旁边再注册一条
-> PIO 总线。（顺带一提：x86 的 16550 UART 与 ARM 的 PL011 寄存器布局不同，vuart 的寄存器
-> 语义层要换，但 focus 调度逻辑不变。）
+> **设备与架构分开**：`dm/vuart.c` 模拟 PL011 的 DR/FR/IMSC 等寄存器，焦点属于
+> `dm/console.c`。若 x86 guest 仍看 PL011，可复用其设备语义；若改成 16550，就要
+> 实现另一套寄存器模型。PIO 解码/总线是将来的需求，当前仓库没有该实现。
 
 ---
 
-## 8. 模块关系图（x86 基座下，本仓库目录如何映射）
+## 8. 模块关系：以已落地的 ADR-0015 为准
 
 ```mermaid
 flowchart TD
-    subgraph ARCH["arch 层 体系结构相关 必须重写"]
-        A1["head.S 进入 EL2<br/>→ VMXON 进入 VMX root"]
-        A2["Stage-2 页表<br/>→ EPT 页表 位域不同 接口相同"]
-        A3["ESR ISS 解码<br/>→ 指令反汇编器 完全不同"]
-        A4["vGICv3 LR 注入<br/>→ vLAPIC VIRR 位图"]
-        A5["vcpu_run 汇编<br/>→ VMLAUNCH VMRESUME + VMCS"]
+    subgraph CORE["当前 arch 外代码"]
+        VM["common/vm<br/>VM 对象与静态启动"]
+        BUS["common/io<br/>MMIO 注册与分发"]
+        DM["dm<br/>PL011 vuart / console / hv_shell"]
+        HOOK["通用头文件<br/>cpu_/vm_/vcpu_arch_* + arch 类型入口"]
     end
-    subgraph COMMON["common 层 体系结构无关 可复用"]
-        C1["vm 对象 vm NR_VMS<br/>per-VM 状态与生命周期"]
-        C2["handle_exit 分发骨架<br/>原因码 查表 调 handler"]
-        C3["MMIO 总线 注册 查找<br/>ADR-0006"]
-        C4["PSCI / hypercall 上层语义<br/>电源状态机"]
-        C5["vCPU 调度器 M6"]
+    subgraph ARM["当前 arm64 实现"]
+        CTX["vcpu_arch_run 汇编<br/>arch_regs / vcpu_arch"]
+        MEM["Stage-2"]
+        EXIT["handle_exit / data_abort / vpsci"]
+        IRQ["GIC / vGIC"]
     end
-    subgraph DM["dm 层 设备模型 可复用"]
-        D1["vuart 状态机 focus 切换"]
-        D2["virtio 后端 M9"]
-    end
-    ARCH --> COMMON
-    COMMON --> DM
+    VM --> HOOK
+    DM --> HOOK
+    HOOK -. "实现" .-> CTX
+    HOOK -. "实现" .-> MEM
+    HOOK -. "实现" .-> IRQ
+    EXIT --> BUS
+    BUS --> DM
+    BUS --> IRQ
+    X86["未来 x86 需实现钩子与私有状态<br/>VMCS / EPT / APIC / exit 解码<br/>当前尚无实现"] -. "实现同一契约，仍需验证" .-> HOOK
 ```
 
-**这张图是本文最有实用价值的产物**：它标出了本仓库当前代码里，哪些部分是"ARM 的偶然"、
-哪些是"虚拟化的必然"。设计新子系统时，若一个抽象无法在上表两栏之间保持稳定，
-那多半意味着**抽象层切错了位置**。
+`handle_exit` 与 PSCI 没有搬到 common；中性电源状态机属于 M11 后续工作。
+调度器（M11）和用户态 virtio 后端（M14）也不是当前已有模块。检查脚本能阻止源码 /
+头文件越界，不能证明不同架构的语义契约完全一致。
 
 ---
 
@@ -404,19 +407,19 @@ flowchart TD
 | --- | --- | --- | --- |
 | M0 Hello EL2 | `_start` 检查 `CurrentEL==0b1000`，进 EL2 | 检查 `CPUID` VMX 位 → 设 `CR4.VMXE` → `VMXON` | **x86 更繁琐**（要分配 VMXON region、对齐、revision id） |
 | M1 裸机 guest | Stage-2 + 最小 vCPU | EPT + VMCS 初始化（约 100 个字段） | **x86 明显更繁琐**：VMCS 字段多且校验严，配错直接 VM-entry failure |
-| M1.5 PSCI | HVC 陷入模拟 PSCI | `VMCALL` 陷入 + ACPI PIO 模拟 | 相当 |
-| M2 vGIC 软件注入 | 写 `ICH_LR0_EL2` | 置 virtual-APIC page 的 VIRR 位 | **x86 略简单**（无槽位管理） |
-| M2.5 物理 timer + HW 转发 | timer PPI → EL2 → HW 位转发 | LAPIC timer 陷入 / preemption timer | 相当 |
-| M3.x Linux 启动 | arm64 boot protocol + DTB | x86 boot protocol（`boot_params`）或直接 ELF | 相当 |
-| M3.5 SMP | PSCI `CPU_ON` + SGI 虚拟化 | INIT-SIPI-SIPI 模拟 + IPI 虚拟化 | **x86 略难**（三步握手时序） |
-| M5 多 VM | per-VM Stage-2 / VMID / vGIC / vuart | per-VM EPT / VPID / vLAPIC / vuart(MMIO+PIO) | 相当，x86 多一条 PIO 路 |
-| M6 调度器 | 上下文切换含 FP/SIMD | 上下文切换含 `XSAVE` 状态区 | 相当（都要处理"扩展状态不保存"这个假设） |
-| M7–M9 hypercall/HSM/DM | HVC ABI + io_req ring + 用户态 DM | `VMCALL` ABI + io_req ring + 用户态 DM | **几乎一字不差**——这正是 ACRN 的原型 |
-| M10 硬件移植 | RK3588（要运行时 FDT 解析） | 任一 Intel 平台（要 ACPI 解析） | 相当 |
+| M2 PSCI | HVC 陷入模拟 PSCI | `VMCALL` 陷入 + ACPI PIO 模拟 | 相当 |
+| M3 vGIC 软件注入 | 写 `ICH_LR0_EL2` | 置 virtual-APIC page 的 VIRR 位 | **x86 略简单**（无槽位管理） |
+| M4 物理 timer + HW 转发 | timer PPI → EL2 → HW 位转发 | LAPIC timer 陷入 / preemption timer | 相当 |
+| M5–M8 Linux 启动 | arm64 boot protocol + DTB | x86 boot protocol（`boot_params`）或直接 ELF | 相当 |
+| M9 SMP | PSCI `CPU_ON` + SGI 虚拟化 | INIT-SIPI-SIPI 模拟 + IPI 虚拟化 | **x86 略难**（三步握手时序） |
+| M10 多 VM | per-VM Stage-2 / VMID / vGIC / vuart | per-VM EPT / VPID / vLAPIC / vuart(MMIO+PIO) | 相当，x86 多一条 PIO 路 |
+| M11 调度器 | 上下文切换含 FP/SIMD | 上下文切换含 `XSAVE` 状态区 | 相当（都要处理"扩展状态不保存"这个假设） |
+| M12–M14 hypercall/HSM/DM | HVC ABI + io_req ring + 用户态 DM | `VMCALL` ABI + io_req ring + 用户态 DM | **几乎一字不差**——这正是 ACRN 的原型 |
+| M15 硬件移植 | RK3588（要运行时 FDT 解析） | 任一 Intel 平台（要 ACPI 解析） | 相当 |
 
-> **值得注意的一点**：M7–M9（ACRN 模型的核心链路）在两个体系结构上**近乎完全相同**。
+> **值得注意的一点**：M12–M14（ACRN 模型的核心链路）在两个体系结构上**近乎完全相同**。
 > 这不是巧合——`CLAUDE.md` 的 ACRN-model 策略之所以能从 x86 的 ACRN 借鉴到 ARM，
-> 正是因为那一层已经在硬件差异之上了。反过来说，M0–M3.5 那些**最像"学 EL2 核心技术"
+> 正是因为那一层已经在硬件差异之上了。反过来说，M0–M9 那些**最像"学 EL2 核心技术"
 > 的部分，恰恰是最不可移植的部分**——这与本仓库把"学习 EL2 核心技术"列为首要目标是
 > 自洽的。
 
@@ -430,10 +433,9 @@ flowchart TD
 2. **分歧集中在三处**：①上下文的软硬件分工（手动 save/restore vs VMCS 自动切换）；
    ②中断注入模型（LR 槽位 vs VIRR 位图）；③I/O 空间数量（只有 MMIO vs MMIO + PIO）。
    本仓库任何跨 arch 抽象，接口都不该泄漏这三处的细节。
-3. **本仓库的 arch/common 目录划分基本正确**。第 8 节的映射表显示，需要重写的东西
-   几乎都已经在 `hypervisor/arch/arm64/` 下了。**唯一值得复查的是 vGIC**——
-   `vgic_inject_*` 系列的 LR 槽位语义偏向 ARM，M6 重构 per-vCPU 状态时可以顺手把
-   这层接口收敛得更中性。
+3. **边界重构已落地，移植证明尚未完成**。vGIC 已被通用注入钩子隔离，MMIO 总线已
+   与 ARM 解码分离；M11 新增状态和钩子仍需检查其它架构能否实现，不能把通过 grep /
+   预处理检查当成 x86 支持。
 
 ---
 
@@ -444,4 +446,4 @@ flowchart TD
 - Intel® Virtualization Technology for Directed I/O（VT-d，DMA 隔离）
 - `../acrn-hypervisor` — 本文所有 x86 侧结论的对照实现；重点看
   `hypervisor/arch/x86/guest/`（vCPU/VMCS/vLAPIC）与 `hypervisor/dm/`（设备模型）
-- ARM 侧对照见 `CLAUDE.md` 原图与 [2026-06-21-architecture-zoom-out.md](../arm/2026-06-21-architecture-zoom-out.md)
+- ARM 侧对照见 [当前架构](../arm/current-architecture.md) 与 [目标架构](../arm/target-architecture.md)

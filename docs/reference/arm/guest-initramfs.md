@@ -1,7 +1,8 @@
-# Guest initramfs (user-supplied) — busybox rootfs for M3.4
+# Guest initramfs (user-supplied) — busybox rootfs for both VMs
 
-The M3.4 "boot to shell" milestone needs a small root filesystem. Like the
-kernel `Image`, the initramfs is **supplied by you, not built in this repo**.
+Both Linux VMs use the same small root filesystem. Like the kernel `Image`,
+the initramfs archive is **supplied by you, not built in this repo**. The
+maintained `/init` source is `guest/initramfs-init.sh`.
 This doc is a reference recipe for producing a `cpio.gz` initramfs containing a
 static busybox and an `/init` that drops to an interactive shell on the guest
 console.
@@ -9,21 +10,25 @@ console.
 ## What the hypervisor expects
 
 - A gzip-compressed cpio (newc format) archive — a standard Linux initramfs.
-- Loaded by QEMU at **physical** address `0x4C000000` via
-  `-device loader,file=<initramfs>,addr=0x4C000000` (set `LINUX_INITRD`).
-- Advertised to the kernel by the guest DTB `/chosen`:
-  `linux,initrd-start = <0x44000000>` and `linux,initrd-end = <0x45000000>`
-  (guest IPA; PA = IPA + 0x08000000). Keep the payload under 16 MB.
-- The kernel unpacks it as the rootfs and runs `/init`.
+- Set `LINUX_INITRD`; `make run` loads the same archive at PA `0x84000000`
+  for VM0 and `0xC4000000` for VM1.
+- Both guest DTBs advertise `linux,initrd-start = <0x44000000>` and
+  `linux,initrd-end = <0x45000000>` in `/chosen` (guest IPA). Keep the payload
+  under 16 MB.
+- The kernel unpacks it and runs `/init`, which reads `hv.vm=` into `PS1`.
 
 ## Address sanity
 
-| Artifact | Guest IPA | Physical (QEMU `addr=`) |
-|---|---|---|
-| initramfs | `0x44000000` | `0x4C000000` |
+| Artifact | Guest IPA (both VMs) | VM0 PA | VM1 PA |
+|---|---|---|---|
+| RAM base | `0x40000000` | `0x80000000` | `0xC0000000` |
+| Image | `0x40080000` | `0x80080000` | `0xC0080000` |
+| DTB | `0x42000000` | `0x82000000` | `0xC2000000` |
+| initramfs | `0x44000000` | `0x84000000` | `0xC4000000` |
 
-64 MB above guest RAM base (`0x40000000` / PA `0x48000000`); 32 MB above the
-DTB; clear of the kernel at IPA `0x40080000`.
+The initramfs is 64 MB above RAM base and 32 MB above the DTB. The Image must
+fit below the DTB (~31 MB budget). `guest/linux-6.12-qemu_virt.config` is a
+known-good full Linux `.config`, not a savedefconfig.
 
 ## Recipe (host tools — needs a static busybox binary)
 
@@ -58,21 +63,11 @@ mkdir -p initramfs/{bin,sbin,proc,sys,dev,etc}
 cp busybox/busybox initramfs/bin/busybox
 ( cd initramfs && ln -sf busybox bin/sh )
 
-cat > initramfs/init <<'EOF'
-#!/bin/sh
-mount -t proc     none /proc
-mount -t sysfs    none /sys
-mount -t devtmpfs none /dev 2>/dev/null || \
-  /bin/busybox mdev -s
-echo
-echo "=== M3.4: busybox rootfs up — interactive shell ==="
-# console=ttyAMA0 makes the PL011 the controlling /dev/console.
-exec /bin/sh
-EOF
+# Use the repository's maintained init, including per-VM prompts.
+cp /path/to/hypervisor-repo/guest/initramfs-init.sh initramfs/init
 chmod +x initramfs/init
 
-# install the busybox applet symlinks at boot via the init above (mdev/ln),
-# or pre-create the common ones:
+# Pre-create the common applet symlinks:
 for a in mount umount ls cat echo sh mdev cpio; do
   ln -sf busybox initramfs/bin/$a
 done
@@ -93,25 +88,24 @@ LINUX_INITRD=/path/to/initramfs.cpio.gz \
 make run
 ```
 
-Expected: after the M3.0–M3.3 boot, the kernel logs
-`Unpacking initramfs...`, runs `/init`, prints the banner, and an interactive
-busybox prompt appears:
+Expected: both kernels unpack the archive and run `/init`. The banner keeps
+its historical `M3.4` label; the prompt identifies the VM, for example:
 
 ```
-=== M3.4: busybox rootfs up — interactive shell ===
-/ #
+=== M3.4: busybox rootfs up — vm0 interactive shell ===
+vm0:~ #
 ```
 
-Type `ls /` or `cat /proc/cpuinfo` and see output — that is the M3.4 DoD.
+Use `Ctrl-T`, then `vm_console 1`, to select VM1 input and run `ls /` or
+`cat /proc/cpuinfo` there too. The per-VM DTBs differ only in `hv.vm=0/1`;
+this changes the prompt, not the hostname.
 
 ## Console note (must match the DTB bootargs)
 
-This repo's `guest/qemu_virt.dts` sets `console=ttyAMA0` (the passed-through
-PL011), so the shell runs on `ttyAMA0` and `/init`'s `exec /bin/sh` lands on
-`/dev/console` = the PL011. If you switch the guest to the M3.3 virtio-console
-(`console=hvc0` in `bootargs`), make `/init` target `/dev/hvc0` instead, e.g.:
+`console=ttyAMA0` and `earlycon=pl011,0x9000000` address the **emulated PL011**.
+EL2 owns the physical UART; guest MMIO traps into its per-VM vuart. Focus
+controls RX only, so output from either VM remains visible.
 
-    exec setsid sh -c 'exec sh </dev/hvc0 >/dev/hvc0 2>&1'
-
-Keep `earlycon=pl011` either way — virtio-console is not available during early
-boot.
+There is no current EL2 virtio-console backend. Switching bootargs to `hvc0`
+will not create one; virtio backends belong to the planned M14 userspace DM.
+Run through `make run`, which exports the board's CPU count to the QEMU script.

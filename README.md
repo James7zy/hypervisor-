@@ -21,14 +21,20 @@ time slicing, and vCPU count greater than pCPU count. The long-term target is
 the full ACRN model (Service VM + userspace Device Model); the RK3588 port is
 last, at M15.
 
-See [the multi-VM design spec](docs/superpowers/specs/2026-07-19-m5-multi-vm-design.md)
-and [ADR-0014](docs/adr/0014-multi-vm-static-partition-el2-console.md) for the
-current architecture.
+The arch-boundary refactor is also in place: generic code uses `*_arch_*`
+hooks and `<arch/...>` headers; ARM exit decoding is separate from the common
+MMIO bus. This does not yet add scheduling or prove a second architecture port.
+
+Start with [the current architecture](docs/reference/arm/current-architecture.md)
+for module, object and sequence diagrams. The
+[multi-VM spec](docs/superpowers/specs/2026-07-19-m5-multi-vm-design.md),
+[ADR-0014](docs/adr/0014-multi-vm-static-partition-el2-console.md) and
+[ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md) record the design decisions.
 
 > **Note on milestone numbers:** the roadmap was renumbered to consecutive
 > integers on 2026-08-10 (the old scheme had `M1.5`, `M2.5`, `M3.0`–`M3.5` and an
 > unused `M4`). Historical specs, ADRs and debug notes keep their original
-> numbering — e.g. this spec's filename says `m5` for what is now M10. CLAUDE.md
+> numbering — e.g. this spec's filename says `m5` for what is now M10. [AGENTS.md](AGENTS.md#milestone-renumbering-2026-08-10)
 > has the full old→new mapping table.
 
 ### Milestones
@@ -69,14 +75,20 @@ Earliest banner (within ~3 s):
 `LINUX_INITRD` is optional. With an initramfs configured, both VMs boot Linux to
 a busybox shell prompt. Exit QEMU with `Ctrl-A x`.
 
-Two constraints are easy to trip over:
+Constraints that are easy to trip over:
 
 - **`-m 4G` is required** (already set in `scripts/run-qemu.sh`). VM0's RAM is
   backed at PA `0x80000000` and VM1's at `0xC0000000`, so both 1 GB-aligned
   blocks only fall inside QEMU `virt` DRAM with 4 GB present.
 - **The kernel `Image` must fit the address budget** (~31 MB). A full arm64
-  `defconfig` Image overruns the DTB; trim unused subsystems, keeping PL011 +
-  virtio + devtmpfs + initramfs.
+  `defconfig` Image overruns the DTB. A known-good trimmed Linux 6.12 **full
+  `.config`** is checked in at `guest/linux-6.12-qemu_virt.config`; copy it into
+  the kernel tree and run `olddefconfig` before building the Image.
+- **Use `make run` / `make test`, not the QEMU script directly.** The board's
+  `board.mk` supplies `board-nr-cpus` (4 on QEMU virt) to both `CONFIG_NR_CPUS`
+  at build time and `HV_NR_CPUS` for QEMU's `-smp`.
+- **Clean after header or build-configuration changes.** The Makefile does
+  not track header dependencies or compiler-flag changes.
 
 ### EL2 shell
 
@@ -106,18 +118,22 @@ aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 - `aarch64-none-linux-gnu-binutils`
 - `qemu-system-aarch64` >= 6.0
 - `dtc` (device-tree-compiler)
+- Host C compiler (`cc`) for offset checks
+- `perl` for the architecture-boundary check in `make test`
 
 ## Verification
 
 There is no CI; verification is local and automated.
 
-1. **Automated suite**: `make test` checks C/assembly struct offsets, then runs
-   QEMU integration scenarios — `basic` and `vtimer` on a single-VM SVM build
-   (`build/test-svm/`), plus the dual-VM (`test-qemu-dual`) and EL2-shell scenarios on a
-   `NR_VMS=2` build (`build/test-svm-dual/`). The shell scenario drives real
-   keystrokes into QEMU's serial stdin (`Ctrl-T`, `vm_list`, `help`,
-   `vm_console`, error paths, backspace editing) and uses bare-metal guests, so
-   it finishes in seconds rather than waiting on a Linux boot.
+1. **Automated suite**: `make test` checks the arch boundary (source and
+   transitive includes) and host/cross-compiled C/assembly offsets, then runs:
+   - `basic` and `vtimer`: single-VM SVM build (`build/test-svm/`).
+   - Dual-VM and EL2 shell: `NR_VMS=2` build (`build/test-svm-dual/`).
+   - vSPI RX/IPI/replay: separate dual-VM build (`build/test-vspi/`).
+   Shell and vSPI both write QEMU serial input. The shell scenario checks
+   `Ctrl-T`, `vm_list`, `help`, `vm_console`, errors and line editing without
+   waiting for Linux. Shared SVM guests live in `tests/svm/`; the older vSPI
+   guests remain in `tests/vspi/`.
 2. **Build check**: `make` must succeed with zero warnings (`-Werror` is on).
 3. **Linux SMP boot**: run with `LINUX_IMAGE` (and optionally `LINUX_INITRD`)
    and verify `CPU1: Booted secondary processor`, `smp: Brought up 1 node,
@@ -127,6 +143,9 @@ There is no CI; verification is local and automated.
 
 ## Documentation
 
+- [Documentation index](docs/README.md) — current references vs historical records
+- [Current ARM64 architecture](docs/reference/arm/current-architecture.md)
+- [Target ACRN architecture](docs/reference/arm/target-architecture.md) — not yet implemented
 - Design specs: `docs/superpowers/specs/`
 - Architecture decisions: `docs/adr/`
 - Reference knowledge base: `docs/reference/` — split by architecture into
