@@ -29,6 +29,10 @@ arch-includes := \
     -Ihypervisor/arch/arm64/vmexit \
     -Ihypervisor/arch/arm64/timer
 
+# AArch64-only codegen: no FP/SIMD (no FP state is saved), no unaligned
+# accesses (Device memory and MMU-off boot faults on them).
+arch-cflags := -mgeneral-regs-only -mstrict-align
+
 arch-ldscript := hypervisor/arch/arm64/board/$(BOARD)/linker.lds
 
 include hypervisor/arch/arm64/board/$(BOARD)/board.mk

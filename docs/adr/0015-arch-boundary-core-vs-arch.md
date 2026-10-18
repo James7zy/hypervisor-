@@ -5,6 +5,10 @@
 > **2026-10-04:** 迁移按 spec 范围完成,检查零容忍通过。**多架构可移植性尚未
 > 证明**:仓库里只有 arm64 一个 arch,没有第二个架构编译过通用代码;剩余的语义
 > 耦合见文末"已知语义耦合"。
+> **2026-10-18:** 加入 `arch/x86` 链接检查 stub(`make test-x86-stub`,已并入
+> `make test`)。通用代码不改一行就能用 x86_64 gcc 编译,并能和 x86 的 stub 钩子
+> 链接成功。证明的程度是**能编译、能链接**,**没有证明能运行**:stub 钩子都是空实现,
+> 也没有 x86 启动入口。
 
 这个 hypervisor 的目标是多架构:现在是 ARM64(QEMU `virt`,之后 RK3588),将来
 要能加入 x86 等架构。目录仿照 ACRN 分成 `arch/` 和 `common/`,但到 M10 为止这个
@@ -66,8 +70,10 @@ flowchart TB
   review 记忆。
 - **只把 PSCI 移出 `common/`,允许 `common/` 继续调用 `stage2_*`/`vgic_*`。** 否决。
   这样加 x86 时 VM 模块照样得改,只是换了个地方越界。
-- **现在就建一个 `arch/x86` stub 构建来证明 `common/` 能编译。** 暂不采用。每加一个
-  钩子都要同步维护 stub,还需要 x86 工具链。等真正开始移植时,再作为第二道检查加入。
+- **现在就建一个 `arch/x86` stub 构建来证明 `common/` 能编译。** 2026-10-04 时暂不采用:
+  每加一个钩子都要同步维护 stub,还需要 x86 工具链。**2026-10-18 改为采用**:宿主机
+  自带的 `x86_64-linux-gnu-gcc` 就够用;维护成本只是每个钩子一个空函数;换来的是 M11
+  每次新增钩子都会被链接检查立刻覆盖,不用等钩子稳定以后再补。
 - **一次性设计完整 HAL(包括 M11 要用的 save/restore)。** 否决。接口形状应该由真实
   调用点决定,现在猜大概率会猜错。
 - **`arch_<对象>_<动词>`(ACRN/Linux 风格)命名。** 否决。和选定的参考实现 bao 保持
@@ -105,4 +111,4 @@ flowchart TB
 提供(`-DCONFIG_NR_CPUS=N`)。
 
 持续验证的办法:M11 新增的每个钩子都要回答"x86/RISC-V 能否实现",记在
-`docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md` 的钩子可移植性表里。`arch/x86` stub 构建仍然推迟到钩子稳定后。
+`docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md` 的钩子可移植性表里。另外,`make test-x86-stub` 在链接阶段把关:新钩子如果没有在 `arch/x86/stub/hooks.c` 里补上 stub,就会链接失败。

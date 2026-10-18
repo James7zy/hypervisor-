@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: TBD
 
 ARCH          ?= arm64
+ifeq ($(ARCH),x86)
+# Link-check stub only (ADR-0015): no runnable x86 board exists yet.
+BOARD         ?= stub
+CROSS_COMPILE ?= x86_64-linux-gnu-
+else
 BOARD         ?= qemu_virt
 CROSS_COMPILE ?= aarch64-none-linux-gnu-
 
 ifeq ($(shell which $(CROSS_COMPILE)gcc 2>/dev/null),)
     export PATH := /home/corsair/Downloads/toolchain/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$(PATH)
+endif
 endif
 
 CC      := $(CROSS_COMPILE)gcc
@@ -24,7 +30,6 @@ CFLAGS := \
     -ffreestanding -nostdlib -nostartfiles \
     -fno-pic -fno-stack-protector \
     -fno-strict-aliasing \
-    -mgeneral-regs-only -mstrict-align \
     -Wall -Wextra -Werror -O2 -g
 
 ifeq ($(HV_GUEST),svm)
@@ -53,7 +58,7 @@ CONFIG_DEFS := $(shell \
     sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' .config)
 endif
 
-CFLAGS  += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
+CFLAGS  += $(arch-cflags) $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 ASFLAGS += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 
 # scripts/run-qemu.sh sizes -smp from this, so QEMU's pCPU count can never
@@ -75,7 +80,7 @@ HOST_CC    := cc
 
 .PHONY: all run clean defconfig menuconfig help svm check-offsets check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
-	test-qemu-dual test-qemu-shell test guest
+	test-qemu-dual test-qemu-shell test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -212,7 +217,16 @@ test-qemu-shell: test-svm-dual-build
 check-arch-boundary:
 	CC="$(CC)" CPPFLAGS="$(filter -D% -I%,$(CFLAGS))" sh scripts/check-arch-boundary.sh
 
-test: check-arch-boundary check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
+# Second-arch check (ADR-0015): the generic code must compile for x86_64 and
+# link against arch/x86's stub hooks. No weak defaults, so a hook the stub
+# lacks fails the link. Build/link only -- the result is never run.
+X86_BUILD_DIR := build/test-x86
+
+test-x86-stub:
+	$(MAKE) ARCH=x86 BOARD=stub CROSS_COMPILE=x86_64-linux-gnu- \
+	        BUILD_DIR=$(X86_BUILD_DIR) all
+
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh
