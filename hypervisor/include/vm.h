@@ -7,7 +7,6 @@
 #include <spinlock.h>
 #include <percpu.h>   /* NR_CPUS, for the NR_VMS/VCPUS_PER_VM static_assert
                          below (percpu.h forward-declares struct vcpu) */
-#include <vuart.h>    /* struct vuart, embedded by value in struct vm below */
 #include <arch/vm.h>  /* struct arch_regs, struct vcpu_arch */
 
 /* Compile-time VM count. 1 until M5 slice 3; the Makefile overrides it
@@ -56,9 +55,8 @@ struct vm {
     struct vcpu            vcpu[VCPUS_PER_VM];
     u32                    id;        /* index into vm[]; keys the per-VM
                                          file-static state in stage2.c /
-                                         vgic_v3_mmio.c */
+                                         vgic_v3_mmio.c / dm/vuart.c */
     const struct vm_config *config;
-    struct vuart            vuart;    /* emulated PL011; see hypervisor/dm/vuart.c */
     /* M5 slice 3: set by psci_power_down() when this VM calls CPU_OFF/
      * SYSTEM_OFF/SYSTEM_RESET. Not read by any asm path (struct vm has no
      * __ASSEMBLER__ offset macros, unlike struct vcpu/struct hv_ctx) —

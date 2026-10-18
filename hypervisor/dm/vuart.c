@@ -54,6 +54,15 @@ static const u8 vuart_amba_id[8] = {
 };
 
 
+/* Per-VM device state lives here, keyed by vm->id (the same idiom as stage2.c /
+ * vgic_v3_mmio.c), so struct vm stays free of device-model types. BSS-zeroed. */
+static struct vuart vuarts[NR_VMS];
+
+static inline struct vuart *vuart_of(const struct vm *m)
+{
+    return &vuarts[m->id];
+}
+
 static bool vuart_rx_empty(const struct vuart *u)
 {
     return u->rx_head == u->rx_tail;
@@ -128,7 +137,7 @@ static int vuart_mmio_handler(struct mmio_access *acc, void *ctx)
     (void)ctx;
 
     struct vm *m = current_vcpu()->owner;
-    struct vuart *u = &m->vuart;
+    struct vuart *u = vuart_of(m);
 
     /* TX can wait on hardware and takes the print lock, never the device lock. */
     if (acc->is_write && acc->offset == VUART_DR) {
@@ -169,15 +178,17 @@ void vuart_bus_init(void)
 
 bool vuart_rx_has_room(struct vm *m)
 {
-    spin_lock(&m->vuart.lock);
-    bool room = !vuart_rx_full(&m->vuart);
-    spin_unlock(&m->vuart.lock);
+    struct vuart *u = vuart_of(m);
+
+    spin_lock(&u->lock);
+    bool room = !vuart_rx_full(u);
+    spin_unlock(&u->lock);
     return room;
 }
 
 void vuart_rx(struct vm *m, u8 ch)
 {
-    struct vuart *u = &m->vuart;
+    struct vuart *u = vuart_of(m);
 
     spin_lock(&u->lock);
     if (!vuart_rx_full(u)) {
