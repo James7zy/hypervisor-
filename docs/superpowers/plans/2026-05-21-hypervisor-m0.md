@@ -145,7 +145,7 @@ A learning/research ARM hypervisor inspired by ACRN, Xvisor, and Xen.
 **M0 — Hello EL2** (current milestone). The hypervisor enters EL2 on QEMU
 virt and prints a banner. No guest support yet.
 
-See [the M0 design](docs/superpowers/specs/2026-05-21-hypervisor-m0-design.md).
+See [the M0 design](../specs/2026-05-21-hypervisor-m0-design.md).
 
 ## Quickstart
 
