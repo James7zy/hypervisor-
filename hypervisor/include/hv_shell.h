@@ -16,8 +16,7 @@
  *
  * Not multi-core safe by design: the physical console UART interrupt is routed
  * to pCPU0 only, so every byte and every state change below happens on that
- * one core inside the arch's IRQ handler (arm64: gic_v3.c routes the SPI;
- * el2_irq_handler runs the shell). Nothing else in the hypervisor touches
+ * one core inside the arch's IRQ handler. Nothing else in the hypervisor touches
  * this state.
  */
 

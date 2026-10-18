@@ -11,7 +11,8 @@ hv-objs := \
     dm/console.o \
     dm/hv_shell.o
 
+# One public header directory. Module-private headers must be included with
+# quotes from their own directory, so nothing outside a module (arch/ included)
+# can reach into it by search path.
 hv-includes := \
-    -Ihypervisor/include \
-    -Ihypervisor/common/vm \
-    -Ihypervisor/dm
+    -Ihypervisor/include

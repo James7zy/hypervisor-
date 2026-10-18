@@ -6,7 +6,7 @@
 int printk(const char *fmt, ...);
 
 /* Emit one raw character to the physical console, serialized with printk.
- * Used by the vuart TX path so guest output and EL2 printk output never
+ * Used by the vuart TX path so guest output and hypervisor printk output never
  * interleave mid-character. */
 void console_putc(char c);
 

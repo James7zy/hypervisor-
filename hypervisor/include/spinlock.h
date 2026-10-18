@@ -14,8 +14,7 @@ static inline void cpu_arch_relax(void);               /* spin-wait hint */
  * through M3.4 (a single core never needed any); this is the first. Kept
  * deliberately small: a ticket lock with the required acquire/release barriers.
  * Protects printk, vuart device state, and the arch's per-VM interrupt-controller
- * emulation state (arm64: SGI pending bitmaps, GICD/GICR MMIO shadows, per-vCPU
- * SPI publication). The second-stage page tables remain build-once-read-only;
+ * emulation state. The second-stage page tables remain build-once-read-only;
  * per-CPU timer and IPI live registers remain owned by their target CPU.
  * Locks do NOT mask interrupts. Current callers run with hypervisor interrupts
  * masked (boot or exception entry), and must not unmask while holding a lock.

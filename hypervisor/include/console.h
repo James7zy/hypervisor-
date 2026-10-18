@@ -16,7 +16,7 @@
  * would make the guest UART model depend on the debug shell, and putting it in
  * the physical UART driver would make the lowest-level console driver depend on VMs
  * and shell state. It is equally not interrupt-controller code, which is why
- * it no longer lives in the arch's IRQ handler (arm64: the GIC handler).
+ * it no longer lives in the arch's IRQ handler.
  *
  * TX is not arbitrated: every VM's output reaches the physical UART
  * regardless of focus or shell state. Only RX is routed.
@@ -33,7 +33,6 @@ extern u32 console_focus;
  * arbitrated consumer. Called from the arch's console-UART interrupt branch
  * with IRQs masked on the pCPU the interrupt is routed to (pCPU0) -- all
  * console state below is single-core by that routing, not by locking.
- * (arm64: the PL011 branch of el2_irq_handler; the SPI is routed in gic_init.)
  *
  * Returns having drained as much as the current consumer can accept; a byte
  * left unread stays in the hardware FIFO for a later RX interrupt. */

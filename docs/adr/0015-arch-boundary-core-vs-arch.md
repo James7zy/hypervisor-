@@ -9,6 +9,7 @@
 > `make test`)。通用代码不改一行就能用 x86_64 gcc 编译,并能和 x86 的 stub 钩子
 > 链接成功。证明的程度是**能编译、能链接**,**没有证明能运行**:stub 钩子都是空实现,
 > 也没有 x86 启动入口。
+> **2026-10-18(同日):** 公共头文件收拢到 `include/`,见文末"公共头文件规则"。
 
 这个 hypervisor 的目标是多架构:现在是 ARM64(QEMU `virt`,之后 RK3588),将来
 要能加入 x86 等架构。目录仿照 ACRN 分成 `arch/` 和 `common/`,但到 M10 为止这个
@@ -102,8 +103,8 @@ flowchart TB
 | 位置 | 耦合 | 定性 |
 |---|---|---|
 | `include/percpu.h` | `cur_vcpu` 必须是第一个字段、`PERCPU_SIZE` 固定:arch 汇编直接按偏移读通用结构 | **接受**。这是"arch 汇编读通用结构"的契约本身,由 `_Static_assert` 钉住;新 arch 的入口汇编遵守同一契约即可 |
-| `common/vm/vm_config.h` | `dtb_ipa` 对应 arm64 Linux 启动协议(x0 传 DTB) | **接受**。是启动协议数据,不是架构调用;改成中性名(如 `boot_info_ipa`)可选,等第二个架构需要时再做 |
-| `common/vm/vm_config.h` | `vuart_base`/`vuart_irq` 默认 vuart 是 PL011 | **接受**。设备相关不等于架构相关(Decision 第 6 条) |
+| `include/vm_config.h` | ~~`dtb_ipa` 对应 arm64 Linux 启动协议~~ | **已解决(2026-10-18)**。字段改名为中性的 `bootinfo_ipa`,注释里注明 arm64 Linux 在这里放 DTB(x0) |
+| `include/vm_config.h` | `vuart_base`/`vuart_irq` 默认 vuart 是 PL011 | **接受**。设备相关不等于架构相关(Decision 第 6 条) |
 | `struct vm.off` | 通用字段,只有 arm64 guest PSCI(`vmexit/vpsci.c`)写它;读它的是 arm64 `irq/irq_handler.c`(kick 后停车)和通用的 `dm/hv_shell.c` | **交给 M11**:被每 vCPU 运行状态取代(M11 S2) |
 | `VCPUS_PER_VM`、`secondary_main` | 静态 1:1 绑定,由 pCPU id 推出 (VM, vCPU) | **交给 M11**:调度器引入后映射不再是结构性的 |
 
@@ -112,3 +113,24 @@ flowchart TB
 
 持续验证的办法:M11 新增的每个钩子都要回答"x86/RISC-V 能否实现",记在
 `docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md` 的钩子可移植性表里。另外,`make test-x86-stub` 在链接阶段把关:新钩子如果没有在 `arch/x86/stub/hooks.c` 里补上 stub,就会链接失败。
+
+## 公共头文件规则(2026-10-18)
+
+边界检查只看 arch 与非 arch 之间的写法,看不到**模块之间**靠搜索路径泄漏的依赖:
+原先全局带着 `-Ihypervisor/common/vm -Ihypervisor/dm`,于是 `include/vm.h` 能 include
+`dm/vuart.h`,arch 代码也能直接 include `dm/console.h`。现在的规则:
+
+1. **只有一个公共头文件目录 `hypervisor/include/`。** 被其它模块引用的头文件(`vm_config.h`、
+   `console.h`、`hv_shell.h`、`vuart.h`、`mmio.h` 等)都放在这里,用 `<...>` 引用;
+   `-I` 里不再有 `common/vm` 和 `dm`。模块私有的头文件只能用 `"..."` 从本目录引用,
+   别的目录够不到,**由编译器强制**,不靠 review。
+2. **设备模型的状态归设备模型。** `struct vuart` 及其 FIFO 常量移进 `dm/vuart.c`,
+   `vuart.h` 只剩 API;`struct vm` 不再嵌入它(per-VM 状态用 static 数组 + `vm->id`)。
+3. **架构专有的 ABI 常量放进 arch。** `hypercall.h`(`SMCCC_NOT_SUPPORTED`、`HVC_VENDOR_BASE`、
+   `HC_GUEST_DONE`)只有 arm64 的 `vmexit.c` 使用,移到 `arch/arm64/include/arch/hypercall.h`。
+4. 通用层调用设备模型的组合点保留在 `vm_init()`(`vuart_bus_init()`):它是装配代码,
+   不是反向依赖。
+
+**明确留给 M11、不在这次解耦范围内:** `struct vm.off` 的语义(`CPU_OFF` 杀整个 VM)和
+`VCPUS_PER_VM` / `secondary_main` 的静态 1:1 映射,它们要等每 vCPU 运行状态引入后才能拆;
+`percpu.h` 的 `cur_vcpu` 首字段契约是被接受的设计,不是待解的耦合。

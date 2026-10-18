@@ -22,7 +22,7 @@ set -eu
 : "${SVM_BIN2:?must be set by make test-qemu-shell}"
 : "${HYPERVISOR_ELF:?must be set by make test-qemu-shell}"
 
-# Ctrl-T, the shell toggle (HV_SHELL_ESCAPE_KEY in hypervisor/dm/hv_shell.h).
+# Ctrl-T, the shell toggle (HV_SHELL_ESCAPE_KEY in hypervisor/include/hv_shell.h).
 ESC=$(printf '\024')
 BS=$(printf '\010')
 TIMEOUT=25

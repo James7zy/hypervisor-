@@ -6,10 +6,9 @@
  * Per-CPU foundation (M3.5 Slice 1).
  *
  * A per-core register that holds &percpu[this pCPU] is the single source of
- * truth for "which vCPU is current on this physical core" (arm64: TPIDR_EL2).
- * Each pCPU points it at its own slot; the arch's exception-entry asm reads
- * the current vCPU through it (arm64: mrs tpidr_el2 ; ldr [#offset]) instead
- * of taking the address of a single global VM. This is the controlled offset
+ * truth for "which vCPU is current on this physical core". Each pCPU points
+ * it at its own slot; the arch's exception-entry asm reads the current vCPU
+ * through it (base register + PERCPU_CUR_VCPU) instead of taking the address of a single global VM. This is the controlled offset
  * coupling that supersedes the "first field of first field" trick (see
  * ADR-0003); the _Static_assert below makes a drift a build error.
  *
@@ -57,10 +56,10 @@ extern struct percpu percpu[NR_CPUS];
 
 /*
  * Arch hook: this pCPU's slot in percpu[]. Each arch defines the hooks
- * below (static inline) in <arch/percpu.h> (arm64: TPIDR_EL2).
+ * below (static inline) in <arch/percpu.h>.
  */
 static inline struct percpu *cpu_arch_this_percpu(void);
-/* Arch hook: make `pc` this pCPU's slot (arm64: TPIDR_EL2 = pc). */
+/* Arch hook: make `pc` this pCPU's slot. */
 static inline void cpu_arch_set_this_percpu(struct percpu *pc);
 #include <arch/percpu.h>
 
@@ -76,8 +75,7 @@ static inline struct vcpu *current_vcpu(void)
  *
  * Cross-reference: arch asm may derive this same fact independently, via
  * (this CPU's percpu pointer - &percpu[0]) / PERCPU_SIZE pointer arithmetic
- * instead of reading cpu_id (arm64: the hv_ctx_slot macro in
- * hypervisor/arch/arm64/vmexit/vmexit_asm.S). No _Static_assert ties the two
+ * instead of reading cpu_id. No _Static_assert ties the two
  * together (arithmetic in an asm macro can't be checked at C compile time),
  * so if you change this derivation, check the asm still agrees, and vice
  * versa. */

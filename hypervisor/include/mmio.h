@@ -7,15 +7,14 @@
 /*
  * Architecture-neutral MMIO trap-and-emulate bus (ADR-0006; moved out of
  * arch/ by ADR-0015). Device models register guest-physical ranges; each
- * arch decodes its own trap (arm64: Stage-2 data abort, see
- * arch/arm64/vmexit/data_abort.c; x86: EPT violation) into a struct mmio_access and dispatches it
- * here.
+ * arch decodes its own second-stage translation fault into a struct
+ * mmio_access and dispatches it here.
  */
 
 /*
  * A decoded MMIO access handed to a device handler.
  *
- *   addr     - faulting guest-physical address (arm64: IPA; x86: GPA), byte-exact
+ *   addr     - faulting guest-physical address, byte-exact
  *   offset   - addr - region base; what most device handlers actually use
  *              (filled in by mmio_bus_dispatch)
  *   size     - access width in bytes: 1, 2, 4, or 8

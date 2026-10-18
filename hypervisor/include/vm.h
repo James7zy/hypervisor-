@@ -30,7 +30,7 @@
  * qemu_virt: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
  * intentionally NOT required to equal NR_VMS * VCPUS_PER_VM: single-VM build
  * profiles (HV_GUEST=svm, NR_VMS=1, the pre-slice-3 SVM regression
- * tests) only ever power on pCPUs 0/1 (arm64: via PSCI CPU_ON) -- pCPUs 2/3 are simply never woken
+ * tests) only ever power on pCPUs 0/1 -- pCPUs 2/3 are simply never woken
  * under those profiles, so under-using the physical core budget is safe; the
  * dangerous direction (a VM's slot overrunning NR_CPUS) is what this guards.
  */
@@ -55,16 +55,13 @@ struct vm {
     struct vcpu            vcpu[VCPUS_PER_VM];
     u32                    id;        /* index into vm[]; keys the per-VM
                                          file-static state in arch code
-                                         (arm64: stage2.c, vgic_v3_mmio.c)
                                          and in dm/vuart.c */
     const struct vm_config *config;
     /* M5 slice 3: set by the arch's guest power-management emulation when this
-     * VM powers itself down (arm64: psci_power_down() on CPU_OFF/SYSTEM_OFF/
-     * SYSTEM_RESET). Not read by any asm path (struct vm has no
+     * VM powers itself down. Not read by any asm path (struct vm has no
      * __ASSEMBLER__ offset macros, unlike struct vcpu/struct hv_ctx) —
      * only the arch's cross-CPU kick path polls it, to park this VM's other
-     * pCPU(s) instead of re-entering their guest (arm64: the kick-SGI branch
-     * of el2_irq_handler). */
+     * pCPU(s) instead of re-entering their guest. */
     volatile u32            off;
 };
 
@@ -76,22 +73,21 @@ void vm_run(void);
 /*
  * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.
  */
-/* Per-VM arch setup (arm64: build the VM's Stage-2 table, VMID, VTTBR;
- * x86: EPT and EPTP). */
+/* Per-VM arch setup (second-stage translation tables and their identifier). */
 void vm_arch_init(struct vm *m);
-/* Register the arch's emulated platform devices (arm64: the vGIC
- * distributor/redistributors) on the MMIO bus, once for all VMs. */
+/* Register the arch's emulated platform devices (e.g. the interrupt
+ * controller) on the MMIO bus, once for all VMs. */
 void vm_arch_devices_init(void);
 /* Put a VM's boot vCPU in its architectural reset/boot state for `cfg`
- * (arm64: Linux boot protocol registers, HCR_EL2, virtual CPU interface). */
+ * (boot-protocol registers, virtualization controls, virtual interrupt
+ * interface). */
 void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg);
-/* Load `v` onto this pCPU's virtualization hardware (arm64: VMPIDR_EL2,
- * Stage-2, vGIC list registers). */
+/* Load `v` onto this pCPU's virtualization hardware (CPU identity,
+ * second-stage tables, virtual interrupt state). */
 void vcpu_arch_load(struct vcpu *v);
-/* Raise virtual interrupt `irq` for vCPU `v`; callable from any pCPU (arm64:
- * vGIC SPI injection, kicking v's pCPU if remote). arm64 supports shared
- * peripheral interrupts only (arm64: the vuart's SPI) -- the one caller
- * today. */
+/* Raise virtual interrupt `irq` for vCPU `v`; callable from any pCPU
+ * (kicking v's pCPU if remote). Only shared peripheral interrupts are
+ * supported (the vuart's) -- the one caller today. */
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq);
 /* Enter the guest on this pCPU; returns on an exit that needs the caller. */
 void vcpu_arch_run(struct vcpu *v);

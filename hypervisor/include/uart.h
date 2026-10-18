@@ -14,7 +14,7 @@ void uart_putc(char c);
  * FIFO is empty. Polls the UART's RX-FIFO-empty status; no interrupts. */
 int uart_getc(void);
 
-/* Enable the physical RX + receive-timeout interrupts (IMSC RXIM|RTIM) so EL2
+/* Enable the physical RX + receive-timeout interrupts so the hypervisor
  * takes the console UART interrupt promptly once it owns the UART exclusively
  * (M5 slice 2). Call once, after uart_init(), on the pCPU the physical UART
  * interrupt is routed to. */

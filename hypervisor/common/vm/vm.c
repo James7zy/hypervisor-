@@ -6,7 +6,7 @@
 #include <uart.h>
 #include <vuart.h>
 #include <cpu.h>
-#include "vm_config.h"
+#include <vm_config.h>
 
 struct vm vm[NR_VMS];
 
@@ -54,7 +54,7 @@ void vm_init(void)
 #else
         printk("[hv] Linux guest: VMID=%u entry=0x%lx dtb=0x%lx ram_pa=0x%lx\n",
                (unsigned)cfg->vmid, (unsigned long)cfg->entry,
-               (unsigned long)cfg->dtb_ipa, (unsigned long)cfg->ram_pa);
+               (unsigned long)cfg->bootinfo_ipa, (unsigned long)cfg->ram_pa);
 #endif
     }
 

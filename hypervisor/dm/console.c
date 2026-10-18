@@ -12,7 +12,7 @@
 #include <uart.h>
 #include <vuart.h>
 #include <hv_shell.h>
-#include "console.h"
+#include <console.h>
 
 /* Owned here rather than in vuart.c: focus is arbitration state shared by the
  * shell and the vuarts, not part of any one VM's UART model. */

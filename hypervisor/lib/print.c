@@ -6,8 +6,8 @@
 
 #include <stdarg.h>
 
-/* Serialize printk across pCPUs so concurrent EL2 output is not interleaved
- * character-by-character (M3.5). The only shared sink is the PL011. */
+/* Serialize printk across pCPUs so concurrent hypervisor output is not interleaved
+ * character-by-character (M3.5). The only shared sink is the console UART. */
 static struct spinlock print_lock = SPINLOCK_INIT;
 
 /* Raw emit, no locking -- caller must already hold print_lock. */

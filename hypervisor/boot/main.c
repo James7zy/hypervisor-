@@ -22,10 +22,10 @@ void hypervisor_main(uintptr_t dtb_phys)
 
     cpu_arch_init();
 
-    vm_init();   /* builds vCPU0 Stage-2 / VMID, which vCPU1 shares (M3.5) */
+    vm_init();   /* per-VM arch setup and boot-vCPU reset; vCPU1 shares VM state (M3.5) */
 
-    /* vCPU1 is now brought up on demand by the guest's PSCI CPU_ON (handled in
-     * psci_cpu_on_guest), not by the hypervisor. */
+    /* vCPU1 is now brought up on demand by the guest's own power-on request
+     * (arm64: PSCI CPU_ON, handled in psci_cpu_on_guest), not by the hypervisor. */
     vm_run();
 
     cpu_arch_halt();

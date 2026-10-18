@@ -3,7 +3,7 @@
 #include <vm.h>
 #include <board.h>
 #include <printk.h>
-#include "vm_config.h"   /* struct vm_config (vmid / ram_pa) */
+#include <vm_config.h>   /* struct vm_config (vmid / ram_pa) */
 #include "stage2.h"
 
 /*

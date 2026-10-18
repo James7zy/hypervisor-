@@ -4,7 +4,7 @@
 #include <vm.h>
 #include <percpu.h>
 #include <cpu.h>
-#include <hypercall.h>
+#include <arch/hypercall.h>
 #include "vpsci.h"
 #include "data_abort.h"
 #include <vgic_sgi.h>

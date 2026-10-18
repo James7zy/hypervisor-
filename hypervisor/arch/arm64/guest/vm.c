@@ -30,7 +30,7 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
      *   x1 = x2 = x3 = 0 (reserved, must be zero)
      *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
      */
-    v->regs.x[0] = (u64)cfg->dtb_ipa;
+    v->regs.x[0] = (u64)cfg->bootinfo_ipa;
     v->regs.x[1] = 0;
     v->regs.x[2] = 0;
     v->regs.x[3] = 0;
