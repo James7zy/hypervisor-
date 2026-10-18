@@ -11,12 +11,13 @@ void uart_init(uintptr_t base);
 void uart_putc(char c);
 
 /* Non-blocking RX: return the next received byte (0..255), or -1 if the RX
- * FIFO is empty. Polls PL011 FR.RXFE; no interrupts. */
+ * FIFO is empty. Polls the UART's RX-FIFO-empty status; no interrupts. */
 int uart_getc(void);
 
 /* Enable the physical RX + receive-timeout interrupts (IMSC RXIM|RTIM) so EL2
- * takes BOARD_PL011_IRQ promptly once it owns the UART exclusively (M5 slice
- * 2). Call once, after uart_init(), on the pCPU that owns the physical SPI. */
+ * takes the console UART interrupt promptly once it owns the UART exclusively
+ * (M5 slice 2). Call once, after uart_init(), on the pCPU the physical UART
+ * interrupt is routed to. */
 void uart_rx_irq_enable(void);
 
 #endif /* HV_UART_H */

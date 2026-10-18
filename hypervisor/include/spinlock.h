@@ -13,12 +13,14 @@ static inline void cpu_arch_relax(void);               /* spin-wait hint */
  * Minimal SMP spinlock (M3.5). The repo had zero synchronization primitives
  * through M3.4 (a single core never needed any); this is the first. Kept
  * deliberately small: a ticket lock with the required acquire/release barriers.
- * Protects printk, SGI pending bitmaps, vuart device state, per-VM GICD/GICR
- * MMIO shadows, and per-vCPU SPI publication/consumption. Stage-2 remains
- * build-once-read-only; timer/SGI live registers remain target-PE-owned.
- * Locks do NOT mask interrupts. Current callers run with EL2 IRQs masked
- * (boot or exception entry), and must not unmask while holding a lock.
- * No device/SPI/MMIO lock is held across console output, kicks or guest waits.
+ * Protects printk, vuart device state, and the arch's per-VM interrupt-controller
+ * emulation state (arm64: SGI pending bitmaps, GICD/GICR MMIO shadows, per-vCPU
+ * SPI publication). The second-stage page tables remain build-once-read-only;
+ * per-CPU timer and IPI live registers remain owned by their target CPU.
+ * Locks do NOT mask interrupts. Current callers run with hypervisor interrupts
+ * masked (boot or exception entry), and must not unmask while holding a lock.
+ * No device/interrupt/MMIO lock is held across console output, cross-CPU kicks
+ * or guest waits.
  *
  * Ticket lock: `next` hands out tickets, `owner` is the ticket currently
  * served. A waiter spins until owner == its ticket, giving FIFO fairness.

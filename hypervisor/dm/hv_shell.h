@@ -4,7 +4,7 @@
 #include <types.h>
 
 /*
- * EL2 debug shell on the physical console (ACRN's hypervisor/debug/shell.c
+ * Hypervisor debug shell on the physical console (ACRN's hypervisor/debug/shell.c
  * plays the same role there).
  *
  * Ctrl-T (0x14) on the physical UART is a two-state toggle handled by
@@ -14,9 +14,10 @@
  * true, NO physical RX byte reaches any guest -- every byte is line-edited
  * here and interpreted as a command on Enter.
  *
- * Not multi-core safe by design: the physical PL011 SPI is routed to pCPU0
- * only (gic_v3.c), so every byte and every state change below happens on that
- * one core inside el2_irq_handler. Nothing else in the hypervisor touches
+ * Not multi-core safe by design: the physical console UART interrupt is routed
+ * to pCPU0 only, so every byte and every state change below happens on that
+ * one core inside the arch's IRQ handler (arm64: gic_v3.c routes the SPI;
+ * el2_irq_handler runs the shell). Nothing else in the hypervisor touches
  * this state.
  */
 

@@ -4,7 +4,8 @@
 
 /*
  * Fixed-size MMIO bus. M3.x needs only a handful of regions:
- * GICD, GICR, and one or two virtio-mmio frames. 8 is ample headroom.
+ * the interrupt-controller windows (arm64: GICD, GICR), the vuart, and one
+ * or two virtio-mmio frames. 8 is ample headroom.
  */
 #define MMIO_MAX_REGIONS 8
 

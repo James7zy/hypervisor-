@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: TBD */
 /*
- * EL2 debug shell -- see hv_shell.h for the console-ownership contract.
+ * Hypervisor debug shell -- see hv_shell.h for the console-ownership contract.
  *
- * Runs entirely inside el2_irq_handler on pCPU0 (the only core the physical
- * PL011 SPI is routed to), so none of the state here needs locking. Output
+ * Runs entirely inside the arch's IRQ handler on pCPU0 (the only core the
+ * physical console UART interrupt is routed to; arm64: el2_irq_handler), so none of the state here needs locking. Output
  * goes through printk/console_putc, which serialize against guest TX under
  * the shared console lock (lib/print.c).
  */
@@ -109,13 +109,14 @@ static void cmd_help(const char *arg)
  * takes as its argument -- discovering that mapping is this command's whole
  * reason for existing.
  *
- * Deliberately NOT shown: config->vmid (the Stage-2 VMID). It is 1-based
+ * Deliberately NOT shown: config->vmid (the second-stage VMID). It is 1-based
  * while the id here is 0-based, so printing both side by side invites exactly
  * the "which number do I type?" confusion this command exists to remove.
  *
  * STATE says "halted", not "off", even though it reads vm->off: that flag
- * means "some vCPU of this VM called CPU_OFF/SYSTEM_OFF/SYSTEM_RESET, so all
- * of the VM's pCPUs are parked in wfi" (vpsci.c psci_power_down). "off" would
+ * means "some vCPU of this VM requested power-off, so all of the VM's pCPUs
+ * are parked" (arm64: CPU_OFF/SYSTEM_OFF/SYSTEM_RESET, parked in wfi; see
+ * vpsci.c psci_power_down). "off" would
  * imply an orderly whole-VM shutdown, which is not what the flag guarantees.
  *
  * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),

@@ -38,7 +38,7 @@ void vm_init(void)
         }
 
         /* Every vCPU knows its VM and its VM-local index; vcpu[1+]'s regs are
-         * authored later by the guest-driven PSCI CPU_ON. */
+         * authored later when the guest powers it on (arm64: PSCI CPU_ON). */
         for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
             m->vcpu[i].owner    = m;
             m->vcpu[i].vcpu_idx = i;
@@ -68,7 +68,7 @@ void vm_run(void)
     /*
      * Make this pCPU's percpu slot (arm64: TPIDR_EL2) the single source of
      * truth for "current vCPU on this core" before the first guest entry.
-     * The exception-entry asm reads the guest frame through
+     * The arch's exception-entry asm reads the guest frame through
      * &percpu[id]->cur_vcpu (PERCPU_CUR_VCPU) instead of the address of a
      * single global VM (M3.5 Slice 1; supersedes the ADR-0003 trick). CPU0
      * is always VM0 vCPU0.
@@ -79,21 +79,23 @@ void vm_run(void)
     vcpu_arch_load(&vm[0].vcpu[0]);
 
     /*
-     * CPU0 owns the physical PL011 RX SPI (BOARD_PL011_IRQ), matching the
+     * CPU0 owns the physical console UART's RX interrupt, matching the
      * existing routing. Enable RX + receive-timeout interrupts once, before
-     * the guest-entry loop: from here EL2 drains the physical FIFO itself on
-     * every RX IRQ and feeds bytes to the vuart model (M5 slice 2).
+     * the guest-entry loop: from here the hypervisor drains the physical FIFO
+     * itself on every RX interrupt and feeds bytes to the vuart model
+     * (M5 slice 2).
      */
     uart_rx_irq_enable();
 
     /*
      * Hypervisor-driven boot of every other VM's boot vCPU (M5 slice 3).
      * VM0's vCPU0 is entered directly below (CPU0 IS VM0's boot pCPU); every
-     * other VM's vCPU0 has no guest asking for it via PSCI (there is no guest
-     * running yet), so the hypervisor itself issues the physical CPU_ON here,
-     * once, before dropping into VM0's guest loop. Unlike psci_cpu_on_guest's
-     * guest-driven path (which synchronously waits for `online` because it
-     * must honor the guest's CPU_ON return-value contract), this is
+     * other VM's vCPU0 has no guest asking for it (there is no guest running
+     * yet), so the hypervisor itself powers on the physical CPU here, once,
+     * before dropping into VM0's guest loop. Unlike the arch's guest-driven
+     * path (arm64: psci_cpu_on_guest, which synchronously waits for `online`
+     * because it must honor the guest's PSCI CPU_ON return-value contract),
+     * this is
      * fire-and-forget: nothing here needs to observe the target pCPU up
      * before proceeding, and secondary_main() publishes `online` on its own
      * for debugging/monitoring only.
@@ -109,19 +111,22 @@ void vm_run(void)
     for (;;) {
         /*
          * The guest's interactive console is the emulated vuart (M5 slice 2):
-         * Stage-2 traps its PL011 IPA window and irq_handler.c's PL011 branch
-         * drains the physical FIFO on EL2's behalf, so this loop still has no
-         * device emulation to poll. The EL2 virtio device model was removed in
+         * the second-stage tables trap its console MMIO window and the arch's
+         * console-UART interrupt branch drains the physical FIFO on the
+         * hypervisor's behalf (arm64: Stage-2 / irq_handler.c), so this loop
+         * still has no device emulation to poll. The in-hypervisor virtio device
+         * model was removed in
          * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
          */
         vcpu_arch_run(&vm[0].vcpu[0]);
-        /* Most synchronous exits (MMIO data abort, PSCI, unknown HVC) eret
-         * straight back to the guest from el1_sync_handler and never return to
-         * C. vcpu_arch_run returns here only on the timer IRQ exit; the loop then
-         * re-enters the guest so successive timer PPIs (injected by
+        /* Most synchronous exits (MMIO access, power-management calls, unknown
+         * hypercalls) resume the guest directly from the arch's exit handler and
+         * never return to C (arm64: el1_sync_handler erets). vcpu_arch_run
+         * returns here only on the timer IRQ exit; the loop then re-enters the
+         * guest so successive timer interrupts (arm64: PPIs injected by
          * el2_irq_handler) keep advancing guest time.
          *
-         * The HC_GUEST_DONE HVC (an M2 debug hook a real Linux guest never
+         * The HC_GUEST_DONE hypercall (arm64: HVC; an M2 debug hook a real Linux guest never
          * issues) calls hv_restore(), which restores g_hv_ctx and rets to the
          * most recent vcpu_arch_run call site -- i.e. back into this same loop body,
          * not out of vm_run. With a single UP vCPU and no scheduler this loop

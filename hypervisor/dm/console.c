@@ -2,9 +2,10 @@
 /*
  * Physical console RX arbitration (see console.h).
  *
- * Moved out of the EL2 IRQ handler: deciding which consumer owns a typed
- * character is console policy, not interrupt-controller work. The GIC layer
- * now only recognises the PL011 SPI and calls console_rx_drain().
+ * Moved out of the arch's IRQ handler: deciding which consumer owns a typed
+ * character is console policy, not interrupt-controller work. The interrupt
+ * layer now only recognises the console UART interrupt and calls
+ * console_rx_drain() (arm64: the GIC layer and the PL011 SPI).
  */
 #include <types.h>
 #include <vm.h>
@@ -42,7 +43,7 @@ void console_rx_drain(void)
 
         /*
          * Ctrl-T (HV_SHELL_ESCAPE_KEY) is intercepted here and delivered to
-         * NOBODY: it toggles the EL2 shell (hv_shell.h). This is the right
+         * NOBODY: it toggles the debug shell (hv_shell.h). This is the right
          * layer for it precisely because both consumers below are downstream
          * of that decision.
          */
@@ -55,8 +56,9 @@ void console_rx_drain(void)
             continue;
         }
 
-        /* The vuart buffers the byte and injects a SOFTWARE SPI into that
-         * guest's vGIC if its virtual IMSC is unmasked. */
+        /* The vuart buffers the byte and injects a SOFTWARE interrupt into that
+         * guest if its virtual interrupt mask is clear (arm64: an SPI into the
+         * guest's vGIC when the vuart IMSC is unmasked). */
         if (shell_active) {
             hv_shell_rx((u8)c);
         } else {

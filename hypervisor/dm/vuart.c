@@ -2,16 +2,19 @@
 /*
  * PL011 "vuart": per-VM trap-and-emulate console.
  *
- * EL2 now owns the physical PL011 exclusively (see drivers/uart/pl011.c / print.c);
- * the guest's window at config->vuart_base is punched out of Stage-2
- * (stage2.c) so every guest access traps here instead of touching hardware.
+ * The hypervisor owns the physical console UART exclusively (see drivers/uart/pl011.c / print.c);
+ * the guest's window at config->vuart_base is left unmapped in the
+ * second-stage tables (arm64: punched out of Stage-2 in stage2.c) so every
+ * guest access traps here instead of touching hardware.
  * TX is forwarded to the physical UART via console_putc (serialized with
- * printk under the same lock); RX is filled by EL2's IRQ handler draining the
+ * printk under the same lock); RX is filled by the hypervisor's IRQ handler draining the
  * physical FIFO and calling vuart_rx() (console_rx_drain, dm/console.c).
  *
  * Registered ONCE globally on the M3.1 MMIO bus; the handler resolves the
- * faulting VM per-access via current_vcpu()->owner, matching vgic_v3_mmio.c's
- * idiom. Each VM's vCPU0 is its console interrupt target; vGIC owns delivery.
+ * faulting VM per-access via current_vcpu()->owner, matching the arch's
+ * interrupt-controller emulation (arm64: vgic_v3_mmio.c). Each VM's vCPU0 is
+ * its console interrupt target; the arch's virtual interrupt controller owns
+ * delivery.
  */
 #include <types.h>
 #include <printk.h>

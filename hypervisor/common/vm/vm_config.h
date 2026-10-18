@@ -9,9 +9,10 @@ struct vm_config {
     u32       vmid;
     uintptr_t entry;       /* guest IPA of the kernel entry point        */
     uintptr_t mem_base;    /* guest IPA of RAM base                      */
-    uintptr_t ram_pa;      /* physical address backing mem_base (Stage-2)*/
+    uintptr_t ram_pa;      /* physical address backing mem_base (second stage)*/
     size_t    mem_size;
-    uintptr_t dtb_ipa;     /* guest IPA where the DTB is visible (x0)    */
+    uintptr_t dtb_ipa;     /* guest IPA where the boot info is visible
+                              (arm64 Linux: DTB, passed in x0)           */
     u8        pcpu_base;   /* first pCPU of the VM's static slot; vCPU i
                               runs on pCPU pcpu_base + i */
     uintptr_t vuart_base;  /* guest-physical base of the emulated console
