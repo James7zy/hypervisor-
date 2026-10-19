@@ -94,38 +94,6 @@ together with the original scheduler design rather than restoring its old paths.
 | M15 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
 | Deferred | — | SMMU/DMA isolation and the device-passthrough framework: not needed while all User VM devices are DM-emulated on QEMU; schedule when RK3588 passthrough demands it |
 
-### Milestone renumbering (2026-08-10)
-
-The roadmap was flattened to consecutive integers `M0`–`M15`. The old scheme had
-decimal milestones (`M1.5`, `M2.5`, `M3.0`–`M3.5`) and a gap where `M4` was never
-used, which made ordering ambiguous. **Historical documents were deliberately not
-rewritten** — `docs/superpowers/{specs,plans}/`, `docs/adr/` and `docs/debug/`
-are records of what happened at the time, and their filenames are referenced from
-git history and already-pushed branches. Use this table when reading them:
-
-| Old | New | Milestone |
-|---|---|---|
-| M0 | M0 | Hello EL2 |
-| M1 | M1 | Bare-metal guest |
-| M1.5 | **M2** | PSCI |
-| M2 | **M3** | vGIC software injection |
-| M2.5 | **M4** | Physical timer + GIC + HW-forwarding |
-| M3.0 | **M5** | Linux alive (no interrupts) |
-| M3.1 | **M6** | MMIO trap framework |
-| M3.2 | **M7** | vGICv3 emulation |
-| M3.4 | **M8** | Boot to shell |
-| M3.5 | **M9** | SMP |
-| M5 | **M10** | Multi-VM foundation |
-| M6 | **M11** | vCPU scheduler |
-| M7 | **M12** | Hypercall ABI + VM lifecycle |
-| M8 | **M13** | HSM kernel driver + io_req ring |
-| M9 | **M14** | Device Model + virtio backends |
-| M10 | **M15** | RK3588 port |
-
-There was never an `M3.3`, and the old `M4` (once "RK3588 port") was retired when
-the port moved to the end of the roadmap; neither has a new-scheme equivalent.
-Filenames such as `2026-06-23-m3.5-smp-design.md` keep their old numbering.
-
 ### ACRN-model strategy (decided 2026-07-14, revised 2026-07-19)
 
 The end state is the full ACRN architecture: a privileged Service VM running a

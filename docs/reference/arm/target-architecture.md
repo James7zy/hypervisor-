@@ -179,6 +179,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15、编号对照与 ACRN-model
+- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15 与 ACRN-model
   strategy；路线图不依赖仓库外的本地 skill。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。
