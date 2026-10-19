@@ -1,5 +1,6 @@
-# Selects hypervisor/arch/<arch>/; the top-level Makefile reads CONFIG_ARCH_* and
-# CONFIG_BOARD_* from .config to pick the arch directory and board.
+# Documentation only (Kconfig is not parsed). The arch is chosen by the ARCH
+# variable; make <board>_defconfig writes CONFIG_ARCH_*/CONFIG_BOARD_* and the
+# Makefile checks they agree with ARCH.
 choice
     prompt "Target architecture"
     default ARCH_ARM64

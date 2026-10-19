@@ -27,7 +27,7 @@
    `BOARD_*` 常量和 `board.h`。唯一例外是静态 VM 配置表 `common/vm/vm_configs.c`,
    它本身就是板级配置(ADR-0008);声明它的 `vm_config.h` 不引入 `board.h`。
 2. 访问架构层只有两种途径:`<对象>_arch_<动词>` 钩子(`cpu_`、`vm_`、`vcpu_`),
-   以及 `<arch/xxx.h>` 命名空间头文件(由构建系统按 `ARCH` 解析;`ARCH` 和板子由 `.config` 里的 `CONFIG_ARCH_*`/`CONFIG_BOARD_*` 决定,命令行 `ARCH=` 与之矛盾会报错)。
+   以及 `<arch/xxx.h>` 命名空间头文件(由构建系统按 `ARCH` 解析;`ARCH` 是环境/命令行变量,和 Linux 一样;板子由 `make <board>_defconfig` 写出的 `.config` 决定,其 `CONFIG_ARCH_*` 必须与 `ARCH` 一致,否则报错)。
 3. 钩子原型由**通用头文件**声明,每个 arch 都必须实现,**不提供 weak 默认实现**,
    缺实现在链接时就报错。钩子**按需增长**:由真实调用点引入,不预先设计完整 HAL。
 4. 通用结构体嵌入 arch 结构体(`struct vcpu` ⊃ `struct arch_regs` + `struct

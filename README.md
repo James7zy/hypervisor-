@@ -61,7 +61,8 @@ for module, object and sequence diagrams. The
 ## Quickstart
 
 ```sh
-make defconfig          # copy configs/qemu_virt_defconfig → .config
+make qemu_virt_defconfig   # copy arch/arm64/configs/qemu_virt_defconfig → .config
+                        # (toolchain on PATH; export CROSS_COMPILE=... if its prefix differs)
 make                    # build build/hypervisor.elf + build/hypervisor.bin
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 ```

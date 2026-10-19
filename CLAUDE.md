@@ -27,7 +27,7 @@ core chain is proven on QEMU.
 ## Build Commands
 
 ```sh
-make defconfig          # copy configs/qemu_virt_defconfig → .config
+make qemu_virt_defconfig   # copy arch/arm64/configs/qemu_virt_defconfig → .config
 make                    # build build/hypervisor.elf + build/hypervisor.bin
 make test               # arch boundary + host/target offsets + five QEMU scenarios
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
@@ -55,13 +55,22 @@ Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-
 - **The Makefile does not track header dependencies** — after editing any header
   (e.g. `board.h`), run `make clean` or stale `.o`s relink with old values.
 
-The target **architecture and board come from `.config`** (`CONFIG_ARCH_<arch>=y`,
-`CONFIG_BOARD_<board>=y`), not from make variables: `make defconfig` writes the arm64
-`qemu_virt` config, `make defconfig DEFCONFIG=x86_stub` the x86 link-check one, and
-`make CONFIG=configs/x86_stub_defconfig BUILD_DIR=build/x all` builds against a
-checked-in defconfig without touching `.config`. A command-line `ARCH=`/`BOARD=` that
-contradicts the config is an error. Override the toolchain with
-`CROSS_COMPILE=aarch64-none-linux-gnu-`.
+Board selection works like Linux. `ARCH` (default `arm64`; `x86` is the link-check
+stub) and `CROSS_COMPILE` are plain environment/make variables; the board is chosen by
+`make <board>_defconfig`, which copies `hypervisor/arch/$(ARCH)/configs/<board>_defconfig`
+to `.config`:
+
+```sh
+export ARCH=arm64                               # default; ARCH=x86 for the stub
+export CROSS_COMPILE=aarch64-none-linux-gnu-    # compiler must be on PATH
+make qemu_virt_defconfig                        # ARCH=x86 make stub_defconfig
+make
+```
+
+The board comes from `CONFIG_BOARD_*` in `.config`, which must have been generated for
+the same `ARCH` (`CONFIG_ARCH_*`); a mismatch is an error that tells you to re-run
+`make <board>_defconfig`. The Makefile has no built-in toolchain path: put the
+cross-compiler on `PATH` yourself. `make help` lists the boards of the current `ARCH`.
 
 **Toolchain required:**
 - `aarch64-none-linux-gnu-gcc` ≥ 10
@@ -233,7 +242,7 @@ migration plan: `docs/superpowers/specs/2026-09-29-arch-boundary-design.md`.
 - **No magic numbers in `drivers/uart/pl011.c`**: driver receives base from `uart_init`. Which drivers a board links is listed in its `board.mk` (`board-drivers`).
 - **printk supports only**: `%s %c %d %u %x %lx %%`. No width, precision, floats, or `%p`.
 - **Empty directories use `.gitkeep`** to preserve the ACRN-style skeleton shape for future milestones.
-- **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
+- **`.config` is required**: `make` fails with an error if `.config` is absent — always run `make <board>_defconfig` first. The Makefile converts `CONFIG_FOO=y` lines to `-DCONFIG_FOO=1`.
 - **dtc does not concatenate adjacent string literals** (unlike C), so `guest/qemu_virt.dts` takes its whole `bootargs` value as one `-DHV_BOOTARGS='"..."'` string from the Makefile. The DTS is preprocessed with `$(CPP)` before `dtc`; `make guest` emits one DTB per VM, differing only in the `hv.vm=` token.
 - **The guest initramfs `/init` lives at `guest/initramfs-init.sh`** (the `.cpio.gz` itself is outside the repo). It reads `hv.vm=` into `PS1` so the two VMs show `vm0:~ #` / `vm1:~ #` — without it both guests print an identical prompt on the shared console and `vm_console <n>` gives no visible feedback. The busybox it targets has only 11 applets and **no `hostname`**, hence `PS1` rather than a real hostname.
 

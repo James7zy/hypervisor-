@@ -1,16 +1,34 @@
 # SPDX-License-Identifier: TBD
 
-# The target architecture and board come from the config file, not from make
-# variables: CONFIG_ARCH_<ARCH>=y and CONFIG_BOARD_<BOARD>=y name the
-# directories hypervisor/arch/<arch>/ and hypervisor/arch/<arch>/board/<board>/.
-# CONFIG defaults to .config (written by `make defconfig`); a sub-make may point
-# it at a checked-in defconfig instead (see test-x86-stub).
+# Board selection works like Linux:
+#
+#   export ARCH=arm64                              # default; ARCH=x86 = link-check stub
+#   export CROSS_COMPILE=aarch64-none-linux-gnu-   # that compiler must be on PATH
+#   make qemu_virt_defconfig                       # copy arch/$(ARCH)/configs/ -> .config
+#   make
+#
+# ARCH picks hypervisor/arch/<arch>/. The board comes from CONFIG_BOARD_* in the
+# config file, which must have been generated for the same ARCH (CONFIG_ARCH_*).
+# CONFIG defaults to .config; a sub-make may point it at a checked-in defconfig
+# instead (see test-x86-stub).
+ARCH ?= arm64
+ifeq ($(wildcard hypervisor/arch/$(ARCH)/Makefile),)
+$(error unsupported ARCH='$(ARCH)' (available: $(notdir $(wildcard hypervisor/arch/*))))
+endif
+
+CROSS_COMPILE_arm64 := aarch64-none-linux-gnu-
+CROSS_COMPILE_x86   := x86_64-linux-gnu-
+CROSS_COMPILE ?= $(CROSS_COMPILE_$(ARCH))
+
 CONFIG ?= .config
 
-# Goals that run without a config (ARCH/BOARD then default for `help`/`clean`).
-ifeq ($(filter defconfig clean help menuconfig,$(MAKECMDGOALS)),)
+# Goals that only write or remove the config, or print help, need neither a
+# config nor a compiler.
+ifeq ($(filter %_defconfig defconfig clean help menuconfig,$(MAKECMDGOALS)),)
+need-config := y
+
 ifeq ($(wildcard $(CONFIG)),)
-$(error $(CONFIG) not found. Run 'make defconfig' first.)
+$(error $(CONFIG) not found. Run 'make <board>_defconfig' first (see 'make help'))
 endif
 cfg-arch  := $(shell sed -n 's/^CONFIG_ARCH_\([A-Z0-9_]*\)=y$$/\1/p' $(CONFIG) | tr 'A-Z' 'a-z')
 cfg-board := $(shell sed -n 's/^CONFIG_BOARD_\([A-Z0-9_]*\)=y$$/\1/p' $(CONFIG) | tr 'A-Z' 'a-z')
@@ -20,35 +38,21 @@ endif
 ifneq ($(words $(cfg-board)),1)
 $(error $(CONFIG) must set exactly one CONFIG_BOARD_<board>=y (found: $(cfg-board)))
 endif
-# A command-line ARCH=/BOARD= may only restate the config, never contradict it:
-# a build whose flags and CONFIG_* macros disagree is worse than an error.
-ifeq ($(origin ARCH),command line)
-ifneq ($(ARCH),$(cfg-arch))
-$(error ARCH=$(ARCH) contradicts $(CONFIG), which selects arch '$(cfg-arch)'. Pick the arch with CONFIG=<defconfig>)
+ifneq ($(cfg-arch),$(ARCH))
+$(error $(CONFIG) was generated for arch '$(cfg-arch)' but ARCH=$(ARCH). Run: ARCH=$(ARCH) make <board>_defconfig)
 endif
-endif
+# There is no BOARD variable (as in Linux); restating the config's is harmless.
 ifeq ($(origin BOARD),command line)
 ifneq ($(BOARD),$(cfg-board))
-$(error BOARD=$(BOARD) contradicts $(CONFIG), which selects board '$(cfg-board)'. Pick the board with CONFIG=<defconfig>)
+$(error BOARD=$(BOARD) contradicts $(CONFIG), which selects board '$(cfg-board)'. Run: make <board>_defconfig)
 endif
 endif
-ARCH  := $(cfg-arch)
 BOARD := $(cfg-board)
 CONFIG_DEFS := $(shell \
     sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' $(CONFIG))
-else
-ARCH  ?= arm64
-BOARD ?= qemu_virt
-endif
-
-ifeq ($(ARCH),x86)
-# Link-check stub only (ADR-0015): no runnable x86 board exists yet.
-CROSS_COMPILE ?= x86_64-linux-gnu-
-else
-CROSS_COMPILE ?= aarch64-none-linux-gnu-
 
 ifeq ($(shell which $(CROSS_COMPILE)gcc 2>/dev/null),)
-    export PATH := /home/corsair/Downloads/toolchain/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$(PATH)
+$(error '$(CROSS_COMPILE)gcc' not found in PATH. Put the toolchain on PATH and export CROSS_COMPILE (e.g. CROSS_COMPILE=$(CROSS_COMPILE_$(ARCH))))
 endif
 endif
 
@@ -83,7 +87,9 @@ endif
 ASFLAGS := -g
 
 include hypervisor/Makefile
+ifneq ($(need-config),)
 include hypervisor/arch/$(ARCH)/Makefile
+endif
 
 INCLUDES := $(hv-includes) $(arch-includes)
 
@@ -250,9 +256,13 @@ check-arch-boundary:
 # link against arch/x86's stub hooks. No weak defaults, so a hook the stub
 # lacks fails the link. Build/link only -- the result is never run.
 X86_BUILD_DIR := build/test-x86
+# Not the exported CROSS_COMPILE: that one is for the main ARCH.
+X86_CROSS_COMPILE ?= $(CROSS_COMPILE_x86)
 
 test-x86-stub:
-	$(MAKE) CONFIG=configs/x86_stub_defconfig BUILD_DIR=$(X86_BUILD_DIR) all
+	$(MAKE) ARCH=x86 CROSS_COMPILE=$(X86_CROSS_COMPILE) \
+	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
+	        BUILD_DIR=$(X86_BUILD_DIR) all
 
 test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 
@@ -262,18 +272,27 @@ run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 clean:
 	rm -rf $(BUILD_DIR)
 
-# `make defconfig DEFCONFIG=x86_stub` selects configs/x86_stub_defconfig.
-DEFCONFIG ?= qemu_virt
+# `make <board>_defconfig` copies hypervisor/arch/$(ARCH)/configs/<board>_defconfig
+# to .config; plain `make defconfig` uses the arch's default board.
+DEFCONFIG_arm64 := qemu_virt
+DEFCONFIG_x86   := stub
+DEFCONFIG       ?= $(DEFCONFIG_$(ARCH))
+ARCH_CONFIGS    := hypervisor/arch/$(ARCH)/configs
 
-defconfig:
-	cp configs/$(DEFCONFIG)_defconfig .config
-	@echo "Wrote .config from configs/$(DEFCONFIG)_defconfig"
+%_defconfig:
+	@test -f $(ARCH_CONFIGS)/$@ || { \
+	    echo "ERROR: no $@ for ARCH=$(ARCH). Available:"; \
+	    ls $(ARCH_CONFIGS) | sed 's/^/  /'; exit 1; }
+	cp $(ARCH_CONFIGS)/$@ .config
+	@echo "Wrote .config from $(ARCH_CONFIGS)/$@"
+
+defconfig: $(DEFCONFIG)_defconfig
 
 menuconfig:
 	@echo "menuconfig reserved for a later milestone; edit .config by hand."
 	@false
 
 help:
-	@echo "Targets: all run clean defconfig"
-	@echo "Config:  CONFIG=$(CONFIG) (ARCH/BOARD come from it: ARCH=$(ARCH) BOARD=$(BOARD))"
-	@echo "Vars:    CROSS_COMPILE=$(CROSS_COMPILE) DEFCONFIG=$(DEFCONFIG)"
+	@echo "Targets: all run clean test <board>_defconfig defconfig"
+	@echo "Select:  export ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE); make <board>_defconfig; make"
+	@echo "Boards for ARCH=$(ARCH): $$(ls $(ARCH_CONFIGS) 2>/dev/null | sed 's/_defconfig$$//' | tr '\n' ' ')"
