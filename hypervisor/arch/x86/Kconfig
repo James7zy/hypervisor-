@@ -1,0 +1,7 @@
+choice
+    prompt "Target board"
+    default BOARD_STUB
+config BOARD_STUB
+    bool "Link-check stub (never run)"
+    depends on ARCH_X86
+endchoice

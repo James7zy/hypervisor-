@@ -15,7 +15,9 @@
 ## 1. 模块关系
 
 代码分成**架构中立层**和 **`arch/`**。中立层只通过 `*_arch_*` 钩子和 `<arch/xxx.h>` 访问
-架构（`make test` 里的 `check-arch-boundary.sh` 强制，零容忍）。公共头文件只有一个目录
+架构（`make test` 里的 `check-arch-boundary.sh` 强制，零容忍）。架构由 `.config` 的 `CONFIG_ARCH_*` 在编译期选定（Makefile 据此
+`include hypervisor/arch/<arch>/Makefile`，并把该架构的 `include/` 放进 `-I`，
+`<arch/vm.h>` 才解析到对应版本）。公共头文件只有一个目录
 `hypervisor/include/`，`-I` 里没有 `dm/` 和 `common/vm/`，所以模块私有头文件别处够不到。
 
 ```mermaid

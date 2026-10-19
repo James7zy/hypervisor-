@@ -1,12 +1,50 @@
 # SPDX-License-Identifier: TBD
 
-ARCH          ?= arm64
+# The target architecture and board come from the config file, not from make
+# variables: CONFIG_ARCH_<ARCH>=y and CONFIG_BOARD_<BOARD>=y name the
+# directories hypervisor/arch/<arch>/ and hypervisor/arch/<arch>/board/<board>/.
+# CONFIG defaults to .config (written by `make defconfig`); a sub-make may point
+# it at a checked-in defconfig instead (see test-x86-stub).
+CONFIG ?= .config
+
+# Goals that run without a config (ARCH/BOARD then default for `help`/`clean`).
+ifeq ($(filter defconfig clean help menuconfig,$(MAKECMDGOALS)),)
+ifeq ($(wildcard $(CONFIG)),)
+$(error $(CONFIG) not found. Run 'make defconfig' first.)
+endif
+cfg-arch  := $(shell sed -n 's/^CONFIG_ARCH_\([A-Z0-9_]*\)=y$$/\1/p' $(CONFIG) | tr 'A-Z' 'a-z')
+cfg-board := $(shell sed -n 's/^CONFIG_BOARD_\([A-Z0-9_]*\)=y$$/\1/p' $(CONFIG) | tr 'A-Z' 'a-z')
+ifneq ($(words $(cfg-arch)),1)
+$(error $(CONFIG) must set exactly one CONFIG_ARCH_<arch>=y (found: $(cfg-arch)))
+endif
+ifneq ($(words $(cfg-board)),1)
+$(error $(CONFIG) must set exactly one CONFIG_BOARD_<board>=y (found: $(cfg-board)))
+endif
+# A command-line ARCH=/BOARD= may only restate the config, never contradict it:
+# a build whose flags and CONFIG_* macros disagree is worse than an error.
+ifeq ($(origin ARCH),command line)
+ifneq ($(ARCH),$(cfg-arch))
+$(error ARCH=$(ARCH) contradicts $(CONFIG), which selects arch '$(cfg-arch)'. Pick the arch with CONFIG=<defconfig>)
+endif
+endif
+ifeq ($(origin BOARD),command line)
+ifneq ($(BOARD),$(cfg-board))
+$(error BOARD=$(BOARD) contradicts $(CONFIG), which selects board '$(cfg-board)'. Pick the board with CONFIG=<defconfig>)
+endif
+endif
+ARCH  := $(cfg-arch)
+BOARD := $(cfg-board)
+CONFIG_DEFS := $(shell \
+    sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' $(CONFIG))
+else
+ARCH  ?= arm64
+BOARD ?= qemu_virt
+endif
+
 ifeq ($(ARCH),x86)
 # Link-check stub only (ADR-0015): no runnable x86 board exists yet.
-BOARD         ?= stub
 CROSS_COMPILE ?= x86_64-linux-gnu-
 else
-BOARD         ?= qemu_virt
 CROSS_COMPILE ?= aarch64-none-linux-gnu-
 
 ifeq ($(shell which $(CROSS_COMPILE)gcc 2>/dev/null),)
@@ -48,15 +86,6 @@ include hypervisor/Makefile
 include hypervisor/arch/$(ARCH)/Makefile
 
 INCLUDES := $(hv-includes) $(arch-includes)
-
-# .config required for all targets except defconfig/clean/help/menuconfig
-ifeq ($(filter defconfig clean help menuconfig,$(MAKECMDGOALS)),)
-ifeq ($(wildcard .config),)
-$(error .config not found. Run 'make defconfig' first.)
-endif
-CONFIG_DEFS := $(shell \
-    sed -n 's/^CONFIG_\([A-Za-z0-9_]*\)=y$$/-DCONFIG_\1=1/p' .config)
-endif
 
 CFLAGS  += $(arch-cflags) $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
 ASFLAGS += $(CONFIG_DEFS) $(board-cflags) $(INCLUDES)
@@ -223,8 +252,7 @@ check-arch-boundary:
 X86_BUILD_DIR := build/test-x86
 
 test-x86-stub:
-	$(MAKE) ARCH=x86 BOARD=stub CROSS_COMPILE=x86_64-linux-gnu- \
-	        BUILD_DIR=$(X86_BUILD_DIR) all
+	$(MAKE) CONFIG=configs/x86_stub_defconfig BUILD_DIR=$(X86_BUILD_DIR) all
 
 test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
 
@@ -234,9 +262,12 @@ run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 clean:
 	rm -rf $(BUILD_DIR)
 
+# `make defconfig DEFCONFIG=x86_stub` selects configs/x86_stub_defconfig.
+DEFCONFIG ?= qemu_virt
+
 defconfig:
-	cp configs/$(BOARD)_defconfig .config
-	@echo "Wrote .config from configs/$(BOARD)_defconfig"
+	cp configs/$(DEFCONFIG)_defconfig .config
+	@echo "Wrote .config from configs/$(DEFCONFIG)_defconfig"
 
 menuconfig:
 	@echo "menuconfig reserved for a later milestone; edit .config by hand."
@@ -244,4 +275,5 @@ menuconfig:
 
 help:
 	@echo "Targets: all run clean defconfig"
-	@echo "Vars:    ARCH=$(ARCH) BOARD=$(BOARD) CROSS_COMPILE=$(CROSS_COMPILE)"
+	@echo "Config:  CONFIG=$(CONFIG) (ARCH/BOARD come from it: ARCH=$(ARCH) BOARD=$(BOARD))"
+	@echo "Vars:    CROSS_COMPILE=$(CROSS_COMPILE) DEFCONFIG=$(DEFCONFIG)"

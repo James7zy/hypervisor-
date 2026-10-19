@@ -55,7 +55,13 @@ Boot constraints learned from the first real run (see `docs/debug/m3-boot-debug-
 - **The Makefile does not track header dependencies** — after editing any header
   (e.g. `board.h`), run `make clean` or stale `.o`s relink with old values.
 
-Override defaults with: `ARCH=arm64 BOARD=qemu_virt CROSS_COMPILE=aarch64-none-linux-gnu-`
+The target **architecture and board come from `.config`** (`CONFIG_ARCH_<arch>=y`,
+`CONFIG_BOARD_<board>=y`), not from make variables: `make defconfig` writes the arm64
+`qemu_virt` config, `make defconfig DEFCONFIG=x86_stub` the x86 link-check one, and
+`make CONFIG=configs/x86_stub_defconfig BUILD_DIR=build/x all` builds against a
+checked-in defconfig without touching `.config`. A command-line `ARCH=`/`BOARD=` that
+contradicts the config is an error. Override the toolchain with
+`CROSS_COMPILE=aarch64-none-linux-gnu-`.
 
 **Toolchain required:**
 - `aarch64-none-linux-gnu-gcc` ≥ 10
