@@ -117,6 +117,121 @@ Current modules, objects and boot/console sequences:
 [current-architecture.md](docs/reference/arm/current-architecture.md).
 [target-architecture.md](docs/reference/arm/target-architecture.md) is the future ACRN model, not implemented.
 
+### Target architecture (ACRN model, M12–M15 — **not implemented**)
+
+Where the roadmap ends: a Service VM running a userspace Device Model for the User VMs, over
+this hypervisor. Today there is no scheduler, Service VM, HSM or userspace DM. The diagrams
+are the same two as in [target-architecture.md](docs/reference/arm/target-architecture.md)
+(which also has the reading notes); if you change one, change both.
+
+**System view** — VMs side by side, privilege and responsibility layered top to bottom:
+
+```mermaid
+flowchart TD
+    subgraph APP["应用 / Workloads"]
+        direction LR
+        APP_S["Linux Apps<br/>管理 / 云 / UI"]
+        APP_U["Android / Linux Apps<br/>IVI / HMI / 通用"]
+        APP_R["RT Apps<br/>控制任务"]
+    end
+
+    subgraph SVM["Service VM（Linux / SOS）"]
+        direction TB
+        DM["Device Model（用户态 dm）<br/>创建 / 启动 VM<br/>模拟虚拟设备<br/>处理 VM exit / MMIO<br/>提供 virtio 后端"]
+        HSM["HSM 内核驱动<br/>ioctl + io_req 共享环"]
+        TOOLS["管理工具<br/>acrnctl / config / launch"]
+        TOOLS --> DM
+        DM <--> HSM
+    end
+
+    subgraph UVM["User VM（Linux / Android）"]
+        direction TB
+        UOS["Guest OS<br/>virtio 前端<br/>虚拟设备 / guest 驱动"]
+    end
+
+    subgraph RVM["RTOS VM"]
+        direction TB
+        RTOS["RTOS Kernel<br/>RT 任务"]
+    end
+
+    subgraph HV["Hypervisor（EL2，本仓库）"]
+        direction TB
+        VMM["VM 管理<br/>创建 / 销毁"]
+        SCHED["vCPU 调度器<br/>vCPU 分发（M11）"]
+        MEM["内存管理<br/>Stage-2 隔离"]
+        EXIT["VM exit 处理<br/>转发 exit 给 DM"]
+        IRQ["中断管理<br/>GIC IRQ 路由"]
+        IOV["I/O 虚拟化<br/>MMIO / 设备直通"]
+    end
+
+    subgraph HW["ARM 硬件 / SoC"]
+        direction LR
+        CPU["ARM CPU Cores<br/>EL1 Guest / EL2 HV"]
+        RAM["DDR / LPDDR"]
+        DEV["物理设备<br/>UART / GPU / NPU / PCIe / 存储"]
+    end
+
+    APP_S --> SVM
+    APP_U --> UVM
+    APP_R --> RVM
+
+    DM <-->|"virtio 前后端"| UOS
+    SVM -->|"Hypercall / ioctl<br/>VM 生命周期控制"| HV
+    UVM -->|"VM exit / trap<br/>MMIO / IRQ"| HV
+    RVM -->|"VM exit / trap"| HV
+    HV --> HW
+
+    classDef svm fill:#e6f0ff,stroke:#06c,color:#000;
+    classDef uvm fill:#ffe6e6,stroke:#c33,color:#000;
+    classDef rvm fill:#e8f5e9,stroke:#2e7d32,color:#000;
+    classDef hv fill:#fff4e5,stroke:#e67700,color:#000;
+    class DM,HSM,TOOLS svm;
+    class UOS uvm;
+    class RTOS rvm;
+    class VMM,SCHED,MEM,EXIT,IRQ,IOV hv;
+```
+
+**Privilege levels** — ARM's exception levels; virtualization lives at EL2:
+
+```mermaid
+flowchart TD
+    subgraph GUEST["Guest VM / Service VM / RTOS VM"]
+        direction TB
+        EL0["EL0：用户态应用"]
+        EL1["EL1：Guest OS 内核<br/>Linux / Android / RTOS"]
+        EL0 --> EL1
+    end
+
+    subgraph HYPER["Hypervisor（本仓库）"]
+        EL2["EL2：Hypervisor Mode<br/>vCPU 调度<br/>Stage-2 翻译<br/>trap and emulate<br/>中断虚拟化<br/>设备直通控制"]
+    end
+
+    subgraph SECURE["可选安全世界"]
+        EL3["EL3：Secure Monitor<br/>Trusted Firmware-A / PSCI"]
+    end
+
+    subgraph SOC["ARM SoC 硬件"]
+        direction TB
+        FEAT["ARM 虚拟化扩展 / EL2<br/>Stage-2 地址翻译<br/>GICv3 / GICv4<br/>SMMU / IOMMU（DMA 隔离）<br/>PSCI / 电源管理"]
+        PHYS["ARM Cores | DDR | GICv3/v4 | SMMU | PCIe | MMIO 设备 | DMA"]
+        FEAT --- PHYS
+    end
+
+    EL1 -->|"HVC / trap"| EL2
+    EL2 -->|"eret"| EL1
+    EL2 -->|"SMC"| EL3
+    EL2 --> SOC
+
+    classDef guest fill:#ffe6e6,stroke:#c33,color:#000;
+    classDef hyper fill:#fff4e5,stroke:#e67700,color:#000;
+    classDef secure fill:#ede7f6,stroke:#5e35b1,color:#000;
+    classDef soc fill:#eceff1,stroke:#546e7a,color:#000;
+    class EL0,EL1 guest;
+    class EL2 hyper;
+    class EL3 secure;
+    class FEAT,PHYS soc;
+```
+
 ### Arch boundary: core vs arch/ (2026-09-29)
 
 Code **outside `hypervisor/arch/`** reaches the architecture only through `<object>_arch_<verb>`
