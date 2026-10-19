@@ -28,7 +28,7 @@ Architecture docs must use Mermaid: sequence, class and module-relationship diag
 - 改动保持在任务范围内，但必须补齐被它影响的调用方、测试和配置；不添加无人要求的抽象、包装、转换、选项或“以后可能用到”的代码。
 - 保留现有架构与数据表示；规模相当的方案优先选择边界条件正确的那个。注释解释代码本身不能表达的原因，保持简短。
 - 移动、合并或精简代码时保留原有校验与错误处理；信任边界、安全、可访问性、防止数据丢失的处理、硬件所需的校准/屏障/状态管理和用户明确要求均不能删减。
-- 新增非平凡逻辑（分支、循环、解析、安全或状态更新等）应留下一个能验证行为的小测试或自检；它不能替代下文规定的构建、回归和 QEMU 验收。
+- 新增非平凡逻辑（分支、循环、解析、安全或状态更新等）应留下一个能验证行为的小测试或自检；它不能替代构建、回归和 QEMU 验收。
 - 有已知限制的临时简化，用 `ponytail:` 注释写明适用上限和重新设计的触发条件，避免“以后再说”没有边界。
 - 回复结尾用一两行说明未做或未验证的部分，以及用户需要知道的风险；未实际运行的检查不能写成已通过。
 
@@ -54,48 +54,6 @@ For M11 also read the
 clearly defined units; high cohesion, low coupling. Each milestone gets a spec in
 `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/`.
 
-## Build
-
-```sh
-export PATH=<toolchain>/bin:$PATH                         # the Makefile has no toolchain path
-export ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-   # ARCH defaults to arm64; x86 = link-check stub
-make qemu_virt_defconfig                                  # board → .config (`make help` lists boards)
-make                                                      # build/hypervisor.elf + .bin
-make test                                                 # see Verification
-LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run   # Ctrl-A x exits
-```
-
-`scripts/build.sh -h` wraps this flow. `.config` is required and must match `ARCH`.
-Needs `aarch64-none-linux-gnu` gcc/binutils ≥ 10, `qemu-system-aarch64` ≥ 6.0, `dtc`, `perl`.
-GDB: `QEMU_EXTRA_ARGS="-s -S" make run`, then `target remote :1234`.
-
-Gotchas (history: `docs/debug/m3-boot-debug-walkthrough.md`):
-- **Run QEMU only through `make run` / `make test`**: `-smp` comes from the board's
-  `board-nr-cpus`, exported as `HV_NR_CPUS`. **`-m 4G` is required**: VM0 RAM is at PA
-  `0x80000000`, VM1 at `0xC0000000` (1 GB-aligned for Stage-2 L1 blocks, ADR-0004).
-- **The kernel `Image` must be ≲ 31 MB** (Image at PA `0x80080000`, DTB at `0x82000000`); a full
-  arm64 `defconfig` is ~37 MB. Use `guest/linux-6.12-qemu_virt.config` (a **full** `.config`, not a
-  savedefconfig): `cp` it to the kernel tree, `make olddefconfig`, `make Image`.
-- **No header dependency tracking**: after editing a header, `make clean`.
-
-## Verification (no CI; local tests)
-
-1. `make test` runs, in order: arch-boundary check, x86 stub link check, host/target struct
-   offsets, then QEMU scenarios `basic` (HVC/PSCI), `vtimer`, `dual`, EL2 `shell`, `vspi`.
-2. `make` must build with **zero warnings** (`-Werror`).
-3. Linux SMP: boot with `LINUX_IMAGE`; check `/sys/devices/system/cpu/online` is `0-1` and both
-   CPU columns of `/proc/interrupts` show timer and IPI counts, in both VMs.
-
-Test rules:
-- Bare-metal guests live in `tests/svm/`. A new scenario = `cases/<case>.c` + `expect/<scenario>.txt`
-  + one Makefile target; **do not add another `tests/svmN/` directory**.
-- The shell and vSPI tests write QEMU serial stdin; `BOOT_WAIT` is deliberately generous because
-  bytes sent before EL2 enables PL011 RX are lost.
-
-**"Done" means observed running.** A milestone is done only after its DoD was run in QEMU and the
-result seen. Build-clean + `readelf` alone is **static-only**; say so (M3 was once marked done that
-way and its first real run found three bugs: `docs/debug/m3-boot-verification.md`).
-
 ## Where knowledge lives
 
 Would it still hold on another machine, for another person?
@@ -103,13 +61,6 @@ Would it still hold on another machine, for another person?
 - **No** (local paths, personal workflow) → private memory under `~/.claude/`. No in-repo `memory/`.
 - **New docs are written in Chinese** (identifiers and technical terms stay English); never keep the
   same content in two languages. Rules: [docs/README.md](docs/README.md).
-
-## Known defects (not fixed; M11 rewrites this state)
-
-- **`CPU_OFF` kills the whole VM** (`arch/arm64/vmexit/vpsci.c`): it shares `psci_power_down()`
-  with `SYSTEM_OFF`, sets per-VM `vm->off` and parks every pCPU. PSCI says it must stop only the
-  caller. Shown as `halted` in the shell's `vm_list`.
-- **`vm_console <n>` accepts a halted VM** and silently does nothing.
 
 ## Architecture
 
@@ -231,56 +182,6 @@ flowchart TD
     class EL3 secure;
     class FEAT,PHYS soc;
 ```
-
-### Arch boundary: core vs arch/ (2026-09-29)
-
-Code **outside `hypervisor/arch/`** reaches the architecture only through `<object>_arch_<verb>`
-hooks (`cpu_`, `vm_`, `vcpu_`) and `<arch/xxx.h>` headers. Forbidden outside `arch/`: inline asm and
-`.S`, system register names (`*_ELn`, `ICH_*`, `ICC_*`), PSCI, direct `vgic_*`/`stage2_*`/`gic_*`/
-`vtimer_*` calls, `BOARD_*`/`board.h` (only `common/vm/vm_configs.c` may read `BOARD_*`), and include
-paths into a concrete `arch/<name>/`. Decision: [ADR-0015](docs/adr/0015-arch-boundary-core-vs-arch.md).
-
-- **Enforced by `make test`** (`scripts/check-arch-boundary.sh`), zero tolerance, including headers
-  reached transitively. A hit means the code belongs in `arch/` behind a hook.
-- **Hooks**: prototypes in the generic headers (`include/{cpu,percpu,spinlock,vm}.h`), implemented by
-  every arch, **no weak defaults**. Add a hook only for a real call site. `arch/x86/` is a link-check
-  stub (`stub/hooks.c`, never run): a hook without an x86 stub fails `make test-x86-stub`.
-- **One public header directory, `hypervisor/include/`.** Module-private headers are included with
-  quotes from their own directory; `-I` has no `dm/` or `common/vm/`.
-- **Board data**: `arch/<arch>/board/<board>/board.mk` gives `board-drivers`, `board-nr-cpus`,
-  `board-cflags` (e.g. `-DCONFIG_NR_CPUS`); runtime data reaches common code via `include/board_info.h`.
-- **Device-specific is not arch-specific**: an emulated PL011 stays in `dm/` and injects via a hook.
-
-### Physical GIC vs vGIC separation (2026-09-08)
-
-| Directory | Owns |
-|---|---|
-| `arch/arm64/irq/` | `gic_v3.c` (the physical GICv3), `irq_handler.c` (EL2 dispatcher) |
-| `arch/arm64/vgic/` | `vgic.c` (ICH_LR injection), `vgic_v3_mmio.c` (GICD/GICR emulation), `vgic_sgi.c` (IPI) |
-
-**One-way dependency: `vgic/` may call public `gic_*` functions; `irq/gic_v3.c` must never know about
-VMs, vCPUs or the vGIC.** Enforced by review. Today `vgic/` calls only `gic_ppi_set_enable()` and
-`gic_kick_pcpu()` (3 call sites); keep that list short.
-- Physical INTIDs stay out of `vgic/`; cross-core kicks go through `gic_kick_pcpu()`. Do not write
-  `ICC_SGI1R_EL1` outside `gic_v3.c`.
-- `irq_handler.c` only dispatches (ack, decide, inject, EOI). Console RX arbitration is
-  `dm/console.c` (`console_rx_drain()`).
-- Kicking a VM's other pCPUs on power-down is PSCI policy (`psci_kick_vm_other_pcpus()` in `vpsci.c`).
-- Do not create a shared `gic_regs.h`: `gic_v3.h` has registers EL2 *writes*, `vgic_v3_mmio.h` the
-  offsets it *emulates*.
-- `docs/superpowers/` and `docs/adr/` cite pre-split paths on purpose; they are historical.
-
-### Key invariants
-
-- **`-mgeneral-regs-only` is mandatory**: FP/SIMD state is not saved. Never emit FP/SIMD instructions.
-- **printk supports only** `%s %c %d %u %x %lx %%`: no width, precision, floats or `%p`.
-- **`drivers/uart/pl011.c` has no magic addresses**: the base comes from `uart_init()`.
-- **Empty directories keep a `.gitkeep`** to preserve the ACRN-style skeleton.
-- **dtc does not concatenate adjacent string literals**: `guest/qemu_virt.dts` takes its whole `bootargs`
-  as one `-DHV_BOOTARGS='"..."'` from the Makefile; `make guest` emits one DTB per VM, differing only
-  in `hv.vm=`.
-- **Guest `/init` is `guest/initramfs-init.sh`** (the `.cpio.gz` is outside the repo). It turns `hv.vm=`
-  into `PS1` (`vm0:~ #` / `vm1:~ #`); the busybox has 11 applets and no `hostname`.
 
 ## Milestone Roadmap
 
