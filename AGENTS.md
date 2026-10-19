@@ -92,6 +92,9 @@ The board comes from `CONFIG_BOARD_*` in `.config`, which must have been generat
 the same `ARCH` (`CONFIG_ARCH_*`); a mismatch is an error that tells you to re-run
 `make <board>_defconfig`. The Makefile has no built-in toolchain path: put the
 cross-compiler on `PATH` yourself. `make help` lists the boards of the current `ARCH`.
+`scripts/build.sh [-a arch] [-b board] [-c] [build|guest|run|test|x86|clean]` wraps this flow
+(sets `ARCH`/`CROSS_COMPILE`, accepts `TOOLCHAIN_BIN=<dir>` to extend `PATH`, regenerates
+`.config` only when it targets a different arch/board); see `scripts/build.sh -h`.
 
 **Toolchain required:**
 - `aarch64-none-linux-gnu-gcc` ≥ 10
