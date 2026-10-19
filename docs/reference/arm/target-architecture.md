@@ -7,7 +7,7 @@
 >
 > **当前实现**见 [current-architecture.md](current-architecture.md)：M10 静态分区与
 > 已完成的 arch 边界重构，**不包含 M11 调度器**。里程碑与编号映射见
-> [AGENTS.md](../../../AGENTS.md#milestone-roadmap)。
+> [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap)。
 >
 > 本文的两张图原先是 `CLAUDE.md` 里的 ASCII 大图，2026-09-14 迁出并改用 Mermaid 重画
 > （`CLAUDE.md` 要求架构文档配 Mermaid 图）。x86 基座的对位版本见
@@ -90,7 +90,7 @@ flowchart TD
 - **Service VM 的双层结构是 M13/M14 的核心**：`HSM` 是内核态驱动（仿 `acrn_hsm`），
   通过 io_req 共享环把 User VM 的 MMIO exit 递到用户态；`DM` 是用户态程序，真正
   完成模拟。EL2 只负责把 exit **转发**出去，不含 virtio 后端逻辑——这是
-  「不写两遍后端」那条决策（见 `AGENTS.md` 的 ACRN-model strategy 第 3 条）。
+  「不写两遍后端」那条决策（见 `CLAUDE.md` 的 ACRN-model strategy 第 3 条）。
 - **RTOS VM 不连 DM**：它走直通路径，这也是 SMMU/DMA 隔离最终会落在哪的原因。
 - **图中功能不等于已有目录**：当前 VM 编排在 `common/vm/`，MMIO 总线在
   `common/io/`；ARM exit 解码在 `arch/arm64/vmexit/`，Stage-2 / 中断实现在
@@ -179,6 +179,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [AGENTS.md](../../../AGENTS.md#milestone-roadmap) — M0–M15、编号对照与 ACRN-model
+- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15、编号对照与 ACRN-model
   strategy；路线图不依赖仓库外的本地 skill。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。

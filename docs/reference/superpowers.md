@@ -62,6 +62,6 @@ extension；不信任时不加载本项目包。使用 `/skill:brainstorming` �
 
 ## 工程约束
 
-`AGENTS.md` / `CLAUDE.md`、架构边界和 QEMU 验收要求仍然有效，不能被通用 skill
+`CLAUDE.md`（`AGENTS.md` 是指向它的软链接）、架构边界和 QEMU 验收要求仍然有效，不能被通用 skill
 流程替代。skills 可引导 agent 执行本地脚本，使用前应审查来源。
 Superpowers 本身不为 pi 安装 subagent/task 工具；并行委派仍须符合当前会话的授权规则。

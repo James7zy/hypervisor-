@@ -21,7 +21,7 @@
 1. [`README.md`](../README.md) — 项目状态、构建与验证入口。
 2. [`reference/arm/current-architecture.md`](reference/arm/current-architecture.md) —
    **当前实现**：双 VM 静态分区、arch 钩子、对象归属、启动与控制台时序。
-3. [`AGENTS.md`](../AGENTS.md#milestone-roadmap) — M0–M15 路线图与编号重排表；
+3. [`CLAUDE.md`](../CLAUDE.md#milestone-roadmap) — M0–M15 路线图与编号重排表；
    **历史文档多用旧编号**（如 M5 = 现在的 M10）。本地 `roadmap` skill 已不由仓库维护。
 4. [`reference/arm/target-architecture.md`](reference/arm/target-architecture.md) —
    **目标形态**（ACRN 模型）与当前实现的差距。

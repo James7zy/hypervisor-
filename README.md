@@ -34,7 +34,7 @@ for module, object and sequence diagrams. The
 > **Note on milestone numbers:** the roadmap was renumbered to consecutive
 > integers on 2026-08-10 (the old scheme had `M1.5`, `M2.5`, `M3.0`–`M3.5` and an
 > unused `M4`). Historical specs, ADRs and debug notes keep their original
-> numbering — e.g. this spec's filename says `m5` for what is now M10. [AGENTS.md](AGENTS.md#milestone-renumbering-2026-08-10)
+> numbering — e.g. this spec's filename says `m5` for what is now M10. [CLAUDE.md](CLAUDE.md#milestone-renumbering-2026-08-10)
 > has the full old→new mapping table.
 
 ### Milestones
