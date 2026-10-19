@@ -118,3 +118,4 @@ was first described in a spec. ADRs are the durable, indexed source of truth for
 | [0013](0013-smp-per-cpu-tpidr-guest-driven-bringup.md) | Make EL2 per-CPU via `TPIDR_EL2`, bring secondaries up guest-driven, route IPIs through a kick-SGI | Accepted (M3.5) |
 | [0014](0014-multi-vm-static-partition-el2-console.md) | Objectify the VM, statically partition 2 VMs across 4 pCPUs, move the console under EL2 | Accepted (M5) |
 | [0015](0015-arch-boundary-core-vs-arch.md) | arch/ 以外的代码只能通过 `*_arch_*` 钩子访问架构层 | Accepted (M11 前置);修订 0003 的偏移宏位置 |
+| [0016](0016-acrn-model-roadmap-decisions.md) | 路线图按 ACRN 模型排序:QEMU 优先、调度器紧随多 VM、virtio 后端只写一次 | Accepted (M10–M15 排序) |

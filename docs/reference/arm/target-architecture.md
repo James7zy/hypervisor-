@@ -90,7 +90,7 @@ flowchart TD
 - **Service VM 的双层结构是 M13/M14 的核心**：`HSM` 是内核态驱动（仿 `acrn_hsm`），
   通过 io_req 共享环把 User VM 的 MMIO exit 递到用户态；`DM` 是用户态程序，真正
   完成模拟。EL2 只负责把 exit **转发**出去，不含 virtio 后端逻辑——这是
-  「不写两遍后端」那条决策（见 `CLAUDE.md` 的 ACRN-model strategy 第 3 条）。
+  「不写两遍后端」那条决策（见 [ADR-0016](../../adr/0016-acrn-model-roadmap-decisions.md) 第 3 条）。
 - **RTOS VM 不连 DM**：它走直通路径，这也是 SMMU/DMA 隔离最终会落在哪的原因。
 - **图中功能不等于已有目录**：当前 VM 编排在 `common/vm/`，MMIO 总线在
   `common/io/`；ARM exit 解码在 `arch/arm64/vmexit/`，Stage-2 / 中断实现在
@@ -179,6 +179,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15 与 ACRN-model
-  strategy；路线图不依赖仓库外的本地 skill。
+- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15 路线图；路线图不依赖仓库外的本地 skill。
+- [ADR-0016](../../adr/0016-acrn-model-roadmap-decisions.md) — ACRN 模型的路线图排序决策。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。

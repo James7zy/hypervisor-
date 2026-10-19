@@ -94,39 +94,8 @@ together with the original scheduler design rather than restoring its old paths.
 | M15 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage, board bring-up; reproduce the full chain on hardware |
 | Deferred | — | SMMU/DMA isolation and the device-passthrough framework: not needed while all User VM devices are DM-emulated on QEMU; schedule when RK3588 passthrough demands it |
 
-### ACRN-model strategy (decided 2026-07-14, revised 2026-07-19)
-
-The end state is the full ACRN architecture: a privileged Service VM running a
-userspace Device Model that serves virtio backends to User VMs. Standing
-decisions shaping the roadmap ordering:
-
-1. **QEMU-first**: the entire ACRN-model core chain (multi-VM → hypercall →
-   HSM → DM) is developed and verified on QEMU `virt`; the RK3588 port comes last.
-2. **Scheduler right after multi-VM** (revised 2026-07-19; was "scheduler
-   last"): the primary project goal is learning EL2 core technology, and the
-   scheduler is the densest remaining piece — it forces per-vCPU state
-   (FP/SIMD, system registers, vGIC LR save/restore) to be complete. Doing it
-   at M11, before the hypercall→HSM→DM chain, means M12–M14 build on a finished
-   state-switching foundation instead of accumulating "no-save" assumptions.
-   M10 itself still keeps 1:1 vCPU:pCPU pinning (ACRN "partitioned" mode).
-3. **No interim in-hypervisor virtio backends**: virtio backends are written
-   once, in the userspace DM (M14). Until then User VMs use vuart console +
-   initramfs (no disk). Avoids writing/maintaining the backend logic twice.
-4. **FDT parsing deferred to M15**: QEMU milestones keep static board config
-   (ADR-0008) and prebuilt guest DTB templates.
-5. **EL2 owns the console from M10 on** (2026-07-19): the M5 PL011 passthrough
-   is revoked; the physical UART belongs to EL2 and every VM sees a
-   trap-and-emulate vuart, with an escape key switching input focus. This is
-   the only design that gives every VM an interactive shell over one physical
-   UART, and it pre-builds the Service VM console path.
-6. **One guest address map for all VMs** (2026-07-19): every VM sees RAM at
-   IPA `0x40000000` regardless of the backing PA. This is not new mechanism —
-   `vm_config` already separates `mem_base` (IPA) from `ram_pa`, and VM0 has
-   mapped IPA `0x40000000` → PA `0x80000000` since M5 — so VM1 is just a
-   second config with `ram_pa = 0xC0000000`. One DTB template, one set of
-   load-offset constants, and the guest-visible machine is identical across
-   VMs. (An identity-mapped VM1 was considered and rejected: it would need a
-   second DTB template and a second address-constant set for zero gain.)
+Roadmap ordering decisions (QEMU first, scheduler right after multi-VM, virtio backends written once
+in the userspace DM, FDT deferred to M15): [ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md).
 
 ## Reference source trees (in `../`)
 
