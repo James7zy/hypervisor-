@@ -32,17 +32,12 @@ Architecture docs must use Mermaid: sequence, class and module-relationship diag
 - 有已知限制的临时简化，用 `ponytail:` 注释写明适用上限和重新设计的触发条件，避免“以后再说”没有边界。
 - 回复结尾用一两行说明未做或未验证的部分，以及用户需要知道的风险；未实际运行的检查不能写成已通过。
 
-## 本地 Superpowers skills
-
-若 `.claude/skills/using-superpowers/SKILL.md` 存在，会话开始先用 `Skill` 加载
-`using-superpowers`。本工程使用本地 skills，不使用 Claude 插件；上游文档里的
-`superpowers:<name>` 对应本地 `<name>`，不要调用插件命名空间。安装与更新见
-[操作说明](docs/reference/superpowers.md)；本工程的架构与验证约束优先。
-
 ## Project
 
-A research Type-1 ARM64 hypervisor on QEMU `virt` (AArch64), later RK3588. Inspired by
-ACRN, Xvisor and bao; the directory layout mirrors ACRN's `hypervisor/`.
+A research Type-1 multi-architecture hypervisor: ARM64 (AArch64) first, on QEMU `virt` and later
+RK3588, with AMD/Intel x86-64 (AMD SVM / Intel VT-x) as the second architecture. Only ARM64 runs
+today; `arch/x86/` is a link-check stub. Inspired by ACRN, Xvisor and bao; the directory layout
+mirrors ACRN's `hypervisor/`.
 
 **M10 is done**: two Linux VMs, two vCPUs each, statically pinned 1:1 to pCPUs (2+2 on 4),
 EL2-owned console and shell. **Next: M11 (vCPU scheduler)**; the long-term target is the
