@@ -1,8 +1,16 @@
 # hypervisor
 
-A research Type-1 ARM64 hypervisor targeting QEMU `virt` (AArch64) first, then
-Rockchip RK3588. Inspired by ACRN, Xvisor, and bao-hypervisor; the directory
-layout mirrors ACRN's `hypervisor/` structure.
+A research Type-1 **multi-architecture** hypervisor. ARM64 (AArch64) comes first,
+on QEMU `virt` and then Rockchip RK3588; AMD/Intel x86-64 (AMD SVM / Intel VT-x)
+is the second target. Only ARM64 runs today: `arch/x86/` is a link-check stub.
+Inspired by ACRN, Xvisor, and bao-hypervisor; the directory layout mirrors ACRN's
+`hypervisor/` structure.
+
+| Architecture | Status |
+|---|---|
+| ARM64 (QEMU `virt`) | **runs** two Linux VMs, `make test` covers it |
+| x86-64 (AMD/Intel) | **link-check stub only**: the generic code compiles and links for x86, nothing boots |
+| ARM64 (RK3588) | planned, M15 |
 
 ## Status
 
@@ -21,9 +29,13 @@ time slicing, and vCPU count greater than pCPU count. The long-term target is
 the full ACRN model (Service VM + userspace Device Model); the RK3588 port is
 last, at M15.
 
-The arch-boundary refactor is also in place: generic code uses `*_arch_*`
-hooks and `<arch/...>` headers; ARM exit decoding is separate from the common
-MMIO bus. This does not yet add scheduling or prove a second architecture port.
+The multi-architecture split is also in place: generic code reaches the
+architecture only through `*_arch_*` hooks and `<arch/...>` headers, enforced by
+`make test`; ARM exit decoding is separate from the common MMIO bus; and an x86
+stub (`arch/x86/`) is compiled and linked on every `make test` to prove the
+generic code builds for a second architecture. This does not yet add scheduling,
+and it does **not** prove a working x86 port: the stub's hooks are empty and
+never run.
 
 Start with [the current architecture](docs/reference/arm/current-architecture.md)
 for module, object and sequence diagrams. The
@@ -60,11 +72,17 @@ for module, object and sequence diagrams. The
 ## Quickstart
 
 ```sh
+export ARCH=arm64                               # default; ARCH=x86 selects the stub
+export CROSS_COMPILE=aarch64-none-linux-gnu-    # the compiler must be on PATH
 make qemu_virt_defconfig   # copy arch/arm64/configs/qemu_virt_defconfig → .config
-                        # (toolchain on PATH; export CROSS_COMPILE=... if its prefix differs)
 make                    # build build/hypervisor.elf + build/hypervisor.bin
 LINUX_IMAGE=/path/to/Image LINUX_INITRD=/path/to/initramfs.cpio.gz make run
 ```
+
+The architecture and toolchain are chosen the way Linux does it: `ARCH` and
+`CROSS_COMPILE`, then `make <board>_defconfig` (`make help` lists the boards of the
+current `ARCH`). To link-check the x86 stub without touching your `.config`, run
+`make test-x86-stub`. `scripts/build.sh -h` wraps all of this.
 
 Earliest banner (within ~3 s):
 
@@ -116,6 +134,7 @@ aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 
 - `aarch64-none-linux-gnu-gcc` >= 10
 - `aarch64-none-linux-gnu-binutils`
+- `x86_64-linux-gnu-gcc` for the x86 link check (`make test-x86-stub`, part of `make test`)
 - `qemu-system-aarch64` >= 6.0
 - `dtc` (device-tree-compiler)
 - Host C compiler (`cc`) for offset checks
@@ -126,7 +145,8 @@ aarch64-none-linux-gnu-gdb build/hypervisor.elf -ex 'target remote :1234'
 There is no CI; verification is local and automated.
 
 1. **Automated suite**: `make test` checks the arch boundary (source and
-   transitive includes) and host/cross-compiled C/assembly offsets, then runs:
+   transitive includes), compiles and links the generic code for x86-64 against
+   the `arch/x86` stub, and checks host/cross-compiled C/assembly offsets, then runs:
    - `basic` and `vtimer`: single-VM SVM build (`build/test-svm/`).
    - Dual-VM and EL2 shell: `NR_VMS=2` build (`build/test-svm-dual/`).
    - vSPI RX/IPI/replay: separate dual-VM build (`build/test-vspi/`).
@@ -144,14 +164,15 @@ There is no CI; verification is local and automated.
 ## Documentation
 
 - [Documentation index](docs/README.md) — current references vs historical records
-- [Current ARM64 architecture](docs/reference/arm/current-architecture.md)
+- [Current architecture](docs/reference/arm/current-architecture.md) — the ARM64 implementation and the arch boundary
 - [Target ACRN architecture](docs/reference/arm/target-architecture.md) — not yet implemented
 - Design specs: `docs/superpowers/specs/`
 - Architecture decisions: `docs/adr/`
 - Reference knowledge base: `docs/reference/` — split by architecture into
   [`arm/`](docs/reference/arm/) (the implementation baseline: Stage-2, vGIC,
   world switch, exit dispatch) and [`x86/`](docs/reference/x86/) (an x86-64
-  VT-x contrast document for mapping concepts when reading ACRN)
+  VT-x contrast document for mapping concepts when reading ACRN; the x86 port itself
+  is not written yet)
 - Debug walkthroughs: `docs/debug/`
 - Project guidance for contributors and agents: [`CLAUDE.md`](CLAUDE.md)
 
