@@ -10,7 +10,7 @@ Inspired by ACRN, Xvisor, and bao-hypervisor; the directory layout mirrors ACRN'
 |---|---|
 | ARM64 (QEMU `virt`) | **runs** two Linux VMs, `make test` covers it |
 | x86-64 (AMD/Intel) | **link-check stub only**: the generic code compiles and links for x86, nothing boots |
-| ARM64 (RK3588) | planned, M15 |
+| ARM64 (RK3588) | planned, M15 (bring-up) and M16 (passthrough) |
 
 ## Status
 
@@ -24,10 +24,14 @@ Each VM is built from the same guest address map (RAM at IPA `0x40000000`,
 backed by different PAs), so one DTB template and one load-address scheme serve
 both. There is still no scheduler: vCPUs are pinned 1:1 to pCPUs.
 
-Next: **M11 (vCPU scheduler)** — full context switch including FP/SIMD state,
-time slicing, and vCPU count greater than pCPU count. The long-term target is
-the full ACRN model (Service VM + userspace Device Model); the RK3588 port is
-last, at M15.
+Next: the **M11 prerequisites** — A: EL2 hardening (EL2 Stage-1 MMU and cache,
+a trap set including guest `smc`), B: PSCI/SMCCC completion — then **M11 (vCPU
+scheduler)**: full context switch including FP/SIMD state, time slicing, TLB/VMID
+maintenance, and vCPU count greater than pCPU count. The long-term target is the
+full ACRN model (Service VM + userspace Device Model); the RK3588 port comes
+last (M15 bring-up, M16 passthrough and isolation). Ordering rationale:
+[ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md) and
+[ADR-0017](docs/adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md).
 
 The multi-architecture split is also in place: generic code reaches the
 architecture only through `*_arch_*` hooks and `<arch/...>` headers, enforced by
@@ -63,11 +67,14 @@ for module, object and sequence diagrams. The
 | M8 — Boot to shell | done | initramfs → interactive busybox shell |
 | M9 — SMP | done | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization |
 | M10 — Multi-VM foundation | **done** | 2 VMs × 2 vCPUs, per-VM Stage-2/VMID/vGIC/vuart, EL2-owned console |
-| M11 — vCPU scheduler | next | Context switch incl. FP/SIMD, time slicing, vCPU overcommit |
-| M12 — Hypercall ABI + VM lifecycle | planned | HVC hypercall namespace, VM create/start/pause/destroy |
+| M11 prerequisite A — EL2 hardening | **next** | EL2 Stage-1 MMU + cache, trap set incl. guest `smc` |
+| M11 prerequisite B — PSCI/SMCCC completion | planned | `CPU_SUSPEND`, `AFFINITY_INFO`, `SYSTEM_RESET2`, SMCCC probing |
+| M11 — vCPU scheduler | planned | Context switch incl. FP/SIMD, time slicing, TLB/VMID, vCPU overcommit |
+| M12 — Hypercall ABI + VM lifecycle | planned | Dynamic Stage-2 + page allocator, HVC hypercall namespace, VM create/start/pause/destroy |
 | M13 — HSM kernel driver + io_req ring | planned | Service VM kernel module, MMIO exits forwarded to userspace |
 | M14 — Device Model + virtio backends | planned | Userspace `dm`, virtio-mmio console and blk |
-| M15 — RK3588 port | planned | Runtime FDT parsing, real UART/GIC/storage |
+| M15 — RK3588 bring-up | planned | Runtime FDT parsing, real UART/GIC, boot from TF-A |
+| M16 — Passthrough and isolation | planned | Physical IRQ routing, device MMIO passthrough, SMMU, vGIC completion |
 
 ## Quickstart
 

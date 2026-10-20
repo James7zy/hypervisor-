@@ -150,8 +150,8 @@ flowchart TD
 - **guest PSCI 与平台 PSCI 分开**：`arch/arm64/vmexit/vpsci.c` 处理 guest 的 HVC，
   `arch/arm64/cpu/psci.c` 通过 SMC 调用平台 PSCI。QEMU 提供平台实现，不需要单独
   加载 TF-A；RK3588（M15）需对接实际固件，而不是把 guest 请求直接透传。
-- **SMMU 目前是空格子**：所有 User VM 设备都由 DM 模拟，不需要 DMA 隔离；等 M15 真机
-  直通时才排期（见 roadmap 的 Deferred 行）。
+- **SMMU 目前是空格子**：所有 User VM 设备都由 DM 模拟，不需要 DMA 隔离；真机设备直通
+  排在 M16（[ADR-0017](../../adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md)）。
 
 ---
 
@@ -165,7 +165,7 @@ flowchart TD
 | Device Model（用户态） | 无；EL2 `dm/` 为 vuart + console + hv_shell | M14 |
 | virtio 前后端 | 无，guest 用 vuart + initramfs | M14 |
 | vCPU 调度器 | 无，1:1 静态绑核 | M11 |
-| SMMU / DMA 隔离 | 无 | Deferred |
+| SMMU / DMA 隔离 | 无 | M16 |
 | 运行时 FDT 解析 | 静态板级配置（ADR-0008） | M15 |
 
 ---
@@ -179,6 +179,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M15 路线图；路线图不依赖仓库外的本地 skill。
+- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M16 路线图；路线图不依赖仓库外的本地 skill。
 - [ADR-0016](../../adr/0016-acrn-model-roadmap-decisions.md) — ACRN 模型的路线图排序决策。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。

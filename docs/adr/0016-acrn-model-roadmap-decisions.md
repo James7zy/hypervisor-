@@ -3,6 +3,8 @@
 > **Status:** Accepted. **Milestone:** M10–M15(路线图排序)。决定于 2026-07-14,
 > 2026-07-19 修订(调度器由 M14 提前到 M11);2026-10-19 从 `CLAUDE.md` 迁入本 ADR。
 > 其中第 5、6 条的实现见 [[0014-multi-vm-static-partition-el2-console]]。
+> **2026-10-20:** 第 2 条的"调度器紧随多 VM"现在是紧随两个 M11 前置阶段,"SMMU 与直通推迟"
+> 改为排进 M16,见 [[0017-el2-hardening-before-scheduler-and-passthrough-milestone]];其余仍然有效。
 
 项目的终点形态是完整的 ACRN 架构:一个有特权的 Service VM,在用户态运行 Device Model,
 为 User VM 提供 virtio 后端。这条链上的每一步(多 VM → hypercall → HSM 内核驱动 →

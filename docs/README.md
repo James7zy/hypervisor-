@@ -26,7 +26,7 @@
 4. [`reference/arm/target-architecture.md`](reference/arm/target-architecture.md) —
    **目标形态**（ACRN 模型）与当前实现的差距。
 5. [`CLAUDE.md`](../CLAUDE.md) — 修改代码时遵守的边界、构建约束和已知缺陷。
-6. [`adr/README.md`](adr/README.md) — 16 条架构决策；ADR-0015 规定 arch 边界，ADR-0016 固定 ACRN 模型的路线图排序。
+6. [`adr/README.md`](adr/README.md) — 17 条架构决策；ADR-0015 规定 arch 边界，ADR-0016 固定 ACRN 模型的路线图排序，ADR-0017 在 M11 前插入 EL2 加固并新增 M16 直通。
 
 > `reference/arm/2026-06-21-architecture-zoom-out.md` 和同日的 GIC trap 调查保留为
 > 历史快照，不反映当前多 VM 实现；现在的调用链看 `current-architecture.md`。
