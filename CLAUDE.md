@@ -7,7 +7,7 @@ Architecture docs must use Mermaid: sequence, class and module-relationship diag
 ## Ponytail：最小完整改动
 
 参考 [Ponytail 的 AGENTS.md](https://github.com/DietrichGebert/ponytail/blob/b088b2df6e08d4306c6a3c3d575fe38c2d2d2989/AGENTS.md)
-（[MIT](https://github.com/DietrichGebert/ponytail/blob/b088b2df6e08d4306c6a3c3d575fe38c2d2d2989/LICENSE)），按本工程特点整合以下常驻工作原则。
+按本工程特点整合以下常驻工作原则。
 适用于编码、修复、重构和评审；**本工程的架构边界、已接受的 ADR、硬件正确性和验证要求优先，不能以精简为由削弱。**
 
 ### 动手前确定影响范围
@@ -31,6 +31,20 @@ Architecture docs must use Mermaid: sequence, class and module-relationship diag
 - 新增非平凡逻辑（分支、循环、解析、安全或状态更新等）应留下一个能验证行为的小测试或自检；它不能替代构建、回归和 QEMU 验收。
 - 有已知限制的临时简化，用 `ponytail:` 注释写明适用上限和重新设计的触发条件，避免“以后再说”没有边界。
 - 回复结尾用一两行说明未做或未验证的部分，以及用户需要知道的风险；未实际运行的检查不能写成已通过。
+
+## 里程碑前置：限时与范围锁
+
+一个里程碑正式开工前如果又需要"前置阶段"（重构、加固、补全缺口等），该前置阶段必须：
+
+1. 范围锁定在开工前盘点出的清单里；过程中新发现的缺口记成后续已知缺口，不追加进当前前置阶段。
+2. 定时间盒（参考相近规模里程碑的历史节奏估算，写进对应 ADR 或 spec），不能无限期。
+3. 到期即止：做到哪算哪，未完成部分标成已知缺口，强制进入原计划的下一个里程碑；不因为"还不够干净"
+   而继续留在前置阶段，不顺延。
+
+**Why:** 2026-10-22 定下。arch-boundary 重构之后，M11 调度器前又叠了一层 EL2 加固 + PSCI/SMCCC
+补全（ADR-0017），从 M10 完工到此时三个月里没有一行 M11 相关代码落地——不是路线图设计错了，是
+前置任务会自我繁殖。这条规则管的是这个会反复出现的模式，不只是 M11 这一次；M12 的页分配器 +
+动态 Stage-2 等前置切片同样适用。
 
 ## Project
 

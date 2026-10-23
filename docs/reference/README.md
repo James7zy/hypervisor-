@@ -39,6 +39,10 @@
   特权层次图)+「与当前实现的差距」对照表。原为 `CLAUDE.md` 里的两块 ASCII 大图,
   2026-09-14 迁出重画。**非当前实现**——现状看 `arm/current-architecture.md`；
   x86 对位版本见 [[x86/architecture-x86]] §1、§2。
+- [arm/gap-analysis-vs-xvisor-bao.md](arm/gap-analysis-vs-xvisor-bao.md) — **ARM64 缺口盘点**:
+  对照 xvisor、bao 列出 9 项缺口（EL2 自身的 Stage-1 MMU、`HCR_EL2` 陷入集合、TLB 维护、PSCI、
+  动态 Stage-2、直通、SMMU、vGIC、ID 过滤），逐项给出现状证据、参考入口和所排里程碑；
+  未排期的项记为已知缺口。决定本身见 ADR-0017。
 - [arm/2026-06-21-gicd-gicr-trap-investigation.md](arm/2026-06-21-gicd-gicr-trap-investigation.md) —
   一次从提问到实证的查证:「客户机访问 GICD/GICR 怎么到 EL2?」带 instrumentation 的
   真实 boot 证明 ADR-0012「触发 Stage-2 abort → 影子模拟 → 从不碰硬件」**不成立**——
