@@ -7,12 +7,19 @@
 #include <board_info.h>
 #include <gic_v3.h>
 #include <vtimer.h>
+#include "../mmu/el2_mmu.h"
 
 /* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
 extern char secondary_entry[];
 
 void cpu_arch_init(void)
 {
+    /* EL2 Stage-1 MMU, identity map, before anything else touches memory
+     * (M11 prerequisite A slice 1): a page-table mistake must show up here,
+     * immediately, not get mixed up with later state. */
+    el2_mmu_init();
+    el2_mmu_enable();
+
     printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name,
            SYSREG_READ(CurrentEL));
 

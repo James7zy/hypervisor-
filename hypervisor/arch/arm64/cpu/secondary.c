@@ -20,6 +20,7 @@
 #include <arch/sysreg.h>
 #include <gic_v3.h>
 #include <vgic.h>
+#include "../mmu/el2_mmu.h"
 
 static inline void mmio_write32(unsigned long addr, u32 val)
 {
@@ -45,6 +46,11 @@ static inline void mmio_write8(unsigned long addr, u8 val)
 
 void secondary_main(u32 id)
 {
+    /* EL2 Stage-1 MMU: the shared identity-map table was already built by
+     * the boot CPU's el2_mmu_init(); this core only programs its own
+     * per-PE MAIR/TCR/TTBR0/SCTLR before touching any MMIO. */
+    el2_mmu_enable();
+
     const unsigned long rd  = BOARD_GIC_RDIST_BASE + (unsigned long)id * GICR_STRIDE;
     const unsigned long sgi = rd + GICR_SGI_OFFSET;
     const u32 ppi  = BOARD_VTIMER_IRQ;   /* 27 */
