@@ -7,7 +7,7 @@
 >
 > **当前实现**见 [current-architecture.md](current-architecture.md)：M10 静态分区与
 > 已完成的 arch 边界重构，**不包含 M11 调度器**。里程碑与编号映射见
-> [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap)。
+> [Linear 路线图](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)。
 >
 > 本文的两张图原先是 `CLAUDE.md` 里的 ASCII 大图，2026-09-14 迁出并改用 Mermaid 重画
 > （`CLAUDE.md` 要求架构文档配 Mermaid 图）。x86 基座的对位版本见
@@ -179,6 +179,6 @@ flowchart TD
   重画，附术语对照表（EL2↔VMX root、Stage-2↔EPT、vGICv3↔vLAPIC、PSCI↔ACPI）。
 - [[../../adr/0014-multi-vm-static-partition-el2-console]] — M10 的多 VM 静态分区、
   per-VM Stage-2/vGIC、EL2 独占控制台。
-- [CLAUDE.md](../../../CLAUDE.md#milestone-roadmap) — M0–M16 路线图；路线图不依赖仓库外的本地 skill。
+- [Linear Hypervisor 项目](https://linear.app/jamestam/project/hypervisor-3b151b91cb63) — M0–M16 里程碑路线图与执行追踪。
 - [ADR-0016](../../adr/0016-acrn-model-roadmap-decisions.md) — ACRN 模型的路线图排序决策。
 - [ADR-0015](../../adr/0015-arch-boundary-core-vs-arch.md) — 已落地的 core/arch 边界。

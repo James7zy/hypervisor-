@@ -53,11 +53,15 @@ RK3588, with AMD/Intel x86-64 (AMD SVM / Intel VT-x) as the second architecture.
 today; `arch/x86/` is a link-check stub. Inspired by ACRN, Xvisor and bao; the directory layout
 mirrors ACRN's `hypervisor/`.
 
-**M10 is done**: two Linux VMs, two vCPUs each, statically pinned 1:1 to pCPUs (2+2 on 4),
-EL2-owned console and shell. **Next: M11 prerequisites A/B (EL2 hardening, PSCI/SMCCC completion), then M11 (vCPU scheduler)**; the long-term target is the
-full ACRN model (Service VM + userspace Device Model). Roadmap: [Milestone Roadmap](#milestone-roadmap).
-For M11 also read the
-[arch-boundary alignment](docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md).
+**Current state (M10, gate-verified 2026-07-20)**: two Linux VMs, two vCPUs each,
+statically pinned 1:1 to pCPUs (2+2 on 4), EL2-owned console and shell; no scheduler
+yet. The long-term target is the full ACRN model (Service VM + userspace Device
+Model). The milestone roadmap and its execution tracking live in
+[Linear](https://linear.app/jamestam/project/hypervisor-3b151b91cb63)
+(阶段0 = M0–M10 completed; 阶段1–9 = M11 prerequisites → M16). When starting M11,
+read the
+[arch-boundary alignment](docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)
+together with the original scheduler design rather than restoring its old paths.
 
 **Design principle:** small, fast iterations; break work into the smallest practical,
 clearly defined units; high cohesion, low coupling. Each milestone gets a spec in
@@ -76,37 +80,6 @@ Would it still hold on another machine, for another person?
 Current modules, objects and boot/console sequences:
 [current-architecture.md](docs/reference/arm/current-architecture.md).
 [target-architecture.md](docs/reference/arm/target-architecture.md) is the future ACRN model, not implemented.
-
-## Milestone Roadmap
-
-The arch-boundary refactor is complete; the M11 prerequisites and scheduling are not. When starting M11,
-read the [alignment note](docs/superpowers/specs/2026-10-04-m11-arch-boundary-alignment.md)
-together with the original scheduler design rather than restoring its old paths.
-
-| Milestone | Status | Goal |
-|---|---|---|
-| M0 — Hello EL2 | **done** | Enter EL2, print banner |
-| M1 — Bare-metal guest | **done** | Stage-2 MMU, minimal vCPU |
-| M2 — PSCI | **done** | PSCI VERSION/FEATURES/CPU_OFF/SYSTEM_OFF over HVC (no GIC) |
-| M3 — vGIC software injection | **done** | HVC → `vgic_inject_sw` → guest EL1 IRQ handler (no physical HW) |
-| M4 — Physical timer + GIC + HW-forwarding | **done** | timer PPI → EL2 → `vgic_inject_hw` → guest (ADR-0001) |
-| M5 — Linux alive (no interrupts) | **done** | Load `Image` + DTB, arm64 boot protocol, PL011 passthrough earlycon; stalls at first GIC MMIO |
-| M6 — MMIO trap framework | **done** | Stage-2 data-abort decode + MMIO trap-and-emulate dispatch |
-| M7 — vGICv3 emulation | **done** | GICD/GICR(cpu0) trap-and-emulate on the M6 bus; timer-PPI injection |
-| M8 — Boot to shell | **done (boot-verified 2026-06-19)** | initramfs load + DTB initrd nodes → interactive busybox shell prompt (headline M5 goal: UP Linux boots to a busybox shell). Confirmed on a real QEMU run: Linux 6.12.93 reaches `~ #` and runs `ls`/`echo`/`uname` over the ttyAMA0 PL011 passthrough |
-| M9 — SMP | **done (boot-verified 2026-06-27; reverified 2026-07-13)** | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization, static 1:1 pinning (no scheduler) |
-| M10 — Multi-VM foundation | **done (gate-verified 2026-07-20)** | VM objectification (`g_vm` → `vm[NR_VMS]`): per-VM Stage-2/VMID, per-VM vGIC, static 2+2 CPU partitioning on 4 pCPUs. Memory: QEMU `-m 4G`, VM1 RAM backed at PA `0xC0000000`; both VMs see the identical guest address map (RAM IPA `0x40000000` — the IPA≠PA Stage-2 mechanism is live since M5), so one DTB template and one load-address scheme serve both VMs. Console: EL2 owns the physical PL011 exclusively (revoked the M5 passthrough), both VMs get trap-and-emulate vuarts (`hypervisor/dm/vuart.c`), Ctrl-T switches RX focus (TX is focus-independent). VM-scoped PSCI power-down: `SYSTEM_OFF` in one VM parks only that VM's pCPUs. Landed as three slices, each independently spec- and quality-reviewed, plus a final whole-milestone review; see [[docs/adr/0014-multi-vm-static-partition-el2-console]]. Automated regression: `test-qemu-dual` with shared guests in `tests/svm/`. Known gaps carried into M11+: no automated test for PSCI-off isolation (verified manually only) — the Ctrl-T/`vm_console` focus gap was closed 2026-07-25 by `tests/run_shell_test.sh`; console focus left on a since-shut-down VM is a silent no-op, not fed back to the user (now at least visible as `halted` in `vm_list`); the pre-M10 single-VM overview remains a historical snapshot; current diagrams are in `docs/reference/arm/current-architecture.md` |
-| M11 prerequisite A — EL2 hardening | **next** (ADR-0017) | EL2 Stage-1 MMU + cache (MMU-only slice first, then cache) so hypervisor memory is Normal, not Device; `HCR_EL2` trap set: `TSC` (guest `smc`), `TWI/TWE`, ID-register filtering, `MDCR_EL2` PMU/debug. QEMU can only show "boots and all tests still pass"; real-hardware atomics are confirmed at M15 (static-only until then). Deliverable: an SVM guest's `smc` is intercepted and returns NOT_SUPPORTED; Linux still boots two VMs |
-| M11 prerequisite B — PSCI/SMCCC completion | planned (ADR-0017) | `CPU_SUSPEND`, `AFFINITY_INFO`, `MIGRATE_INFO_TYPE`, `SYSTEM_RESET2`, SMCCC version/features probing. Deliverable: an SVM guest queries every implemented function via `PSCI_FEATURES` |
-| M11 — vCPU scheduler | planned (moved up from M14, 2026-07-19; scope widened by ADR-0017) | Full context switch (incl. FP/SIMD state — lifts the `-mgeneral-regs-only` no-save assumption), time slicing, vCPU count > pCPU count, plus TLB/VMID maintenance (first `tlbi` in the tree), virtual-timer save/restore and `ICH_VTR_EL2` LR-count probing. Deliverable: M10's 2 VMs × 2 vCPUs time-sliced on 2 pCPUs (the other 2 pCPUs left idle for later Service VM work); both guests reach shells and concurrent FP workloads in both VMs run uncorrupted |
-| M12 — Hypercall ABI + VM lifecycle | planned | First slice: page allocator + dynamic Stage-2 (4 KB granule, `map/unmap`, permissions; replaces the static 1 GB block + 2 MB hole). Then HVC hypercall namespace (distinct from PSCI), VM create/start/pause/destroy, Service VM privilege concept. Deliverable: Service VM controls User VM start/stop via hypercalls |
-| M13 — HSM kernel driver + io_req ring | planned | Custom Linux kernel module in the Service VM (modeled on `acrn_hsm`): ioctl interface, io_req shared-memory ring, forwarding User VM MMIO exits to Service VM userspace. Deliverable: a userspace program receives one User VM MMIO access and completes it. Highest-risk milestone — kept minimal on purpose (no virtio) |
-| M14 — Device Model + virtio backends | planned | Userspace `dm` program: VM load/start, virtio-mmio console and blk backends. Deliverable: User VM launched by DM, rootfs on a virtio-blk image |
-| M15 — RK3588 bring-up | planned | Runtime FDT parsing, real UART/GIC, boot from TF-A. Deliverable: one Linux VM boots on the board (cannot be verified in QEMU) |
-| M16 — Passthrough and isolation | planned (ADR-0017) | Physical SPI routing to guests (incl. EOI handling), device MMIO passthrough, SMMU DMA isolation, vGIC completion (maintenance interrupt; ITS/LPI if needed). Deliverable: a VM runs with a passed-through device on the board |
-
-Roadmap ordering decisions (QEMU first, scheduler right after multi-VM, virtio backends written once
-in the userspace DM, FDT deferred to M15): [ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md), amended by [ADR-0017](docs/adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md) (EL2 hardening before the scheduler; passthrough is M16).
 
 ## Reference source trees (in `../`)
 

@@ -17,21 +17,18 @@ Inspired by ACRN, Xvisor, and bao-hypervisor; the directory layout mirrors ACRN'
 **M10 — Multi-VM foundation** is done (gate-verified 2026-07-20). Two unmodified
 Linux guests run side by side on QEMU `virt`, each with its own Stage-2 page
 table, VMID, vGICv3 and vuart, statically partitioned 2+2 across four pCPUs.
-EL2 owns the physical PL011 exclusively; both VMs get a trap-and-emulate vuart,
-and `Ctrl-T` opens an EL2 shell to switch console focus between them.
-
 Each VM is built from the same guest address map (RAM at IPA `0x40000000`,
 backed by different PAs), so one DTB template and one load-address scheme serve
-both. There is still no scheduler: vCPUs are pinned 1:1 to pCPUs.
+both. There is still no scheduler: vCPUs are pinned 1:1 to pCPUs. EL2 owns the
+physical PL011 exclusively; both VMs get a trap-and-emulate vuart, and `Ctrl-T`
+opens an EL2 shell to switch console focus between them. The long-term target
+is the full ACRN model (Service VM + userspace Device Model).
 
-Next: the **M11 prerequisites** — A: EL2 hardening (EL2 Stage-1 MMU and cache,
-a trap set including guest `smc`), B: PSCI/SMCCC completion — then **M11 (vCPU
-scheduler)**: full context switch including FP/SIMD state, time slicing, TLB/VMID
-maintenance, and vCPU count greater than pCPU count. The long-term target is the
-full ACRN model (Service VM + userspace Device Model); the RK3588 port comes
-last (M15 bring-up, M16 passthrough and isolation). Ordering rationale:
-[ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md) and
-[ADR-0017](docs/adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md).
+The milestone roadmap and its execution tracking live in
+[Linear](https://linear.app/jamestam/project/hypervisor-3b151b91cb63):
+阶段0 records M0–M10 as completed, 阶段1–9 = the M11 prerequisites → M16.
+Ordering rationale: [ADR-0016](docs/adr/0016-acrn-model-roadmap-decisions.md)
+and [ADR-0017](docs/adr/0017-el2-hardening-before-scheduler-and-passthrough-milestone.md).
 
 The multi-architecture split is also in place: generic code reaches the
 architecture only through `*_arch_*` hooks and `<arch/...>` headers, enforced by
@@ -51,30 +48,6 @@ for module, object and sequence diagrams. The
 > integers on 2026-08-10 (the old scheme had `M1.5`, `M2.5`, `M3.0`–`M3.5` and an
 > unused `M4`). Historical specs, ADRs and debug notes keep their original
 > numbering — e.g. this spec's filename says `m5` for what is now M10.
-
-### Milestones
-
-| Milestone | Status | Goal |
-|---|---|---|
-| M0 — Hello EL2 | done | Enter EL2, print banner |
-| M1 — Bare-metal guest | done | Stage-2 MMU, minimal vCPU |
-| M2 — PSCI | done | PSCI over HVC (no GIC) |
-| M3 — vGIC software injection | done | HVC → `vgic_inject_sw` → guest EL1 IRQ handler |
-| M4 — Physical timer + GIC + HW-forwarding | done | timer PPI → EL2 → `vgic_inject_hw` → guest |
-| M5 — Linux alive | done | Load `Image` + DTB, arm64 boot protocol, PL011 earlycon |
-| M6 — MMIO trap framework | done | Stage-2 data-abort decode + trap-and-emulate dispatch |
-| M7 — vGICv3 emulation | done | GICD/GICR trap-and-emulate; timer-PPI injection |
-| M8 — Boot to shell | done | initramfs → interactive busybox shell |
-| M9 — SMP | done | 2-vCPU Linux, PSCI `CPU_ON`, per-pCPU vCPU, SGI virtualization |
-| M10 — Multi-VM foundation | **done** | 2 VMs × 2 vCPUs, per-VM Stage-2/VMID/vGIC/vuart, EL2-owned console |
-| M11 prerequisite A — EL2 hardening | **next** | EL2 Stage-1 MMU + cache, trap set incl. guest `smc` |
-| M11 prerequisite B — PSCI/SMCCC completion | planned | `CPU_SUSPEND`, `AFFINITY_INFO`, `SYSTEM_RESET2`, SMCCC probing |
-| M11 — vCPU scheduler | planned | Context switch incl. FP/SIMD, time slicing, TLB/VMID, vCPU overcommit |
-| M12 — Hypercall ABI + VM lifecycle | planned | Dynamic Stage-2 + page allocator, HVC hypercall namespace, VM create/start/pause/destroy |
-| M13 — HSM kernel driver + io_req ring | planned | Service VM kernel module, MMIO exits forwarded to userspace |
-| M14 — Device Model + virtio backends | planned | Userspace `dm`, virtio-mmio console and blk |
-| M15 — RK3588 bring-up | planned | Runtime FDT parsing, real UART/GIC, boot from TF-A |
-| M16 — Passthrough and isolation | planned | Physical IRQ routing, device MMIO passthrough, SMMU, vGIC completion |
 
 ## Quickstart
 

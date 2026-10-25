@@ -21,8 +21,9 @@
 1. [`README.md`](../README.md) — 项目状态、构建与验证入口。
 2. [`reference/arm/current-architecture.md`](reference/arm/current-architecture.md) —
    **当前实现**：双 VM 静态分区、arch 钩子、对象归属、启动与控制台时序。
-3. [`CLAUDE.md`](../CLAUDE.md#milestone-roadmap) — M0–M15 路线图；
-   **历史文档多用旧编号**（如 M5 = 现在的 M10）。本地 `roadmap` skill 已不由仓库维护。
+3. [Linear Hypervisor 项目](https://linear.app/jamestam/project/hypervisor-3b151b91cb63) —
+   M0–M16 里程碑与执行追踪（阶段0 = M0–M10 已完成）；
+   **历史文档多用旧编号**（如 M5 = 现在的 M10）。
 4. [`reference/arm/target-architecture.md`](reference/arm/target-architecture.md) —
    **目标形态**（ACRN 模型）与当前实现的差距。
 5. [`CLAUDE.md`](../CLAUDE.md) — 修改代码时遵守的边界、构建约束和已知缺陷。
