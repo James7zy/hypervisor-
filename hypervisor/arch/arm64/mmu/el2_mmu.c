@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: TBD */
 /*
- * EL2 Stage-1 MMU, slice 1: identity map, MMU on, caches still off
- * (SCTLR_EL2.M=1, C=0, I=0). See
+ * EL2 Stage-1 MMU: identity map, MMU + D/I caches on (SCTLR_EL2.M=1,
+ * C=1, I=1). See
  * docs/superpowers/specs/2026-10-22-m11-pre-a-el2-hardening-design.md for
  * the full design and the register values' provenance (cross-checked
  * against bao-hypervisor and xvisor, two independent real-hardware-booting
@@ -35,8 +35,10 @@
     (TCR_RES1 | TCR_T0SZ | TCR_IRGN0_WBWA | TCR_ORGN0_WBWA | TCR_SH0_ISH | \
      TCR_TG0_4K | TCR_PS_40BIT)
 
-/* SCTLR_EL2 bits this slice touches (slice 2 adds C and I). */
+/* SCTLR_EL2 bits we program: MMU, D-cache (C, bit2), I-cache (I, bit12). */
 #define SCTLR_EL2_M     (1ULL << 0)
+#define SCTLR_EL2_C     (1ULL << 2)
+#define SCTLR_EL2_I     (1ULL << 12)
 
 /*
  * Stage-1 VMSAv8-64 L1 block descriptor fields, EL2 translation regime
@@ -83,7 +85,16 @@ void el2_mmu_init(void)
 
 void el2_mmu_enable(void)
 {
+    /*
+     * ic iallu: drop any I-cache lines this PE acquired before now, e.g.
+     * left from a previous incarnation -- PSCI CPU_ON does not
+     * architecturally invalidate them. It completes at the dsb nsh + isb
+     * below (ARM ARM: IC requires DSB then ISB), before I=1 below lets
+     * fetches use the cache again. Keep every maintenance op ahead of
+     * that dsb -- it completes both this and the tlbi.
+     */
     __asm__ volatile(
+        "ic iallu\n"
         "msr mair_el2, %0\n"
         "msr tcr_el2,  %1\n"
         "msr ttbr0_el2, %2\n"
@@ -99,7 +110,7 @@ void el2_mmu_enable(void)
 
     u64 sctlr;
     __asm__ volatile("mrs %0, sctlr_el2" : "=r"(sctlr));
-    sctlr |= SCTLR_EL2_M;
+    sctlr |= SCTLR_EL2_M | SCTLR_EL2_C | SCTLR_EL2_I;
     /*
      * Identity map: the next instruction (and everything after) sits at the
      * same VA it was already executing at, so enabling M here does not
