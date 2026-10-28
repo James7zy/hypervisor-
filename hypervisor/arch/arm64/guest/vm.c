@@ -43,11 +43,18 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
     v->regs.sp_el1   = cfg->mem_base + cfg->mem_size - 0x10UL;
 
     /*
-     * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|RW(31) set; HCD(29) clear (allow HVC).
-     * RW=1: EL1 executes in AArch64 state.
+     * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|TWI(13)|TWE(14)|TID3(18)|TSC(19)|
+     * RW(31) set; HCD(29) clear (allow HVC). RW=1: EL1 executes in AArch64
+     * state. TWI/TWE: trap guest wfi/wfe -- handler passes them through (no
+     * scheduler yet). TID3: trap ID-group reads (MIDR/MPIDR/ID_AA64*) --
+     * handler forwards the value the guest saw before the trap existed.
+     * TSC: trap guest smc -- handler returns SMCCC_NOT_SUPPORTED instead of
+     * letting it reach EL3 (ADR-0017; no-op on QEMU, which forces TSC RES0
+     * without EL3, but live on RK3588's EL3/TF-A).
      */
     v->arch.hcr_el2 = (1ULL << 0) | (1ULL << 3) | (1ULL << 4) | (1ULL << 5) |
-                      (1ULL << 31);
+                      (1ULL << 13) | (1ULL << 14) | (1ULL << 18) |
+                      (1ULL << 19) | (1ULL << 31);
 
     vgic_init(v);
 }

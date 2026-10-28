@@ -107,7 +107,7 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 # Bare-metal SVM test guests: one shared runtime, one binary per case
 # (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
-SVM_CASES  := basic vtimer vm1
+SVM_CASES  := basic vtimer vm1 traps
 SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
 SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
@@ -115,7 +115,7 @@ HOST_CC    := cc
 
 .PHONY: all run clean defconfig menuconfig help svm check-offsets check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
-	test-qemu-dual test-qemu-shell test-x86-stub test guest
+	test-qemu-traps test-qemu-dual test-qemu-shell test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -234,6 +234,11 @@ test-qemu-vtimer: test-svm-build
 	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm-vtimer.bin \
 	sh tests/run_svm_test.sh tests/svm/expect/vtimer.txt
 
+test-qemu-traps: test-svm-build
+	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(TEST_BUILD_DIR)/svm/svm-traps.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/traps.txt
+
 test-qemu-dual: test-svm-dual-build
 	LINUX_IMAGE= HYPERVISOR_ELF=$(TEST_DUAL_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(TEST_DUAL_BUILD_DIR)/svm/svm-basic.bin \
@@ -264,7 +269,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-dual test-qemu-shell test-qemu-vspi
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-dual test-qemu-shell test-qemu-vspi
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh

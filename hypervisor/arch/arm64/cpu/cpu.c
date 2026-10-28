@@ -20,6 +20,15 @@ void cpu_arch_init(void)
     el2_mmu_init();
     el2_mmu_enable();
 
+    /*
+     * MDCR_EL2: TDE(8) traps guest debug exceptions, TPM(6)/TPMCR(5) trap
+     * guest PMU register access to EL2 (ADR-0017). No virtual debug or PMU
+     * support yet: register accesses land in handle_sysreg_trap's default
+     * (logged, read-as-zero, writes dropped); a real debug exception halts
+     * with the unexpected-exit log line.
+     */
+    SYSREG_WRITE(MDCR_EL2, (1ULL << 8) | (1ULL << 6) | (1ULL << 5));
+
     printk("[hv] Hello from EL2 on %s, CurrentEL=0x%lx\n", board_name,
            SYSREG_READ(CurrentEL));
 

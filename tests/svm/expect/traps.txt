@@ -1,0 +1,6 @@
+[hv] Hello from EL2
+SVM: launching VMID=
+SVM: TID3 MIDR forwarded (impl=0x41)
+SVM: TWI wfi passed through
+SVM: TWE wfe passed through
+SVM HVC: done (x1=0x0)
