@@ -13,7 +13,8 @@
 #ifndef SVM_LIB_H
 #define SVM_LIB_H
 
-#define HC_GUEST_DONE 0x80000001UL
+/* Keep in sync with arch/hypercall.h: SMCCC vendor range (0x87000000+). */
+#define HC_GUEST_DONE 0x87000001UL
 #define PSCI_VERSION  0x84000000UL
 
 #define SVM_ENTRY __attribute__((section(".text.start")))
@@ -23,6 +24,10 @@ void svm_puts(const char *s);
 
 /* Issue HVC #0 with x0/x1; returns the x0 the hypervisor hands back. */
 unsigned long svm_hvc(unsigned long x0, unsigned long x1);
+
+/* Same, with all four argument registers (PSCI calls use x1..x3). */
+unsigned long svm_hvc4(unsigned long x0, unsigned long x1,
+                       unsigned long x2, unsigned long x3);
 
 /* HC_GUEST_DONE with x1 = result; the hypervisor ends the test here. */
 void svm_done(unsigned long result) __attribute__((noreturn));

@@ -14,6 +14,23 @@ static void handle_hvc(struct arch_regs *regs)
     u32 func_id = (u32)regs->x[0];
     u8  svc     = (u8)(func_id >> 24);
 
+    /*
+     * SMCCC base probes (M11 pre-B), before the PSCI dispatch: the kernel's
+     * smccc probe queries these over the same hvc conduit. ARCH_FEATURES
+     * answers SUCCESS only for itself and SMCCC_VERSION -- no TRNG, no
+     * ARCH_SOC_ID, everything else NOT_SUPPORTED (DEN 0028 A).
+     */
+    if (func_id == SMCCC_VERSION) {
+        regs->x[0] = SMCCC_VERSION_1_1;
+        return;
+    }
+    if (func_id == SMCCC_ARCH_FEATURES) {
+        u32 query = (u32)regs->x[1];
+        regs->x[0] = (query == SMCCC_VERSION || query == SMCCC_ARCH_FEATURES)
+                     ? 0ULL : SMCCC_NOT_SUPPORTED;
+        return;
+    }
+
     if (svc == 0x84 || svc == 0xC4) {   /* 32-bit or 64-bit PSCI */
         psci_handle(regs);
         return;

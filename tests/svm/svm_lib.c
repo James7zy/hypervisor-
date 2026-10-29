@@ -29,6 +29,18 @@ unsigned long svm_hvc(unsigned long x0, unsigned long x1)
     return r0;
 }
 
+unsigned long svm_hvc4(unsigned long x0, unsigned long x1,
+                       unsigned long x2, unsigned long x3)
+{
+    register unsigned long r0 __asm__("x0") = x0;
+    register unsigned long r1 __asm__("x1") = x1;
+    register unsigned long r2 __asm__("x2") = x2;
+    register unsigned long r3 __asm__("x3") = x3;
+    __asm__ volatile("hvc #0" : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3)
+                             :: "memory");
+    return r0;
+}
+
 void svm_done(unsigned long result)
 {
     svm_hvc(HC_GUEST_DONE, result);

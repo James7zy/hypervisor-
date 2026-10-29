@@ -1,0 +1,12 @@
+[hv] Hello from EL2
+SVM: launching VMID=
+SVM: SMCCC version 1.1
+SVM: SMCCC ARCH_FEATURES(self) == 0
+SVM: FEATURES(CPU_SUSPEND) == 0
+SVM: AFFINITY_INFO(aff0=0, lvl0) == ON
+SVM: AFFINITY_INFO(aff1!=0) == -2
+SVM: MIGRATE_INFO_TYPE == 2 (no TOS, MP)
+SVM: timer woke the suspended CPU
+SVM: CPU_SUSPEND(standby) slept and woke
+SVM: CPU_SUSPEND(powerdown) returned, context intact
+SVM HVC: done (x1=0x0)

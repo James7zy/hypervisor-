@@ -75,6 +75,10 @@ void vm_run(void)
      */
     percpu[0].cpu_id   = 0;
     percpu[0].cur_vcpu = &vm[0].vcpu[0];
+    /* The boot pCPU is online too: secondary.c publishes .online for the
+     * PSCI-brought-up cores, and PSCI CPU_ON's ALREADY_ON check plus
+     * AFFINITY_INFO read it for the boot core as well. */
+    percpu[0].online   = 1;
     cpu_arch_set_this_percpu(&percpu[0]);
     vcpu_arch_load(&vm[0].vcpu[0]);
 
