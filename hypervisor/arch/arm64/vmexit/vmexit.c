@@ -9,6 +9,16 @@
 #include "data_abort.h"
 #include <vgic_sgi.h>
 
+/*
+ * ESR_EL2 Exception Class values (ARM DDI0487, ESR_ELx.EC field; names and
+ * values follow Linux arch/arm64/include/esr.h for easy cross-reference).
+ */
+#define EC_WFX       0x01U   /* Trapped WFI/WFE (HCR_EL2.TWI/TWE) */
+#define EC_HVC64     0x16U   /* HVC instruction execution, AArch64 */
+#define EC_SMC64     0x17U   /* SMC instruction execution, AArch64 (TSC) */
+#define EC_SYS64     0x18U   /* Trapped MSR/MRS */
+#define EC_DABT_LOW  0x24U   /* Data Abort from a lower EL */
+
 static void handle_hvc(struct arch_regs *regs)
 {
     u32 func_id = (u32)regs->x[0];
@@ -253,20 +263,19 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     u32 ec = (u32)(esr >> 26) & 0x3FU;
 
     switch (ec) {
-    case 0x01:   /* Trapped WFI/WFE (HCR_EL2.TWI/TWE): pass through */
+    case EC_WFX:      /* no scheduler yet: wfi/wfe pass through as no-ops */
         handle_wfx(regs);
         return;
-    case 0x16:   /* HVC from AArch64 EL1 */
+    case EC_HVC64:
         handle_hvc(regs);
         return;
-    case 0x17:   /* Trapped SMC (HCR_EL2.TSC): NOT_SUPPORTED */
+    case EC_SMC64:    /* ADR-0017: answer SMCCC_NOT_SUPPORTED, never EL3 */
         handle_smc(regs);
         return;
-    case 0x18:
-        /* Trapped MSR/MRS (EC=0x18). See handle_sysreg_trap. */
+    case EC_SYS64:    /* see handle_sysreg_trap */
         handle_sysreg_trap(regs, esr);
         return;
-    case 0x24:   /* Data Abort from lower EL → MMIO trap-and-emulate */
+    case EC_DABT_LOW: /* → MMIO trap-and-emulate */
         if (mmio_handle_data_abort(regs, esr) == 0)
             return;   /* handled: ELR advanced; el1_sync_handler erets back */
         /* fall through to the diagnostic + park on no handler / ISV=0 */
