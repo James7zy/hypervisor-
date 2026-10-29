@@ -106,14 +106,59 @@ static void psci_power_down(const char *what)
     cpu_arch_halt();
 }
 
+/*
+ * CPU_SUSPEND (M11 pre-B). KVM precedent (virt/kvm/arm/psci.c): in a virtual
+ * machine power states are illusory -- both standby and power_down sleep at
+ * EL2 until a wake interrupt and return SUCCESS with the caller's context
+ * intact (retention-shaped). The power_down entry point / context id are
+ * accepted but ignored. The M11 power-state rework (per-vCPU granularity)
+ * revisits this; until then it is the one honest path without a scheduler.
+ */
+static u64 psci_cpu_suspend(void)
+{
+    asm volatile("wfi");
+    return PSCI_RET_SUCCESS;
+}
+
+/*
+ * AFFINITY_INFO (M11 pre-B). We track vCPU granularity only: level must be 0,
+ * and the target affinity maps exactly like CPU_ON (Aff0 = VM-local vCPU
+ * index, higher affinity fields must be zero). ON_PENDING (the brief window
+ * inside CPU_ON) is not modelled; M11's state machine adds it.
+ */
+static u64 psci_affinity_info(struct arch_regs *regs)
+{
+    struct vm *m = current_vcpu()->owner;
+    u64 target_aff = regs->x[1];
+    u32 level      = (u32)regs->x[2];
+
+    if (level != 0U)
+        return PSCI_RET_INVALID_PARAMETERS;
+
+    u64 aff = target_aff & 0xFFULL;   /* Aff0 */
+    if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)VCPUS_PER_VM)
+        return PSCI_RET_INVALID_PARAMETERS;
+
+    u32 pcpu = m->config->pcpu_base + (u32)aff;
+    return (percpu[pcpu].online && !m->off) ? PSCI_AFF_LEVEL_ON
+                                            : PSCI_AFF_LEVEL_OFF;
+}
+
 /* PSCI_FEATURES: SUCCESS for the calls we implement, else NOT_SUPPORTED. */
 static u64 psci_features(u32 fn)
 {
     switch (fn) {
     case PSCI_VERSION:
     case PSCI_CPU_OFF:
+    case PSCI_CPU_SUSPEND_32:
+    case PSCI_CPU_SUSPEND_64:
+    case PSCI_AFFINITY_INFO_32:
+    case PSCI_AFFINITY_INFO_64:
+    case PSCI_MIGRATE_INFO_TYPE:
     case PSCI_SYSTEM_OFF:
     case PSCI_SYSTEM_RESET:
+    case PSCI_SYSTEM_RESET2_32:
+    case PSCI_SYSTEM_RESET2_64:
     case PSCI_FEATURES:
         return PSCI_RET_SUCCESS;
     default:
@@ -132,6 +177,18 @@ void psci_handle(struct arch_regs *regs)
     case PSCI_FEATURES:
         regs->x[0] = psci_features((u32)regs->x[1]);
         break;
+    case PSCI_CPU_SUSPEND_32:
+    case PSCI_CPU_SUSPEND_64:
+        regs->x[0] = psci_cpu_suspend();
+        break;
+    case PSCI_AFFINITY_INFO_32:
+    case PSCI_AFFINITY_INFO_64:
+        regs->x[0] = psci_affinity_info(regs);
+        break;
+    case PSCI_MIGRATE_INFO_TYPE:
+        /* No trusted OS, MP-safe (DEN0022 5.7; kernel PSCI_0_2_TOS_MP). */
+        regs->x[0] = PSCI_TOS_NOT_PRESENT_MP;
+        break;
     case PSCI_CPU_OFF:
         psci_power_down("CPU_OFF");        /* no return */
         break;
@@ -140,6 +197,16 @@ void psci_handle(struct arch_regs *regs)
         break;
     case PSCI_SYSTEM_RESET:
         psci_power_down("SYSTEM_RESET");    /* no return */
+        break;
+    case PSCI_SYSTEM_RESET2_32:
+    case PSCI_SYSTEM_RESET2_64:
+        /* reset_type: 0 = SYSTEM_WARM_RESET, 1 = SYSTEM_COLD_RESET
+         * (DEN0022 5.13); anything else is INVALID_PARAMETERS. */
+        if (regs->x[1] > 1ULL) {
+            regs->x[0] = PSCI_RET_INVALID_PARAMETERS;
+            break;
+        }
+        psci_power_down("SYSTEM_RESET2");   /* no return */
         break;
     case PSCI_CPU_ON_32:
     case PSCI_CPU_ON_64:

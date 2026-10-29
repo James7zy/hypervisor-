@@ -12,15 +12,34 @@
 
 /* PSCI function IDs (Arm DEN0022; SMC32 unless suffixed _64). */
 #define PSCI_VERSION       0x84000000U
-#define PSCI_CPU_OFF       0x84000002U
+#define PSCI_CPU_SUSPEND_32  0x84000001U
 #define PSCI_CPU_ON_32     0x84000003U
+#define PSCI_AFFINITY_INFO_32 0x84000004U
+#define PSCI_MIGRATE_INFO_TYPE 0x84000006U
+#define PSCI_CPU_OFF       0x84000002U
 #define PSCI_SYSTEM_OFF    0x84000008U
 #define PSCI_SYSTEM_RESET  0x84000009U
 #define PSCI_FEATURES      0x8400000AU
+#define PSCI_SYSTEM_RESET2_32 0x84000012U
 #define PSCI_CPU_ON_64     0xC4000003U
+#define PSCI_CPU_SUSPEND_64  0xC4000001U
+#define PSCI_AFFINITY_INFO_64 0xC4000004U
+#define PSCI_SYSTEM_RESET2_64 0xC4000012U
 
 /* Version word: major 1 (bits 31:16), minor 1 (bits 15:0) => PSCI v1.1. */
 #define PSCI_VERSION_1_1   0x00010001U
+
+/* CPU_SUSPEND power_state encoding (DEN0022 5.3): bit30 = state-type,
+ * set = power_down, clear = standby. */
+#define PSCI_STATE_TYPE_POWERDOWN  (1ULL << 30)
+
+/* MIGRATE_INFO_TYPE return: trusted OS not present, MP-safe (kernel
+ * PSCI_0_2_TOS_MP, bao PSCI_TOS_NOT_PRESENT_MP -- same value 2). */
+#define PSCI_TOS_NOT_PRESENT_MP  2ULL
+
+/* AFFINITY_INFO return (DEN0022 5.4): HW_ON / HW_OFF. */
+#define PSCI_AFF_LEVEL_ON   0ULL
+#define PSCI_AFF_LEVEL_OFF  1ULL
 
 /* Return codes (Arm DEN0022). Negative values sign-extend into the 64-bit reg. */
 #define PSCI_RET_SUCCESS              0ULL
