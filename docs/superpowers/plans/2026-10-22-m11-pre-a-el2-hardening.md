@@ -1,7 +1,7 @@
 # M11 前置 A — EL2 加固 Implementation Plan
 
-> **Status:** In progress. **时间盒:** 2 周(ADR-0017 2026-10-22 修订),到期即止,
-> 未完成部分记已知缺口,强制进入 M11 前置 B,不顺延。
+> **Status:** Executed（2026-10-28 全部完成,时间盒内。slice 1 `4c9e1dd`、
+> slice 2 `a5b29aa`、slice 3 `b5e6daa`;无已知缺口。收尾状态行 2026-10-30 补更）。
 
 **Goal:** EL2 自己开 Stage-1 MMU 和 cache(hypervisor 内存从 Device 变 Normal),并加上
 `HCR_EL2`/`MDCR_EL2` 的陷入集合(`TSC`/`TWI`/`TWE`/ID 寄存器过滤/PMU-debug)。

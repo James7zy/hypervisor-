@@ -1,6 +1,7 @@
 # M11 前置 B — PSCI/SMCCC 补全 Implementation Plan
 
-> **Status:** In progress. **时间盒:** 1 周（ADR-0017），到期即止。
+> **Status:** Executed（2026-10-28 全部完成,时间盒内。slice 1 `422a016`、
+> slice 2 `4c9af8e`;无已知缺口。收尾状态行 2026-10-30 更新）。
 > Full design: `docs/superpowers/specs/2026-10-28-m11-pre-b-psci-smccc-design.md`。
 
 **Goal:** 补齐 PSCI 四组函数 + SMCCC 版本/特性探测，接口面为 M11 电源状态
