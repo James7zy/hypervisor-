@@ -87,6 +87,8 @@ sequenceDiagram
   跟随，分叉由用户集成时主导处理。
 - **`release/*`、`hotfix/*`**：按 nvie 模型保留命名，均由用户发起（如某个里程碑
   gate 全绿后打 release），loop 不自行创建。
+- **远端同步（2026-10-30 用户指示）**：`develop` 每日收尾 push 到 `origin/develop`
+  并保持跟踪；`master` 的远端同样归用户所有，loop 绝不 push。
 - 日报：`docs/reports/YYYY-MM-DD-*.md`（中文），随当日最后提交落在 develop。内容：
   当日切片、commit 列表、gate 结果原文摘录、架构师评审结论、已知缺口、次日计划。
 - Linear 同步照常：切片完成即更新 issue 状态（与 git 分支归属无关）。
