@@ -10,6 +10,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-30-host-unit-test-harness-design.md`（关卡①已批准，含架构师裁决记录）
 
+> **关卡①（plan 审查）:** 2026-10-30 APPROVE_WITH_CHANGES，修订已并入本文：host_test.h
+> 第 4 文件经裁决加入；CLAUDE.md 静态检查计数 4；新增静态 gate 子集复跑与 spec 同步步骤。
+
 ## Global Constraints
 
 - host 编译 flag 集（实证钉死，整体照抄，不逐项重议）：`-Wall -Wextra -Werror -O2 -g -fno-builtin -U_FORTIFY_SOURCE -std=c11`（另加 `-Ihypervisor/include`）。
@@ -283,7 +286,7 @@ git commit -m "test: mmio bus unit tests (register limit, lookup bounds, dispatc
 ### Task 3: 验收收尾（固件 bit 级不变 + 文档）
 
 **Files:**
-- Modify: `CLAUDE.md`（验证一节）、`docs/adr/0009-no-ci-manual-verification.md`（修订记录，仿 0015 头部日期注记惯例）、本 plan 状态行。
+- Modify: `CLAUDE.md`（验证一节）、`docs/adr/0009-no-ci-manual-verification.md`（修订记录，仿 0015 头部日期注记惯例）、`docs/superpowers/specs/2026-10-30-host-unit-test-harness-design.md`（文件树补 host_test.h；背景行场景数 6→7）、本 plan 状态行。
 
 **Interfaces:** 无代码接口；DoD 的三项收尾。
 
@@ -295,7 +298,7 @@ PATH=$HOME/Downloads/toolchain/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-l
 sha256sum build/pre-harness/hypervisor.elf build/post-harness/hypervisor.elf
 ```
 
-Expected: 两个哈希**逐字节相同**（链接输入未变：hv-objs 显式清单、交叉 CFLAGS 未动）。不同 → 停下查因，不许跳过。
+Expected: 两个哈希**逐字节相同**（链接输入未变：hv-objs 显式清单、交叉 CFLAGS 未动）。不同 → 停下查因，不许跳过。通过后清理临时目录（`make clean` 不覆盖非默认 BUILD_DIR）：`rm -rf build/pre-harness build/post-harness`。
 
 - [ ] **Step 2: CLAUDE.md 验证一节**
 
@@ -304,12 +307,27 @@ CLAUDE.md 现无独立验证小节；新增一节（置于 "## Project" 之后�
 ```markdown
 ## 验证
 
-- **硬件验收 gate**：`make test`（3 项静态检查 + 7 个 QEMU 场景，ADR-0009；分钟级）。
+- **硬件验收 gate**：`make test`（4 项静态检查 + 7 个 QEMU 场景，ADR-0009；分钟级）。
 - **纯逻辑改动**：`make host-test`（host gcc 直接编译同一份源文件，秒级；tests/host/，
   ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
 ```
 
-- [ ] **Step 3: ADR-0009 修订记录**
+- [ ] **Step 3: 静态 gate 子集复跑（DoD "make test 不受影响" 的切片内执行，关卡① required #3）**
+
+```bash
+PATH=$HOME/Downloads/toolchain/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-linux-gnu/bin:$PATH \
+  make check-arch-boundary test-x86-stub check-offsets check-offsets-target
+```
+
+Expected: 四项全 PASS（QEMU 全套由测试专家在关卡②独立复跑，不在切片内重复）。
+
+- [ ] **Step 4: spec 同步（关卡① required #2 + advisory #5）**
+
+`2026-10-30-host-unit-test-harness-design.md` 的目录树在 runner.c 行后加一行
+`host_test.h  # TEST_ASSERT 宏 + 计数器 extern + test_* 原型（关卡① 2026-10-30 裁决加入）`；
+背景行 "6 个场景" → "7 个场景"（test-qemu-vspi 已并入）。
+
+- [ ] **Step 5: ADR-0009 修订记录**
 
 头部 Status 引用块内追加日期注记（仿 0015 惯例）：
 
@@ -320,16 +338,17 @@ CLAUDE.md 现无独立验证小节；新增一节（置于 "## Project" 之后�
 > "Considered Options" 里"值得在有可移植逻辑后重访"的条件自此兑现。
 ```
 
-- [ ] **Step 4: Commit（docs）**
+- [ ] **Step 6: Commit（docs）**
 
 ```bash
-git add CLAUDE.md docs/adr/0009-no-ci-manual-verification.md
+git add CLAUDE.md docs/adr/0009-no-ci-manual-verification.md \
+        docs/superpowers/specs/2026-10-30-host-unit-test-harness-design.md
 git commit -m "docs: record host-test layer in CLAUDE.md verification + ADR-0009 revision"
 ```
 
-- [ ] **Step 5: 更新本 plan 状态行**
+- [ ] **Step 7: 更新本 plan 状态行**
 
-头部追加 `> **Status:** Executed（见合并提交）。`（pre-a/pre-b 惯例；随切片最后提交落库。）
+头部追加 `> **Status:** Executed（2026-10-30，见合并提交）。`（pre-a/pre-b 惯例带完成日期；随切片最后提交落库。）
 
 ---
 
