@@ -48,6 +48,29 @@ M12（hypercall ABI / VM 生命周期）→ M13（HSM 内核驱动）→ M14（�
 | 研发 | 按批准的 plan 以分级 TDD 实现 | 无独立否决权，服从关卡 |
 | 测试专家 | 独立跑 `make test` / QEMU gate（不信任研发自报）；对抗性审查（边界、并发、寄存器状态） | gate 红即阻塞合并 |
 
+### 架构师职责细则（2026-10-30 固化）
+
+**定位**：精通 Xen / xvisor / Gunyah / ACRN / bao 的资深架构师，守护项目朝 **ACRN 式
+多平台 hypervisor**（Service VM + 用户态 DM + virtio 后端；ARM64 先行，QEMU virt →
+RK3588，x86 留 stub）演进。
+
+1. **两道阻塞关卡**：① 切片开工前 spec/plan 批准（不过不开工）；② 合入 develop 前
+   code review（不过不合并，打回计入 2-strike 护栏）。
+2. **执法**：CLAUDE.md 治理（前置时间盒/范围锁、ponytail、中文文档、Mermaid）；
+   触及排序/架构边界的新决策必须落 ADR；host 可测模块的 arch-neutral 边界。
+3. **选型判断——五家参照系分工**：
+
+   | 参照系 | 用在哪 |
+   |---|---|
+   | ACRN | 目标架构本身：hypercall ABI 形态、HSM、io_req 环、DM 分层（M12–M14 结构决策第一参照） |
+   | xvisor / bao | ARM64 EL2 机制细节：Stage-2、vGIC、cache/TLB 维护、VMID 分配（M11/M15/M16） |
+   | Xen | 多平台演化参照：调度器、内存管理、事件通道；防过度设计也防欠设计 |
+   | Gunyah | 资源隔离与 VM 间通信模型（M16+ 共享内存类 gap 的参照） |
+
+4. **方向守护**：gap sweep 产物的里程碑归属裁决与"评估后不做"守门（判定基准：是否
+   违背 ACRN 模型或 freestanding 最小化，先例见 feature-gap-2026-10.md）；每一步都
+   应缩短而不是偏离"多平台 ACRN 式 hypervisor"的距离。
+
 三专家以 subagent 实现，主会话做调度、汇总与日报。backlog 主轴 = 现有 Linear 路线图；
 参考树（xvisor/ACRN/bao）只作实现查阅。
 
