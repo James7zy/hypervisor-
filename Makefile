@@ -24,7 +24,7 @@ CONFIG ?= .config
 
 # Goals that only write or remove the config, or print help, need neither a
 # config nor a compiler.
-ifeq ($(filter %_defconfig defconfig clean help menuconfig,$(MAKECMDGOALS)),)
+ifeq ($(filter %_defconfig defconfig clean help menuconfig host-test,$(MAKECMDGOALS)),)
 need-config := y
 
 ifeq ($(wildcard $(CONFIG)),)
@@ -113,7 +113,7 @@ SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
 HOST_CC    := cc
 
-.PHONY: all run clean defconfig menuconfig help svm check-offsets check-arch-boundary \
+.PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
 	test-x86-stub test guest
@@ -215,6 +215,23 @@ $(BUILD_DIR)/check_offsets_target.o: tests/check_offsets_target.c
 check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 	@echo "PASS: cross-compiled struct offsets match assembly macros"
 
+# Host unit tests (ADR-0009, 2026-10-30 revision): second-level feedback for
+# arch-neutral logic; NOT part of `make test` (that stays the QEMU gate).
+# -fno-builtin: host gcc -O2 turns string.c's memset loop into a call to
+# itself without it. -U_FORTIFY_SOURCE: Ubuntu default fortify would redirect
+# the tests' memset calls to glibc __memset_chk (fake green).
+HOST_TEST_CFLAGS := -Wall -Wextra -Werror -O2 -g -fno-builtin -U_FORTIFY_SOURCE \
+    -std=c11 -Ihypervisor/include
+HOST_TEST_SRCS := tests/host/runner.c tests/host/string_test.c \
+    hypervisor/lib/string.c
+
+$(BUILD_DIR)/host/host_test: $(HOST_TEST_SRCS) tests/host/host_test.h
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_TEST_SRCS)
+
+host-test: $(BUILD_DIR)/host/host_test
+	$(BUILD_DIR)/host/host_test
+
 TEST_BUILD_DIR := build/test-svm
 
 test-svm-build:
@@ -304,6 +321,6 @@ menuconfig:
 	@false
 
 help:
-	@echo "Targets: all run clean test <board>_defconfig defconfig"
+	@echo "Targets: all run clean test host-test <board>_defconfig defconfig"
 	@echo "Select:  export ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE); make <board>_defconfig; make"
 	@echo "Boards for ARCH=$(ARCH): $$(ls $(ARCH_CONFIGS) 2>/dev/null | sed 's/_defconfig$$//' | tr '\n' ' ')"
