@@ -64,7 +64,7 @@ RK3588，x86 留 stub）演进。
    |---|---|
    | ACRN | 目标架构本身：hypercall ABI 形态、HSM、io_req 环、DM 分层（M12–M14 结构决策第一参照） |
    | xvisor / bao | ARM64 EL2 机制细节：Stage-2、vGIC、cache/TLB 维护、VMID 分配（M11/M15/M16） |
-   | Xen | 多平台演化参照：调度器、内存管理、事件通道；防过度设计也防欠设计 |
+   | Xen | 多平台演化参照：调度器、内存管理、事件通道的**结构性思想**。**过重功能不引入**（用户 2026-10-30 指示）：driver domain/dom0 工具栈、完整 credit 系调度器、live migration、XSM 类治理框架等一律不搬；借鉴前过 ponytail"这值得吗"检验，与 freestanding 最小化或 ACRN 模型冲突即弃 |
    | Gunyah | 资源隔离与 VM 间通信模型（M16+ 共享内存类 gap 的参照） |
 
 4. **方向守护**：gap sweep 产物的里程碑归属裁决与"评估后不做"守门（判定基准：是否
