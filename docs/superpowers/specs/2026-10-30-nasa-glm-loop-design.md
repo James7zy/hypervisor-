@@ -72,11 +72,17 @@ sequenceDiagram
 
 ## 分支与产物
 
-- 切片在 worktree `../nasa-glm-loop-hyp` 上开发；架构师批准后主工作区 `master` fast-forward
-  合入（本 loop 是 master 的唯一写入者，切片间 loop 分支与 master 保持一致）。
-- 日报：`docs/reports/YYYY-MM-DD-*.md`（中文），随当日最后合并进 master。内容：当日切片、
-  commit 列表、gate 结果原文摘录、架构师评审结论、已知缺口、次日计划。
-- 切片合入后同步 Linear issue 状态。
+> **2026-10-30 用户修订**：Day 1 收尾时曾按初版协议把当日提交 fast-forward 进 master，
+> 用户随后手动回退（master 回到 `10b4df9`）并指示：**loop 分支独立向前演进，不合入
+> master**。以下为修订后协议。
+
+- 一切开发、切片、日报只在 worktree `../nasa-glm-loop-hyp`（分支 `nasa-glm-loop-hyp`）
+  上进行；**任何情况下不合并、不 rebase 到 master**——master 归用户所有，何时以何种
+  方式集成（合并/cherry-pick/放弃）由用户单独决定。
+- master 后续若前进，loop 分支不主动跟随 rebase；产生分叉属预期，集成时由用户主导。
+- 日报：`docs/reports/YYYY-MM-DD-*.md`（中文），随当日最后提交落在 loop 分支。内容：
+  当日切片、commit 列表、gate 结果原文摘录、架构师评审结论、已知缺口、次日计划。
+- Linear 同步照常：切片完成即更新 issue 状态（与 git 分支归属无关）。
 
 ## 三环模型映射（Loop engineering）
 
