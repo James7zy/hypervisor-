@@ -22,6 +22,24 @@ M12（hypercall ABI / VM 生命周期）→ M13（HSM 内核驱动）→ M14（�
 2. 已接受 ADR 与架构边界优先，不能以精简为由削弱。
 3. 范围只能通过 ADR 或用户明确指令改变；loop 不得自我扩权。"直到功能完善"不构成扩权理由。
 
+## superpowers 技能绑定（2026-10-30 补记，纠偏）
+
+切片生命周期各阶段**必须通过 Skill 工具加载对应 superpowers 技能执行**，不得以"协议
+文档已描述等价流程"为由跳过加载（Day 1 的教训：跟了形状没跟纪律）：
+
+| 阶段 | 技能（Skill 调用） |
+|---|---|
+| 切片设计/spec | `superpowers:brainstorming`（需求不清时；盘问类交互由用户发起的可豁免） |
+| 切片开工建分支 | `superpowers:using-git-worktrees`（loop 已有 develop worktree，技能用于 feature 分支规程） |
+| 写实施 plan | `superpowers:writing-plans`（每任务精确路径 + 完整代码 + 验证步骤） |
+| 实现 | `superpowers:executing-plans`（主会话自实现）或 `superpowers:subagent-driven-development`（每任务派新 subagent + 逐个 review） |
+| 编码中 | `superpowers:test-driven-development`（RED-GREEN-REFACTOR，删测试前写的实现） |
+| 任务间/合并前 | `superpowers:requesting-code-review`（三专家关卡②的执行载体之一） |
+| 收尾声明前 | `superpowers:verification-before-completion`（先跑验证再宣称完成） |
+
+`superpowers:finishing-a-development-branch` 不适用（合并目标由本协议固定为 develop，
+不走该技能的 merge/PR 选项菜单）。
+
 ## 三专家
 
 | 角色 | 职责 | 强制关卡 |
