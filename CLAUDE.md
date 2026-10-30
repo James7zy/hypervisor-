@@ -67,6 +67,12 @@ together with the original scheduler design rather than restoring its old paths.
 clearly defined units; high cohesion, low coupling. Each milestone gets a spec in
 `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/`.
 
+## 验证
+
+- **硬件验收 gate**：`make test`（4 项静态检查 + 7 个 QEMU 场景，ADR-0009；分钟级）。
+- **纯逻辑改动**：`make host-test`（host gcc 直接编译同一份源文件，秒级；tests/host/，
+  ADR-0009 2026-10-30 修订）。不并入 `make test`，gate 语义不变。
+
 ## Where knowledge lives
 
 Would it still hold on another machine, for another person?
