@@ -7,6 +7,7 @@ int tests_failed;
 int main(void)
 {
     test_string();
+    test_mmio();
 
     if (tests_failed == 0) {
         printf("PASS (%d assertions)\n", tests_run);

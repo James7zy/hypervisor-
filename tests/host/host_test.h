@@ -17,5 +17,6 @@ extern int tests_failed;
 } while (0)
 
 void test_string(void);
+void test_mmio(void);
 
 #endif /* HV_HOST_TEST_H */
