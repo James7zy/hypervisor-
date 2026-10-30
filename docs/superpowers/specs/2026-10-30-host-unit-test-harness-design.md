@@ -24,7 +24,7 @@ QEMU gate（硬件路径仍以 gate 为强制验收）；不追求覆盖现有�
 
 ```
 tests/host/
-  runner.c        # assert 宏 + main：顺序调用所有 test_* 函数，失败打印 文件:行，非零退出
+  runner.c        # main：顺序调用所有 test_* 函数，失败汇总打印，非零退出
   host_test.h     # TEST_ASSERT 宏 + 计数器 extern + test_* 原型（关卡① 2026-10-30 裁决加入）
   mmio_test.c     # 首批被测：common/io/mmio.c
   string_test.c   # 首批被测：lib/string.c
