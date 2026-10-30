@@ -1,5 +1,7 @@
 # Host 单测 harness 实施计划
 
+> **Status:** Executed（2026-10-30，见合并提交）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 落地 `make host-test`：host gcc 秒级编译并运行同一份 hypervisor 纯逻辑源文件的单测（首批 lib/string.c + common/io/mmio.c），普通 shell 可跑、全绿、FAIL 路径实证可用。

@@ -1,6 +1,10 @@
 # Verify with a three-step manual gate, not an automated test suite
 
 > **Status:** Accepted. **Milestone:** M0.
+> **2026-10-30:** host 单测层启用：`make host-test` 用 host gcc 编译同一份
+> arch-neutral 源文件跑纯逻辑单测（tests/host/，零依赖）。本 ADR 的三步 gate
+> 语义不变，仍是强制验收；host 层是它的下一级快速反馈，不是替代。
+> "Considered Options" 里"值得在有可移植逻辑后重访"的条件自此兑现。
 
 A bare-metal EL2 hypervisor is awkward to unit-test: most of its behaviour is
 only observable on real (or emulated) ARM hardware after a context switch into a

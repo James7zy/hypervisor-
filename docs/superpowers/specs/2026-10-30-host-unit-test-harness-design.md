@@ -6,7 +6,7 @@
 
 ## 背景与问题
 
-仓库现有验证只有 QEMU 场景层（`make test`，6 个场景 + 4 项静态检查，分钟级反馈）。
+仓库现有验证只有 QEMU 场景层（`make test`，7 个场景 + 4 项静态检查，分钟级反馈）。
 loop 协议要求纯逻辑严格 RED-GREEN-REFACTOR，分钟级 QEMU 反馈撑不起 TDD 节奏，且
 M11 调度器（位图、runqueue、优先级）是纯逻辑最密集的里程碑——需要 host 单测层。
 
@@ -24,7 +24,8 @@ QEMU gate（硬件路径仍以 gate 为强制验收）；不追求覆盖现有�
 
 ```
 tests/host/
-  runner.c        # assert 宏 + main：顺序调用所有 test_* 函数，失败打印 文件:行，非零退出
+  runner.c        # main：顺序调用所有 test_* 函数，失败汇总打印，非零退出
+  host_test.h     # TEST_ASSERT 宏 + 计数器 extern + test_* 原型（关卡① 2026-10-30 裁决加入）
   mmio_test.c     # 首批被测：common/io/mmio.c
   string_test.c   # 首批被测：lib/string.c
 ```
