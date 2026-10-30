@@ -1,7 +1,8 @@
 # nasa-glm-loop 设计：三专家 TDD 开发 loop（M11–M14）
 
 > **Status:** Proposed（待用户批准）。**日期:** 2026-10-30。
-> **分支:** `nasa-glm-loop-hyp`（worktree `../nasa-glm-loop-hyp`，基于 master `10b4df9`，已创建）。
+> **分支:** `develop`（worktree `../develop`，源于 master `10b4df9`；原名
+> `nasa-glm-loop-hyp`，2026-10-30 更名以对齐 git-flow）。
 > 本文档与 CLAUDE.md 冲突时以 CLAUDE.md 为准。
 
 ## 目标与结束条件
@@ -64,23 +65,29 @@ sequenceDiagram
     T-->>A: gate 结果 + 审查发现
     A->>A: 关卡② code review
     alt gate 全绿 + review 通过
-        A-->>U: 合并 master + Linear 同步
+        A-->>U: 合入 develop（feature 分支 --no-ff）+ Linear 同步
     else 红 / 审查不过
         A-->>D: 打回修复（计入 2-strike 护栏）
     end
 ```
 
-## 分支与产物
+## 分支与产物（git-flow 对齐版，2026-10-30 定）
 
-> **2026-10-30 用户修订**：Day 1 收尾时曾按初版协议把当日提交 fast-forward 进 master，
-> 用户随后手动回退（master 回到 `10b4df9`）并指示：**loop 分支独立向前演进，不合入
-> master**。以下为修订后协议。
+> **修订史**：Day 1 收尾曾按初版协议把当日提交 fast-forward 进 master，用户手动回退
+> （master 回到 `10b4df9`）并指示 loop 分支独立演进；随后更名 `nasa-glm-loop-hyp` →
+> `develop`，对齐 [nvie 分支模型](https://nvie.com/posts/a-successful-git-branching-model/)。
 
-- 一切开发、切片、日报只在 worktree `../nasa-glm-loop-hyp`（分支 `nasa-glm-loop-hyp`）
-  上进行；**任何情况下不合并、不 rebase 到 master**——master 归用户所有，何时以何种
-  方式集成（合并/cherry-pick/放弃）由用户单独决定。
-- master 后续若前进，loop 分支不主动跟随 rebase；产生分叉属预期，集成时由用户主导。
-- 日报：`docs/reports/YYYY-MM-DD-*.md`（中文），随当日最后提交落在 loop 分支。内容：
+- **`develop`**（worktree `../develop`）= loop 的集成分支，"最新交付的开发变更"所在。
+  一切切片、日报经关卡②后合入这里。
+- **切片分支 `feature/<名称>`**：从 `develop` 拉出，关卡①批准开工，关卡②通过后
+  `--no-ff` 合回 `develop` 并删除切片分支（Day 1 的 docs 类提交直接落 develop，属
+  模型允许的 trunk 提交）。
+- **`master`** = 用户所有的 release 线，只接收用户发起的 release/hotfix 合并；
+  **loop 任何情况下不合并、不 rebase、不 push master**。master 若前进，develop 不主动
+  跟随，分叉由用户集成时主导处理。
+- **`release/*`、`hotfix/*`**：按 nvie 模型保留命名，均由用户发起（如某个里程碑
+  gate 全绿后打 release），loop 不自行创建。
+- 日报：`docs/reports/YYYY-MM-DD-*.md`（中文），随当日最后提交落在 develop。内容：
   当日切片、commit 列表、gate 结果原文摘录、架构师评审结论、已知缺口、次日计划。
 - Linear 同步照常：切片完成即更新 issue 状态（与 git 分支归属无关）。
 
