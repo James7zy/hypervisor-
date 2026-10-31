@@ -16,17 +16,21 @@
 const struct vm_config vm_configs[NR_VMS] = {
 #ifdef CONFIG_SVM_SHARED_PCPU
     /*
-     * ctxsw detector profile (M11 slice A, D3): both vCPUs affinity to
-     * pCPU0. Sharing is legal DATA; without a scheduler the pCPU runs the
-     * lowest (vmi,idx) vCPU only — vCPU1 is CPU_ON-able but never picked,
-     * which is exactly the controlled red tests/svm/cases/ctxsw.c asserts.
-     * Slice-B note: sgi_pending[] is keyed by pCPU, so vCPU1-aimed vSGIs
-     * would reach vCPU0 under this profile (B2 decision).
+     * ctxsw detector profile (M11 slice A, D3; shared EXECUTION since B1):
+     * both vCPUs affinity to pCPU0 and round-robin via the WFI yield.
+     * sgi_pending[] is keyed by pCPU, so vCPU1-aimed vSGIs would reach
+     * vCPU0 under this profile (B2 decision).
      *
-     * B1 boundary (gate-1 R5): cases on this profile must NOT use the vGIC,
-     * must NOT program CNTV, and keep DAIF masked — the runtime save/restore
-     * protocol (shadow vs live LR, wake merge) lands in B2; until then
-     * sharing must not run Linux or any interrupt-driven guest.
+     * B1 boundary (gate-1 R5 + gate-2 additions): cases on this profile
+     * must NOT use the vGIC, must NOT program CNTV, keep DAIF masked, and
+     * must NOT write EL1 system registers (B1 switches GPR frame only —
+     * divergent VBAR/CPACR/TPIDR/SCTLR values corrupt the other vCPU).
+     * MPIDR_EL1 reads return the live VMPIDR_EL2, which resume does not
+     * reprogram — a resumed vCPU sees the last fresh-LOADED vCPU's Aff0.
+     * Cases also take no console input (the only remote vGIC publisher).
+     * The runtime save/restore protocol (shadow vs live LR, wake merge)
+     * lands in B2; until then sharing must not run Linux or any
+     * interrupt-driven guest.
      */
     [0] = { .vmid = 1, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM_MEM_BASE, .mem_size = BOARD_SVM_MEM_SIZE,

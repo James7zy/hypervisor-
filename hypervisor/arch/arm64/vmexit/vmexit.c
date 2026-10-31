@@ -279,7 +279,7 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     u32 ec = (u32)(esr >> 26) & 0x3FU;
 
     switch (ec) {
-    case EC_WFX:      /* no scheduler yet: wfi/wfe pass through as no-ops */
+    case EC_WFX:      /* wfe passes through; wfi = B1 cooperative yield */
         handle_wfx(regs, esr);
         return;
     case EC_HVC64:

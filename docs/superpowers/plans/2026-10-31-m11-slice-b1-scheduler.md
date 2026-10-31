@@ -37,7 +37,7 @@
 | 2 | 让出后队列丢失唯一 vCPU → pCPU 空转挂死 | sched_q 空队/单元素重排 host 断言 + ctxsw 轮转可见 |
 | 3 | WFI 让出未推进 ELR → 回到 wfi 死循环 | vmexit WFI 分支 `elr += 4` 保持 + ctxsw 轮转计数 |
 | 4 | 已启动 vCPU 被当 fresh-boot 清白（vGIC/EL1 被抹） | `launched` 分叉 + ctxsw 两 vCPU 各自存活多轮 |
-| 5 | CPU_ON 入队与 pick 竞态（kick 前 vCPU 不在队列） | 入队先于状态发布（同片 A 序）+ psci 用例回归 |
+| 5 | CPU_ON 入队与 pick 竞态（kick 前 vCPU 不在队列） | 入队在状态发布之后、dsb+kick 之前（修订：OFF 态入队会被 skip 规则丢弃）+ psci 用例回归 |
 
 ---
 
@@ -126,7 +126,7 @@ for (;;) {
 ```
 - **1:1 行为等价由构造成立**：独占队列 yield 后 pick 仍返回自己 → 走 else 分支零 ICH 触碰
   （与今日放行逐指令等价）；put/resume 被关进无远端发布者的共享 profile（vgic 复用裁定）。
-- CPU_ON：`sched_enqueue(target)` 先于状态发布 + dsb + kick（Review Focus #5 序不变）。
+- CPU_ON：状态发布（ON_PENDING）→ `sched_enqueue(target)` → dsb + kick（修订序：OFF 态入队会被 owner 的 skip 规则 pick-丢弃）。
 
 - [ ] Step 1 sched.c 四函数（含队列锁与 _Static_assert）+ 两循环按上形状改造 + CPU_ON 入队
   + 删除 secondary.c 的 idle-forever 初始化分支（cur_vcpu 初值 NULL 保留）。

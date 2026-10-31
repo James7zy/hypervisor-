@@ -45,8 +45,9 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
     /*
      * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|TWI(13)|TWE(14)|TID3(18)|TSC(19)|
      * RW(31) set; HCD(29) clear (allow HVC). RW=1: EL1 executes in AArch64
-     * state. TWI/TWE: trap guest wfi/wfe -- handler passes them through (no
-     * scheduler yet). TID3: trap ID-group reads (MIDR/MPIDR/ID_AA64*) --
+     * state. TWI/TWE: trap guest wfi/wfe -- wfe passes through, wfi is
+     * the B1 cooperative yield point. TID3: trap ID-group reads
+     * (MIDR/MPIDR/ID_AA64*) --
      * handler forwards the value the guest saw before the trap existed.
      * TSC: trap guest smc -- handler returns SMCCC_NOT_SUPPORTED instead of
      * letting it reach EL3 (ADR-0017; no-op on QEMU, which forces TSC RES0

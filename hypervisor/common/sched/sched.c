@@ -38,6 +38,10 @@ struct vcpu *sched_pick(u32 pcpu)
 
 void sched_yield_cur(void)
 {
+    /* Queue derived from the CURRENT pCPU while sched_enqueue derives it
+     * from the vCPU's affinity — equal under the B1 invariant that
+     * cur_vcpu is always this pCPU's affined vCPU (static affinity, no
+     * migration). B2 re-audits if that ever loosens. */
     struct vcpu *v = current_vcpu();
     u32 pcpu = current_vcpu_id();
 

@@ -58,9 +58,10 @@ void vm_run(void);
 
 /*
  * The vCPU statically affined to pCPU `pcpu` (vm_config.vcpu_pcpu[]), or NULL
- * if none. With 1:1 tables this is the pCPU's only vCPU; with shared
- * affinity (legal data from slice A) it is the LOWEST (vmi, idx) — slice B's
- * scheduler replaces this pick. M11 slice A.
+ * if none. With 1:1 tables this is the pCPU's only vCPU. Since B1 the run
+ * loops pick through the per-pCPU RR queues instead; this is now the boot
+ * identity check + cur_vcpu seed. (Shared-affinity identity per vCPU is
+ * the queue's job, not a "lowest" pick anymore.)
  */
 struct vcpu *vcpu_for_pcpu(u32 pcpu);
 
