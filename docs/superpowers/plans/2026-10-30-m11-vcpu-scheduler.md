@@ -42,6 +42,10 @@ flowchart LR
 
 ## 片 B — 调度器与协作式切换，同 VM 共享（依赖：A）
 
+> 2026-10-31 关卡①裁定拆分：**B1（已完成，Day 4）** = sched_q + 调度循环 + WFI 让出
+> + ctxsw GPR 级转绿进聚合（8 场景）+ ADR-0018；**B2** = EL1 全量 + vGIC/vtimer
+> 运行期协议 + block/wake + ADR-0019，B1 合并后另写 plan。
+
 **交付**: `common/sched/`（`sched_q.c` 纯逻辑核 + `sched.c` 粘合 + `switch_to` 唯一公开
 入口）；`secondary_main` 改问调度器；WFI trap → block/yield；`vcpu_arch_put` + EL1 批量
 保存/恢复（先推导→detector→对照 bao/xvisor）；vGIC 运行期保存协议重设计 +

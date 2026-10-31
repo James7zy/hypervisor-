@@ -151,12 +151,23 @@ void secondary_main(u32 id)
             if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
                 continue;
         } else {
-            /* Self re-pick after a yield: the vCPU is RUNNABLE (the RUNNING
-             * fast path above already handled the no-yield returns) — finish
-             * the re-entry transition. No put/resume: nothing changed. */
+            /* Self re-pick (prev == v): either a yield (RUNNABLE, launched)
+             * or THIS pCPU's previous vCPU re-ON'd after CPU_OFF — same
+             * pointer, completely different entry: the fresh-boot warm
+             * reset (SCTLR=0 + tlbi) is mandatory or the parked context's
+             * MMU-on state survives into the secondary entry (manual-gate
+             * Day-4 crash). Fork on launched, exactly like the switch-in
+             * branch. */
             percpu[id].cur_vcpu = v;
-            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
-                continue;
+            if (v->launched) {
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            }
         }
         prev = v;
         vcpu_arch_run(v);
