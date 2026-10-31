@@ -113,11 +113,11 @@ static void cmd_help(const char *arg)
  * while the id here is 0-based, so printing both side by side invites exactly
  * the "which number do I type?" confusion this command exists to remove.
  *
- * STATE says "halted", not "off", even though it reads vm->off: that flag
- * means "some vCPU of this VM requested power-off, so all of the VM's pCPUs
- * are parked" (arm64: CPU_OFF/SYSTEM_OFF/SYSTEM_RESET, parked in wfi; see
- * vpsci.c psci_power_down). "off" would
- * imply an orderly whole-VM shutdown, which is not what the flag guarantees.
+ * STATE says "halted" when EVERY vCPU of the VM is OFF (derived from the
+ * per-vCPU run states, M11 slice A; the old VM-level off flag is gone): a VM is
+ * "on" while any of its vCPUs is pending/runnable/running/blocked. "halted"
+ * rather than "off" because CPU_OFF only stops one vCPU — a single-CPU_OFF
+ * VM still shows "on" while its sibling runs.
  *
  * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),
  * so the columns are aligned with literal spaces in the format strings. That
@@ -148,7 +148,12 @@ static void cmd_vm_list(const char *arg)
         }
 
         bool focused = (i == console_focus);
-        const char *state = (m->off != 0U) ? "halted" : "on";
+        bool any_on = false;
+        for (u32 j = 0U; j < (u32)VCPUS_PER_VM; j++) {
+            if (m->vcpu[j].state != VCPU_OFF)
+                any_on = true;
+        }
+        const char *state = any_on ? "on" : "halted";
 
         /* The state field is padded to the marker column ONLY when a marker
          * follows, so an unmarked row ends right after its state word rather
@@ -159,7 +164,7 @@ static void cmd_vm_list(const char *arg)
                (unsigned)first,
                (unsigned)last,
                state,
-               focused ? ((m->off != 0U) ? "  *" : "      *") : "");
+               focused ? (any_on ? "      *" : "  *") : "");
     }
 }
 

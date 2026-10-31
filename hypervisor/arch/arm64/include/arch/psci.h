@@ -40,6 +40,8 @@
 /* AFFINITY_INFO return (DEN0022 5.4): HW_ON / HW_OFF. */
 #define PSCI_AFF_LEVEL_ON   0ULL
 #define PSCI_AFF_LEVEL_OFF  1ULL
+#define PSCI_AFF_LEVEL_ON_PENDING 2ULL   /* M11 slice A: CPU_ON authorized,
+                                            target pCPU has not picked yet */
 
 /* Return codes (Arm DEN0022). Negative values sign-extend into the 64-bit reg. */
 #define PSCI_RET_SUCCESS              0ULL

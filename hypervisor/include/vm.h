@@ -44,18 +44,20 @@ struct vm {
                                          file-static state in arch code
                                          and in dm/vuart.c */
     const struct vm_config *config;
-    /* M5 slice 3: set by the arch's guest power-management emulation when this
-     * VM powers itself down. Not read by any asm path (struct vm has no
-     * __ASSEMBLER__ offset macros, unlike struct vcpu/struct hv_ctx) —
-     * only the arch's cross-CPU kick path polls it, to park this VM's other
-     * pCPU(s) instead of re-entering their guest. */
-    volatile u32            off;
 };
 
 extern struct vm vm[NR_VMS];
 
 void vm_init(void);
 void vm_run(void);
+
+/*
+ * The vCPU statically affined to pCPU `pcpu` (vm_config.vcpu_pcpu[]), or NULL
+ * if none. With 1:1 tables this is the pCPU's only vCPU; with shared
+ * affinity (legal data from slice A) it is the LOWEST (vmi, idx) — slice B's
+ * scheduler replaces this pick. M11 slice A.
+ */
+struct vcpu *vcpu_for_pcpu(u32 pcpu);
 
 /*
  * VM/vCPU hooks every arch implements (ADR-0015); no weak defaults.

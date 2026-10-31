@@ -71,6 +71,17 @@ void vm_init(void)
     vuart_bus_init();
 }
 
+struct vcpu *vcpu_for_pcpu(u32 pcpu)
+{
+    for (u32 vmi = 0; vmi < (u32)NR_VMS; vmi++) {
+        for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
+            if ((u32)vm[vmi].config->vcpu_pcpu[i] == pcpu)
+                return &vm[vmi].vcpu[i];
+        }
+    }
+    return NULL;
+}
+
 void vm_run(void)
 {
     /*
@@ -84,11 +95,10 @@ void vm_run(void)
     percpu[0].cpu_id   = 0;
     percpu[0].cur_vcpu = &vm[0].vcpu[0];
     /* The boot pCPU is online too: secondary.c publishes .online for the
-     * PSCI-brought-up cores, and PSCI CPU_ON's ALREADY_ON check plus
-     * AFFINITY_INFO read it for the boot core as well. */
+     * PSCI-brought-up cores, and AFFINITY_INFO's ON mapping reads run state;
+     * .online stays the physical-online fact. */
     percpu[0].online   = 1;
     cpu_arch_set_this_percpu(&percpu[0]);
-    vcpu_arch_load(&vm[0].vcpu[0]);
 
     /*
      * CPU0 owns the physical console UART's RX interrupt, matching the
@@ -100,25 +110,23 @@ void vm_run(void)
     uart_rx_irq_enable();
 
     /*
-     * Hypervisor-driven boot of every other VM's boot vCPU (M5 slice 3).
-     * VM0's vCPU0 is entered directly below (CPU0 IS VM0's boot pCPU); every
-     * other VM's vCPU0 has no guest asking for it (there is no guest running
-     * yet), so the hypervisor itself powers on the physical CPU here, once,
-     * before dropping into VM0's guest loop. Unlike the arch's guest-driven
-     * path (arm64: psci_cpu_on_guest, which synchronously waits for `online`
-     * because it must honor the guest's PSCI CPU_ON return-value contract),
-     * this is
-     * fire-and-forget: nothing here needs to observe the target pCPU up
-     * before proceeding, and secondary_main() publishes `online` on its own
-     * for debugging/monitoring only.
+     * M11 slice A boot flow: the hypervisor brings up EVERY physical pCPU.
+     * Each secondary finds its statically affined vCPU (secondary_main ->
+     * vcpu_for_pcpu) or idles; boot vCPUs were authored RUNNABLE by vm_init,
+     * so their pCPUs enter them right away. This replaces the old "power on
+     * only each VM's boot pCPU" loop and turns guest CPU_ON into a kick (the
+     * pCPU is already online), not a firmware power-on.
      */
-    for (u32 i = 1; i < (u32)NR_VMS; i++) {
-        u32 p = vm[i].config->vcpu_pcpu[0];
+    for (u32 p = 1; p < (u32)NR_CPUS; p++) {
         s64 r = cpu_arch_power_on(p);
         if (r != 0)
-            printk("[hv] VM%u boot pCPU%u CPU_ON failed (%d)\n",
-                   (unsigned)i, (unsigned)p, (int)r);
+            printk("[hv] pCPU%u power-on failed (%d)\n",
+                   (unsigned)p, (int)r);
     }
+
+    struct vcpu *v = &vm[0].vcpu[0];
+    vcpu_arch_load(v);   /* RUNNABLE -> RUNNING below; never left this pCPU */
+    (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
 
     for (;;) {
         /*
@@ -126,22 +134,30 @@ void vm_run(void)
          * the second-stage tables trap its console MMIO window and the arch's
          * console-UART interrupt branch drains the physical FIFO on the
          * hypervisor's behalf (arm64: Stage-2 / irq_handler.c), so this loop
-         * still has no device emulation to poll. The in-hypervisor virtio device
-         * model was removed in
-         * ADR-0013 (device emulation moves to a future Service-VM userspace DM).
-         */
-        vcpu_arch_run(&vm[0].vcpu[0]);
-        /* Most synchronous exits (MMIO access, power-management calls, unknown
-         * hypercalls) resume the guest directly from the arch's exit handler and
-         * never return to C (arm64: el1_sync_handler erets). vcpu_arch_run
-         * returns here only on the timer IRQ exit; the loop then re-enters the
-         * guest so successive timer interrupts (arm64: PPIs injected by
-         * el2_irq_handler) keep advancing guest time.
+         * still has no device emulation to poll (ADR-0013 moved device
+         * emulation to a future Service-VM userspace DM).
          *
-         * The HC_GUEST_DONE hypercall (arm64: HVC; an M2 debug hook a real Linux guest never
-         * issues) calls hv_restore(), which restores g_hv_ctx and rets to the
-         * most recent vcpu_arch_run call site -- i.e. back into this same loop body,
-         * not out of vm_run. With a single UP vCPU and no scheduler this loop
-         * never exits; an exit path out of vm_run arrives with M3.5 (SMP). */
+         * vcpu_arch_run returns on the exits that need this loop: the timer
+         * IRQ exit (re-enter below so successive timer interrupts keep
+         * advancing guest time) and power-down unwinds (CPU_OFF/SYSTEM_OFF
+         * via hv_restore; state is then OFF and this pCPU waits to be
+         * re-authorized, M11 slice A — CPU_OFF of vcpu0 no longer halts the
+         * pCPU, a sibling CPU_ON can revive it). Most synchronous exits still
+         * resume the guest directly inside the arch's exit handler and never
+         * get here.
+         */
+        /* Acquire load: orders this pCPU's subsequent state reads after the
+         * sender's state->dsb->kick publication (same role as the dmb the
+         * arch side uses; common code uses the __atomic builtins per
+         * include/spinlock.h's precedent — ADR-0015 bans asm here). */
+        while (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_OFF)
+            cpu_arch_idle();
+        if (v->state == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->state == VCPU_RUNNABLE) {
+            vcpu_arch_load(v);
+            (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+        }
+        vcpu_arch_run(v);
     }
 }
