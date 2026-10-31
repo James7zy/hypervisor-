@@ -7,6 +7,7 @@
 #include <vuart.h>
 #include <cpu.h>
 #include <vm_config.h>
+#include <sched.h>
 
 struct vm vm[NR_VMS];
 
@@ -69,6 +70,8 @@ void vm_init(void)
     /* Global MMIO bus registration: once total, not per VM. */
     vm_arch_devices_init();
     vuart_bus_init();
+
+    sched_init();   /* queues filled from the authored states (M11 B1) */
 }
 
 struct vcpu *vcpu_for_pcpu(u32 pcpu)
@@ -132,40 +135,74 @@ void vm_run(void)
                    (unsigned)p, (int)r);
     }
 
-    struct vcpu *v = &vm[0].vcpu[0];
-    vcpu_arch_load(v);   /* RUNNABLE -> RUNNING below; never left this pCPU */
-    (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+    struct vcpu *prev = NULL;
 
     for (;;) {
         /*
-         * The guest's interactive console is the emulated vuart (M5 slice 2):
-         * the second-stage tables trap its console MMIO window and the arch's
-         * console-UART interrupt branch drains the physical FIFO on the
-         * hypervisor's behalf (arm64: Stage-2 / irq_handler.c), so this loop
-         * still has no device emulation to poll (ADR-0013 moved device
-         * emulation to a future Service-VM userspace DM).
-         *
-         * vcpu_arch_run returns on the exits that need this loop: the timer
-         * IRQ exit (re-enter below so successive timer interrupts keep
-         * advancing guest time) and power-down unwinds (CPU_OFF/SYSTEM_OFF
-         * via hv_restore; state is then OFF and this pCPU waits to be
-         * re-authorized, M11 slice A — CPU_OFF of vcpu0 no longer halts the
-         * pCPU, a sibling CPU_ON can revive it). Most synchronous exits still
-         * resume the guest directly inside the arch's exit handler and never
-         * get here.
+         * Scheduler loop (M11 B1, gate-1 R1/R2/R3). Pick carries the RR; a
+         * picked vCPU that is no longer enterable (swept OFF by a racing
+         * SYSTEM_OFF) is skipped, not waited on — waiting would starve the
+         * queue's other vCPUs. Exits needing this loop: timer IRQ (re-pick),
+         * power-down unwinds (hv_restore; the unwound vCPU re-enters via
+         * pick), and B1's WFI yield (same unwind shape, T4). The vuart/
+         * console work stays in the IRQ path (ADR-0013).
          */
-        /* Acquire load: orders this pCPU's subsequent state reads after the
-         * sender's state->dsb->kick publication (same role as the dmb the
-         * arch side uses; common code uses the __atomic builtins per
-         * include/spinlock.h's precedent — ADR-0015 bans asm here). */
-        while (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_OFF)
-            cpu_arch_idle();
-        if (v->state == VCPU_ON_PENDING)
-            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
-        if (v->state == VCPU_RUNNABLE) {
-            vcpu_arch_load(v);
-            (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+        struct vcpu *v;
+        if (prev != NULL &&
+            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
+            /* Unwind without a state change (HC_GUEST_DONE park; a timer
+             * exit erets straight back to the guest and never reaches this
+             * loop): the vCPU is RUNNING and therefore OUT of the queue
+             * (RR dequeues at pick; only yield re-enqueues) — re-enter it
+             * directly. Picking here would see an empty queue and idle
+             * forever. */
+            vcpu_arch_run(prev);
+            continue;
         }
+        v = sched_pick(0);
+        if (v == NULL) {
+            cpu_arch_idle();
+            continue;
+        }
+        if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
+            continue;                       /* swept: drop it, pick again */
+        if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->state != VCPU_RUNNABLE)
+            continue;                       /* lost the race above */
+
+        if (v != prev) {
+            if (prev != NULL && prev->state == VCPU_RUNNABLE)
+                vcpu_arch_put(prev);        /* real switch-away only (R1) */
+            percpu[0].cur_vcpu = v;         /* every pick re-binds (R2) */
+            if (v->launched) {
+                vcpu_arch_resume(v);
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+            }
+            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                continue;                   /* swept mid-load: drop */
+        } else {
+            /* Self re-pick (prev == v): either a yield (RUNNABLE, launched)
+             * or THIS pCPU's previous vCPU re-ON'd after CPU_OFF — same
+             * pointer, completely different entry: the fresh-boot warm
+             * reset (SCTLR=0 + tlbi) is mandatory or the parked context's
+             * MMU-on state survives into the secondary entry (manual-gate
+             * Day-4 crash). Fork on launched, exactly like the switch-in
+             * branch. */
+            percpu[0].cur_vcpu = v;
+            if (v->launched) {
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            }
+        }
+        prev = v;
         vcpu_arch_run(v);
     }
 }

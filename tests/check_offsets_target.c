@@ -36,6 +36,7 @@ _Static_assert(offsetof(struct vcpu, arch.ich_lr)        == 0x130,          "ich
  * pinned here so a field insertion that pushes it (or a migration of it into
  * the asm-visible prefix) fails the build instead of silently drifting. */
 _Static_assert(offsetof(struct vcpu, state)              == 0x16C,          "vcpu.state offset mismatch");
+_Static_assert(offsetof(struct vcpu, launched)            == 0x170,          "vcpu.launched offset mismatch");
 _Static_assert(offsetof(struct hv_ctx, lr)          == HV_LR,          "HV_LR mismatch");
 _Static_assert(offsetof(struct hv_ctx, sp)          == HV_SP,          "HV_SP mismatch");
 _Static_assert(sizeof(struct hv_ctx)                == HV_CTX_SIZE,    "HV_CTX_SIZE mismatch");

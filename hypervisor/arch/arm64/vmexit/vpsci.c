@@ -8,6 +8,7 @@
 #include "vpsci.h"
 #include <gic_v3.h>
 #include <cpu.h>
+#include <sched.h>
 
 /*
  * Guest-driven CPU_ON (M3.5 Slice 4; per-vCPU semantics since M11 slice A).
@@ -51,6 +52,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
      */
     v->regs.elr_el2  = entry;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
+    v->launched      = false;  /* next entry is a fresh boot, not a resume */
     v->regs.sp_el1   = 0;   /* undefined at secondary entry; Linux sets its own */
     v->regs.x[0]     = ctx_id;
     for (u32 i = 1; i < 31U; i++)
@@ -64,6 +66,11 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
      * completes the pair (gate-2 Important 1). */
     __asm__ volatile("dmb ish" ::: "memory");
     (void)vcpu_state_step(&v->state, VCPU_EV_CPU_ON);
+    /* Queue AFTER the state publish: the owner loop drops (dequeues and
+     * discards) a picked vCPU that is not yet ON_PENDING/RUNNABLE, so
+     * enqueued-while-OFF would strand the target. After: the owner either
+     * sees the queue empty (idles until our kick) or picks it enterable. */
+    sched_enqueue(v);
     u32 pcpu = m->config->vcpu_pcpu[idx];
     printk("[hv] PSCI: CPU_ON vCPU%u -> ON_PENDING (pCPU%u)\n",
            (unsigned)idx, (unsigned)pcpu);

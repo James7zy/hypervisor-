@@ -45,8 +45,9 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
     /*
      * HCR_EL2: VM(0)|FMO(3)|IMO(4)|AMO(5)|TWI(13)|TWE(14)|TID3(18)|TSC(19)|
      * RW(31) set; HCD(29) clear (allow HVC). RW=1: EL1 executes in AArch64
-     * state. TWI/TWE: trap guest wfi/wfe -- handler passes them through (no
-     * scheduler yet). TID3: trap ID-group reads (MIDR/MPIDR/ID_AA64*) --
+     * state. TWI/TWE: trap guest wfi/wfe -- wfe passes through, wfi is
+     * the B1 cooperative yield point. TID3: trap ID-group reads
+     * (MIDR/MPIDR/ID_AA64*) --
      * handler forwards the value the guest saw before the trap existed.
      * TSC: trap guest smc -- handler returns SMCCC_NOT_SUPPORTED instead of
      * letting it reach EL3 (ADR-0017; no-op on QEMU, which forces TSC RES0
@@ -89,6 +90,26 @@ void vcpu_arch_load(struct vcpu *v)
 
     /* Required order: Stage-2 activate BEFORE vGIC restore. */
     stage2_activate(v);
+    vgic_restore(v);
+}
+
+void vcpu_arch_put(struct vcpu *v)
+{
+    /* M11 B1 minimal body: vGIC shadow only (same-VM switch shares Stage-2/
+     * VTTBR/HCR, and EL1 sysregs are untouched until B2's bulk set). Same
+     * pCPU as the coming vcpu_arch_resume by construction (run loops call
+     * put(prev) immediately before loading next on THIS pCPU). */
+    vgic_save(v);
+    __asm__ volatile("dsb ish" ::: "memory");
+}
+
+void vcpu_arch_resume(struct vcpu *v)
+{
+    /* Already-launched vCPU re-entering THIS pCPU: shadow restore only. No
+     * vgic_init blanking, no EL1 neutralize — the live guest's GIC state
+     * and EL1 must survive the round trip (B1 boundary: same VM, same
+     * pCPU, no remote shadow publishers — the svm_ctxsw profile; the
+     * general runtime protocol incl. wake merging is slice B2). */
     vgic_restore(v);
 }
 

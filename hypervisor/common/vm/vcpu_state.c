@@ -38,6 +38,12 @@ int vcpu_state_step(enum vcpu_state *s, enum vcpu_event e)
             return 0;
         }
         break;
+    case VCPU_EV_YIELD:
+        if (*s == VCPU_RUNNING) {
+            *s = VCPU_RUNNABLE;
+            return 0;
+        }
+        break;
     case VCPU_EV_OFF:
         /* SYSTEM_OFF sweeps every non-OFF vCPU, ON_PENDING included. */
         if (*s != VCPU_OFF) {

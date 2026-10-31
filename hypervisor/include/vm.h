@@ -34,6 +34,11 @@ struct vcpu {
                                 after the asm-visible prefix — existing
                                 VCPU_* offsets unchanged (pinned in
                                 tests/check_offsets_target.c) */
+    bool       launched;     /* has run at least once since its latest CPU_ON
+                                authorization (M11 B1): false → next entry is
+                                a FRESH boot (vcpu_arch_load: vGIC blank +
+                                EL1 neutralize); true → resume (vGIC shadow
+                                restore only) */
 };
 
 struct vm_config;
@@ -53,9 +58,10 @@ void vm_run(void);
 
 /*
  * The vCPU statically affined to pCPU `pcpu` (vm_config.vcpu_pcpu[]), or NULL
- * if none. With 1:1 tables this is the pCPU's only vCPU; with shared
- * affinity (legal data from slice A) it is the LOWEST (vmi, idx) — slice B's
- * scheduler replaces this pick. M11 slice A.
+ * if none. With 1:1 tables this is the pCPU's only vCPU. Since B1 the run
+ * loops pick through the per-pCPU RR queues instead; this is now the boot
+ * identity check + cur_vcpu seed. (Shared-affinity identity per vCPU is
+ * the queue's job, not a "lowest" pick anymore.)
  */
 struct vcpu *vcpu_for_pcpu(u32 pcpu);
 
@@ -85,6 +91,13 @@ void vcpu_arch_load(struct vcpu *v);
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq);
 /* Enter the guest on this pCPU; returns on an exit that needs the caller. */
 void vcpu_arch_run(struct vcpu *v);
+/* Save `v`'s arch state as it leaves this pCPU in a real switch (M11 B1:
+ * vGIC shadow only — the EL1 bulk set is slice B2; called by the run loops
+ * ONLY on switch-away, never on the yield/same-vCPU re-entry path). */
+void vcpu_arch_put(struct vcpu *v);
+/* Re-enter an ALREADY-launched vCPU on this pCPU: vGIC shadow restore only —
+ * NO vgic_init blanking, NO EL1 neutralize (that would wipe a live guest). */
+void vcpu_arch_resume(struct vcpu *v);
 #endif /* !__ASSEMBLER__ */
 
 #ifdef __ASSEMBLER__

@@ -4,6 +4,7 @@
 #include <vm.h>
 #include <percpu.h>
 #include <cpu.h>
+#include <sched.h>
 #include <arch/hypercall.h>
 #include "vpsci.h"
 #include "data_abort.h"
@@ -59,13 +60,28 @@ static void handle_hvc(struct arch_regs *regs)
     }
 }
 
-/* EC=0x01, trapped wfi/wfe (HCR_EL2.TWI/TWE). No scheduler yet, so both are
- * passed through as no-ops. Unlike HVC/SMC, a trapped instruction exception
- * reports ELR AT the instruction, so advancing past it is required -- without
- * it the guest re-executes the same wfi forever. */
-static void handle_wfx(struct arch_regs *regs)
+/* EC=0x01, trapped wfi/wfe (HCR_EL2.TWI/TWE). WFE passes through; WFI is
+ * the M11-B1 cooperative yield point (see the body). Unlike HVC/SMC, a
+ * trapped instruction exception reports ELR AT the instruction, so
+ * advancing past it is required -- without it the guest re-executes the
+ * same wfi forever. */
+static void handle_wfx(struct arch_regs *regs, u64 esr)
 {
-    regs->elr_el2 += 4ULL;
+    /* WFE (bit 0 of the trapped instruction's ISS): keep passing through —
+     * events are self-contained in the guest. WFI: cooperative yield (M11
+     * B1): advance ELR, mark the vCPU RUNNABLE, requeue, and unwind to this
+     * pCPU's scheduler loop via hv_restore (never eret back into the wfi —
+     * the loop re-enters this vCPU or switches). No vcpu_arch_put here:
+     * put happens only on a REAL switch-away in the loop (gate-1 R1). */
+    if ((esr & 1ULL) == 0ULL) {                 /* WFI */
+        struct vcpu *v = current_vcpu();
+        regs->elr_el2 += 4ULL;
+        if (vcpu_state_step(&v->state, VCPU_EV_YIELD) == 0)
+            sched_yield_cur();
+        /* step failure = swept OFF mid-flight: no requeue, just unwind. */
+        hv_restore();                           /* noreturn */
+    }
+    regs->elr_el2 += 4ULL;                      /* WFE: pass through */
 }
 
 /* EC=0x17, trapped smc (HCR_EL2.TSC, ADR-0017): never let a guest smc reach
@@ -263,8 +279,8 @@ void handle_exit(struct arch_regs *regs, u64 esr)
     u32 ec = (u32)(esr >> 26) & 0x3FU;
 
     switch (ec) {
-    case EC_WFX:      /* no scheduler yet: wfi/wfe pass through as no-ops */
-        handle_wfx(regs);
+    case EC_WFX:      /* wfe passes through; wfi = B1 cooperative yield */
+        handle_wfx(regs, esr);
         return;
     case EC_HVC64:
         handle_hvc(regs);

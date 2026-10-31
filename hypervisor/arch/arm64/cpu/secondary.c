@@ -18,6 +18,7 @@
 #include <percpu.h>
 #include <vm.h>
 #include <cpu.h>
+#include <sched.h>
 #include <arch/sysreg.h>
 #include <gic_v3.h>
 #include <vgic.h>
@@ -105,33 +106,70 @@ void secondary_main(u32 id)
     percpu[id].online = 1;
     __asm__ volatile("dsb ish" ::: "memory");
 
-    if (!v) {
-        printk("[hv] pCPU%u idle (no affined vCPU)\n", (unsigned)id);
-        for (;;)
-            cpu_arch_idle();
-    }
-
     printk("[hv] pCPU%u online, entering guest\n", (unsigned)id);
     /* ^ String kept byte-identical: tests/run_vspi_test.sh greps it to poll
      * boot completion (gate-1 R2). For vcpu[1]-affined pCPUs it now prints
-     * at hypervisor boot rather than at the guest's PSCI CPU_ON. */
+     * at hypervisor boot rather than at the guest's PSCI CPU_ON. With B1's
+     * dynamic queues the idle case (no affined vCPU ever) is just an empty
+     * pick — the loop below parks naturally. */
+
+    struct vcpu *prev = NULL;
 
     for (;;) {
-        /* Wait for authorization (guest CPU_ON / re-ON after CPU_OFF).
-         * Receiver-side ordering: the acquire load below pairs with the
-         * sender's regs -> dmb -> state -> dsb -> kick publication so our
-         * subsequent reads see the authored register file. */
-        while (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_OFF)
-            cpu_arch_idle();
-        /* (Re)pick and (re)load. Re-doing vgic_init/vcpu_arch_load on every
-         * OFF->ON cycle is the PSCI fresh-boot contract: blank LRs/VMCR,
-         * reprogrammed VMPIDR/Stage-2/vGIC state. */
-        if (v->state == VCPU_ON_PENDING)
-            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
-        if (v->state == VCPU_RUNNABLE) {
-            vcpu_arch_load(v);   /* blanks the vGIC interface (fresh boot) */
-            (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+        /* Scheduler loop (M11 B1) — same shape as vm_run's CPU0 loop; see
+         * the commentary there (gate-1 R1/R2/R3). */
+        struct vcpu *v;
+        if (prev != NULL &&
+            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
+            /* Return-without-yield: see vm_run's commentary (gate-1 R1
+             * correction — a RUNNING vCPU is out of the queue). */
+            vcpu_arch_run(prev);
+            continue;
         }
-        vcpu_arch_run(v);   /* returns on timer exit / power-down unwind */
+        v = sched_pick(id);
+        if (v == NULL) {
+            cpu_arch_idle();
+            continue;
+        }
+        if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
+            continue;
+        if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->state != VCPU_RUNNABLE)
+            continue;
+
+        if (v != prev) {
+            if (prev != NULL && prev->state == VCPU_RUNNABLE)
+                vcpu_arch_put(prev);
+            percpu[id].cur_vcpu = v;
+            if (v->launched) {
+                vcpu_arch_resume(v);
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+            }
+            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                continue;
+        } else {
+            /* Self re-pick (prev == v): either a yield (RUNNABLE, launched)
+             * or THIS pCPU's previous vCPU re-ON'd after CPU_OFF — same
+             * pointer, completely different entry: the fresh-boot warm
+             * reset (SCTLR=0 + tlbi) is mandatory or the parked context's
+             * MMU-on state survives into the secondary entry (manual-gate
+             * Day-4 crash). Fork on launched, exactly like the switch-in
+             * branch. */
+            percpu[id].cur_vcpu = v;
+            if (v->launched) {
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            }
+        }
+        prev = v;
+        vcpu_arch_run(v);
     }
 }

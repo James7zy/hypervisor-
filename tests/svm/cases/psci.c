@@ -143,8 +143,12 @@ void SVM_ENTRY _start(void)
     /* CPU_ON brings up vCPU1 (affinity Aff0=1) via the slice-A kick path. */
     r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
                  (unsigned long)psci_secondary_entry, 0xCAFEUL);
-    check(r == 0, "SVM: CPU_ON(vCPU1) == SUCCESS\n");
+    /* Join FIRST, then print our lines: vCPU1's "alive" print races this
+     * pCPU's printk on the shared physical UART and can interleave both
+     * lines character-wise (observed flake, Day 4); after the flag join
+     * vCPU1 sits quietly in its spin until released. */
     check(wait_flag(1, 200000000UL), "SVM: vCPU1 alive\n");
+    check(r == 0, "SVM: CPU_ON(vCPU1) == SUCCESS\n");
 
     /* vCPU1 is authorized/running: a second CPU_ON must report ALREADY_ON
      * (percpu[].online is always true now — the check is vCPU state). */
