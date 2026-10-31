@@ -26,6 +26,9 @@ enum vcpu_event {
     VCPU_EV_BLOCK,      /* CPU_SUSPEND entered (RUNNING → BLOCKED) */
     VCPU_EV_WAKE,       /* wake event while blocked (BLOCKED → RUNNABLE) */
     VCPU_EV_OFF,        /* CPU_OFF / SYSTEM_OFF sweep (→ OFF) */
+    VCPU_EV_YIELD,      /* cooperative WFI yield (RUNNING → RUNNABLE, M11 B1;
+                           B2's block/wake may absorb this edge — ADR-0018
+                           records the pending re-ruling) */
 };
 
 /*
