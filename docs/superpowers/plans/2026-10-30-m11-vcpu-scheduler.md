@@ -58,8 +58,9 @@ flowchart LR
 
 ## 片 C — 跨 VM 共享与 FP/SIMD（依赖：B）
 
-**交付**: 跨 VM `VTTBR`/VMID + `tlbi vmalle1` 纪律；默认拓扑切 2×2-on-2；FP/SIMD 急切
-保存（`.S` 或专用编译单元；`-mgeneral-regs-only` 不变量不解除）。
+**交付**: 跨 VM `VTTBR`/VMID + `tlbi vmalle1` 纪律；默认 **Linux 演示**拓扑切 2×2-on-2
+（裁定 9.2：SVM 测试 profile 不翻）；FP/SIMD 急切保存（`.S` 或专用编译单元；
+`-mgeneral-regs-only` 不变量不解除）。
 
 **DoD**:
 - [ ] 新双 VM 共享隔离场景（同 IPA 各盖各值，切换后读回）全绿。
@@ -73,7 +74,8 @@ flowchart LR
 ## 片 D — 抢占时间片与 Linux 门禁自动化（依赖：C）
 
 **交付**: EL2 物理定时器 tick + `needs_resched` 返回点切换（不在中断上下文切换）；
-`make test-linux`（聚合外）+ ADR-0009 显式重访；镜像来源决策落地。
+`make test-linux`（聚合外）+ ADR-0009 显式重访；镜像来源按裁定 9.1 落地（脚本化获取
++ 固定哈希）。
 
 **DoD**:
 - [ ] 抢占下聚合全绿；两 VM 前向进度并发可观察（非仅无损坏）。

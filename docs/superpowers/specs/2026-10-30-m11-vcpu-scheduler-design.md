@@ -227,7 +227,8 @@ GPR/`SP_EL1`/`ELR_EL2`/`SPSR_EL2`（每次异常，`vmexit_asm.S` 不变）；EL
 
 - **交付**：`vcpu_arch_load` 内做跨 VM `VTTBR_EL2`/VMID 切换 + `tlbi vmalle1`（保守：
   换 VM 必失效；VMID 打 tag 免失效作为记录在案的推迟优化，条件见 8.3）；默认双 VM 拓扑
-  从 2+2-on-4 切到 **2×2-on-2**（VM0/VM1 各一 vCPU 共享 pCPU0/1；开放问题 9.2）；
+  从 2+2-on-4 切到 **2×2-on-2**（VM0/VM1 各一 vCPU 共享 pCPU0/1；裁定 9.2——**仅 Linux
+  演示拓扑，SVM 测试 profile 不翻**）；
   FP/SIMD 急切保存（`vcpu_arch` 追加 FP 块约 528 B；保存/恢复放独立 `.S` 或免
   `-mgeneral-regs-only` 的编译单元——EL2 自身不变量不解除，08-10 Q5 澄清维持）；
   `ctxsw` 用例追加 FP 盖章段。
@@ -242,8 +243,8 @@ GPR/`SP_EL1`/`ELR_EL2`/`SPSR_EL2`（每次异常，`vmexit_asm.S` 不变）；EL
 - **交付**：EL2 物理定时器 tick（新钩子，对齐文档提议名 `cpu_arch_timer_arm`，切片①
   定名）驱动的时间片 round-robin；`needs_resched` 置位 → `vcpu_arch_run` 返回调度循环
   处切换（**不在中断上下文里切换**）；`make test-linux` 自动化目标（聚合之外，08-10
-  用户故事 32/33：25 秒启动不拖慢分钟级循环）+ ADR-0009 显式重访；镜像来源决策落地
-  （9.1）。
+  用户故事 32/33：25 秒启动不拖慢分钟级循环）+ ADR-0009 显式重访；镜像来源按裁定 9.1
+  实现（脚本化获取 + 固定哈希，`LINUX_RUN.sh` 留作本地覆盖）。
 - **host 测试**：tick 抢占无新纯逻辑；`sched_q` 如需"时间片到期重排"语义则补 RED→GREEN。
 - **QEMU**：里程碑验收场景 = 自动化双 VM 2×2-on-2 Linux 启动到 shell + 并发 FP 负载
   （08-10 头条声明的可执行化）。
@@ -289,15 +290,17 @@ FP 全部藏在 put/load 内部（10-04 对齐既定规则）。
    网；TLB 处置上保守换"换 VM 即 `tlbi vmalle1`"，免失效优化挂条件"在 QEMU 与真机各
    验证一次 VMID 隔离"后才能谈。
 
-## 9. 开放问题（需用户裁决，附建议）
+## 9. 开放问题 → 已裁定（2026-10-30，架构师依用户授权"项目有利决策由架构师定"径行裁定）
 
-1. **Linux 镜像来源**（08-10 遗留阻塞子问题）：入库裁剪 Image / 脚本化构建 / 文档化
-   下载固定哈希。**建议**：不入库（git 体积），脚本化下载或复用现有 `LINUX_RUN.sh` 的
-   环境变量约定并固定哈希，D 片前裁决。
-2. **默认演示拓扑是否切 2×2-on-2**（08-10 头条 vs 改变手工 gate 的长期形态）。
-   **建议**：C 片起默认切 2×2-on-2（里程碑主张即演示形态），保留 1:1 配置便于二分。
-3. **CPU_SUSPEND power_down 语义**：维持 retention 形状（前置 B 决定）或实现真实
-   下电-换入口。**建议**：M11 维持 retention（映射到 BLOCKED），M12 VM 生命周期再议。
+1. **Linux 镜像来源**（08-10 遗留阻塞子问题）：**裁定：不入库，脚本化获取 + 固定哈希**
+   （`LINUX_RUN.sh` 环境变量保留为本地覆盖，`make test-linux` 前置校验）。大二进制不进
+   git 历史，脚本+哈希可复现性等价，满足 ADR-0016 的"可复现验证"而非"自包含仓库"。
+2. **默认演示拓扑是否切 2×2-on-2**：**裁定：C 片起默认 Linux 演示拓扑切 2×2-on-2；
+   SVM 测试 profile（dual/shell/vspi 的 1:1 配置）不随之翻**。里程碑主张即演示形态；
+   SVM profile 不动保住 7 场景回归语义，共享拓扑由新场景自带 profile（一次一个变量）。
+3. **CPU_SUSPEND power_down 语义**：**裁定：M11 维持 retention（映射 BLOCKED），
+   entry_point/context_id 继续忽略，真实下电推迟 M12**。DTB 无 idle-states 节点、
+   Linux 不会调用，无消费者不扩状态机（ponytail）。
 
 ## 10. 源文档处置
 
