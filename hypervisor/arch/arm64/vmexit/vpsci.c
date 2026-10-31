@@ -42,15 +42,19 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
     /*
      * Author the secondary's arm64 boot state (Documentation/arm64/booting.rst
      * secondary path): EL1h, DAIF masked, x0 = context_id (NOT the DTB), PC =
-     * entry. Shares vCPU0's Stage-2 / VMID / HCR (Stage-2 vttbr was already
-     * set on every vCPU by stage2_init).
+     * entry. CPU_ON gives the target a warm-reset register file — every other
+     * GPR and sp are zero, nothing may leak from the CPU_OFF that parked it.
+     * The live per-pCPU EL1 CPU state (SCTLR_EL1, TLBs) is reset on the
+     * TARGET pCPU by vcpu_arch_load; from here (the caller's pCPU) we can
+     * only author the saved register file. Shares vCPU0's Stage-2 / VMID /
+     * HCR (Stage-2 vttbr was already set on every vCPU by stage2_init).
      */
     v->regs.elr_el2  = entry;
-    v->regs.x[0]     = ctx_id;
-    v->regs.x[1]     = 0;
-    v->regs.x[2]     = 0;
-    v->regs.x[3]     = 0;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
+    v->regs.sp_el1   = 0;   /* undefined at secondary entry; Linux sets its own */
+    v->regs.x[0]     = ctx_id;
+    for (u32 i = 1; i < 31U; i++)
+        v->regs.x[i] = 0;
     v->arch.hcr_el2  = m->vcpu[0].arch.hcr_el2;  /* mirror vCPU0              */
 
     (void)vcpu_state_step(&v->state, VCPU_EV_CPU_ON);

@@ -72,7 +72,10 @@ void vm_arch_devices_init(void);
  * interface). */
 void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg);
 /* Load `v` onto this pCPU's virtualization hardware (CPU identity,
- * second-stage tables, virtual interrupt state). */
+ * second-stage tables, virtual interrupt state) and reset this pCPU's
+ * live EL1 CPU state to the vCPU's fresh-boot state (warm reset: EL1
+ * sysregs are not saved across CPU_OFF, so a re-authorized CPU_ON must
+ * not inherit the parked guest's MMU-on state). */
 void vcpu_arch_load(struct vcpu *v);
 /* Raise virtual interrupt `irq` for vCPU `v`; callable from any pCPU
  * (kicking v's pCPU if remote). Only shared peripheral interrupts are
