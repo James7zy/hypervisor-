@@ -93,11 +93,12 @@ void sched_loop(u32 pcpu)
              * microsecond window: a wake completing both handler rounds in
              * the check→wfi gap — recorded in ADR-0019.) No locks held here:
              * the window is interruptible by design. */
+            percpu[pcpu].idle_window = 1;
             cpu_arch_irq_enable();
-            bool again = !sched_queue_empty(pcpu);
-            if (!again)
+            if (sched_idle_may_sleep(pcpu))
                 cpu_arch_idle();
             cpu_arch_irq_disable();
+            percpu[pcpu].idle_window = 0;
             continue;
         }
         if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
@@ -129,6 +130,11 @@ void sched_loop(u32 pcpu)
                 if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
                     continue;
             } else {
+                /* Re-ON of prev: the same pointer returns after CPU_OFF —
+                 * completely different entry: the fresh-boot warm reset
+                 * (SCTLR=0 + tlbi in vcpu_arch_load) is MANDATORY or the
+                 * parked context's MMU-on state survives into Linux's
+                 * secondary entry (manual-gate Day-4 crash). */
                 vcpu_arch_load(v);
                 v->launched = true;
                 if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
@@ -153,11 +159,27 @@ void sched_wake(struct vcpu *v)
     cpu_arch_kick(v->owner->config->vcpu_pcpu[v->vcpu_idx]);
 }
 
-/* Locked emptiness probe — the WFI three-way's "alone?" leg. */
+/* Locked emptiness probe — the WFI three-way's "alone?" leg (masked ctx). */
 bool sched_queue_empty(u32 pcpu)
 {
     spin_lock(&q_lock[pcpu]);
     bool e = sched_q_empty(&queues[pcpu]);
     spin_unlock(&q_lock[pcpu]);
     return e;
+}
+
+/*
+ * ADVISORY, LOCK-FREE queue probe for the idle window (gate-2 Critical-1):
+ * the window runs with IRQs unmasked, and taking q_lock there lets an
+ * interrupt's enqueue path self-deadlock on the held ticket (both written
+ * lock contracts forbid it; TCG never delivers IRQs mid-critical-section,
+ * so only hardware would show the hang). A bare acquire read of the u8
+ * count races only with the locked enqueue/dequeue; a stale-empty read
+ * degrades into the already-recorded, self-healing check→wfi residual
+ * (the enqueue side kicks after publishing). A stale-nonempty read merely
+ * skips one idle iteration.
+ */
+bool sched_idle_may_sleep(u32 pcpu)
+{
+    return __atomic_load_n(&queues[pcpu].count, __ATOMIC_ACQUIRE) == 0;
 }

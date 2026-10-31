@@ -118,6 +118,11 @@ static void vcpu1_main(void)
                 check(d == 0xF1B00000UL && e == 0xF1C00000UL && f == 0xF1D00000UL,
                       "CTXSW: v1 ttbr0/mair/cpacr stamps intact\n");
             }
+            {
+                unsigned long mid;
+                __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mid));
+                check((mid & 0xFFUL) == 1UL, "CTXSW: v1 MPIDR Aff0 == 1\n");
+            }
             v1_final = 1;
             for (;;)
                 __asm__ volatile("wfi");   /* silent park: vCPU0 concludes */
@@ -221,6 +226,13 @@ void SVM_ENTRY _start(void)
               "CTXSW: v0 tpidr/ro/contextidr stamps intact\n");
         check(d == 0xE1B00000UL && e == 0xE1C00000UL && f == 0xE1D00000UL,
               "CTXSW: v0 ttbr0/mair/cpacr stamps intact\n");
+    }
+    {
+        /* Identity (gate-2 Important-4): resume reprograms VMPIDR_EL2 —
+         * each vCPU must read its OWN Aff0 through the trap forward. */
+        unsigned long mid;
+        __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mid));
+        check((mid & 0xFFUL) == 0UL, "CTXSW: v0 MPIDR Aff0 == 0\n");
     }
     svm_puts("CTXSW: both timers fired in their owners\n");
 

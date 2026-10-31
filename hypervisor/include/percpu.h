@@ -34,7 +34,7 @@
  * sizeof(struct percpu), used by secondary_entry asm to index percpu[id]
  * (base + id * PERCPU_SIZE). Pinned by a _Static_assert below.
  */
-#define PERCPU_SIZE 16
+#define PERCPU_SIZE 24
 
 #ifndef __ASSEMBLER__
 #include <types.h>
@@ -45,6 +45,12 @@ struct percpu {
     struct vcpu *cur_vcpu;   /* MUST be first — asm reads at PERCPU_CUR_VCPU */
     u32          cpu_id;
     volatile u32 online;
+    volatile u32 idle_window; /* 1 inside the scheduler's unmasked idle
+                                 window (M11 B2): the current-EL IRQ vector
+                                 is live; el2_irq_handler must NOT park
+                                 from there — returning to sched_loop is
+                                 always safe and strictly more live (gate-2
+                                 Important-3). */
 };
 
 _Static_assert(__builtin_offsetof(struct percpu, cur_vcpu) == PERCPU_CUR_VCPU,

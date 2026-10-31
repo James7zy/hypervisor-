@@ -93,6 +93,19 @@ static void handle_wfx(struct arch_regs *regs, u64 esr)
                 sched_yield_cur();              /* (2) B1 yield */
         } else if (vcpu_state_step(&v->state, VCPU_EV_BLOCK) == 0) {
             vcpu_arch_block(v);                 /* (3) save, no switch */
+            /* Gate-2 Important-2: a wake that raced the alone-probe→BLOCK
+             * window was no-op'd (we were still RUNNING at its check) and
+             * burned — the vCPU would sleep with a pending vIRQ and no
+             * queue entry, and unlike the idle residual it does NOT heal on
+             * the next arbitrary interrupt. Re-evaluate: anything queued
+             * behind us, or a remotely published SPI shadow, means the
+             * wake happened — self-WAKE and requeue. (Masked context: the
+             * locked probes are safe here.) */
+            if (!sched_queue_empty(current_vcpu_id()) ||
+                v->arch.spi_shadow_pending) {
+                (void)vcpu_state_step(&v->state, VCPU_EV_WAKE);
+                sched_yield_cur();
+            }
         }
         /* Any step failure (swept OFF mid-flight) or the pending case:
          * unwind without requeue. */

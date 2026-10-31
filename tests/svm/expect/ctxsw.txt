@@ -24,3 +24,5 @@ CTXSW: v0 tpidr/ro/contextidr stamps intact
 CTXSW: v0 ttbr0/mair/cpacr stamps intact
 CTXSW: v1 tpidr/ro/contextidr stamps intact
 CTXSW: v1 ttbr0/mair/cpacr stamps intact
+CTXSW: v0 MPIDR Aff0 == 0
+CTXSW: v1 MPIDR Aff0 == 1

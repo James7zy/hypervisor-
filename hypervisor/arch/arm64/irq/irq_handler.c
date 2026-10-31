@@ -56,6 +56,13 @@ void el2_irq_handler(void)
          */
         struct vcpu *cv = current_vcpu();
         if (cv == NULL || cv->state == VCPU_OFF) {
+            if (cpu_arch_this_percpu()->idle_window) {
+                /* Reached via the current-EL vector from the idle window:
+                 * parking here bricks the pCPU against future CPU_ONs and
+                 * strands already-enqueued vCPUs (gate-2 Important-3).
+                 * Return instead — sched_loop re-picks and stays live. */
+                return;
+            }
             printk("[hv] pCPU%u: vCPU off, parking\n",
                    (unsigned)current_vcpu_id());
             cpu_arch_halt();
