@@ -80,7 +80,13 @@ void SVM_ENTRY _start(void)
     check(r == 0, "CTXSW: CPU_ON(vCPU1) == SUCCESS\n");
 
     while (turn < ROUNDS) {
-        svm_puts("CTXSW: r0\n");          /* fixed-string expect lines */
+        /* Round-indexed markers: the expect file pins r0..r7, so a
+         * scheduler that under-rotates fails the gate (tester N4). */
+        static const char *const marks[ROUNDS] = {
+            "CTXSW: r0\n", "CTXSW: r1\n", "CTXSW: r2\n", "CTXSW: r3\n",
+            "CTXSW: r4\n", "CTXSW: r5\n", "CTXSW: r6\n", "CTXSW: r7\n",
+        };
+        svm_puts(marks[turn]);
         turn++;
         __asm__ volatile("wfi");          /* yield to vCPU1 */
     }
