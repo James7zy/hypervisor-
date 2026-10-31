@@ -19,5 +19,6 @@ extern int tests_failed;
 void test_string(void);
 void test_mmio(void);
 void test_vcpu_state(void);
+void test_sched_q(void);
 
 #endif /* HV_HOST_TEST_H */

@@ -9,6 +9,7 @@ int main(void)
     test_string();
     test_mmio();
     test_vcpu_state();
+    test_sched_q();
 
     if (tests_failed == 0) {
         printf("PASS (%d assertions)\n", tests_run);
