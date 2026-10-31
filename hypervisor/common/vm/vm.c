@@ -100,6 +100,14 @@ void vm_run(void)
     percpu[0].online   = 1;
     cpu_arch_set_this_percpu(&percpu[0]);
 
+    /* Boot identity: CPU0 IS VM0's vCPU0 by construction below (both loops
+     * hardcode it). A config affining it elsewhere would silently double-run
+     * one vCPU on two pCPUs — catch it here (gate-2 Minor 5). */
+    if (vcpu_for_pcpu(0) != &vm[0].vcpu[0]) {
+        printk("[hv] BUG: pCPU0 must host VM0 vCPU0 (vm_config.vcpu_pcpu)\n");
+        cpu_arch_halt();
+    }
+
     /*
      * CPU0 owns the physical console UART's RX interrupt, matching the
      * existing routing. Enable RX + receive-timeout interrupts once, before

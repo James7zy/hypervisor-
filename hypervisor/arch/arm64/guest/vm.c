@@ -61,6 +61,12 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
 
 void vcpu_arch_load(struct vcpu *v)
 {
+    /* Blank the per-vCPU virtual interface on every load: every slice-A load
+     * is a fresh-boot load (OFF->ON cycles included), so a re-ONed vCPU must
+     * not inherit the dead context's ich_lr[]/VMCR. Lives here (not in the
+     * generic run loops) because vgic_init is an arch symbol (ADR-0015) and
+     * this is the pCPU-local point both loops share (gate-2 Important 2). */
+    vgic_init(v);
     /* Virtual MPIDR: Aff0 = VM-local vCPU index. */
     SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
     __asm__ volatile("isb");

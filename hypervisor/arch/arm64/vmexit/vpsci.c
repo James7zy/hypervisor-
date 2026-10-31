@@ -57,6 +57,12 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
         v->regs.x[i] = 0;
     v->arch.hcr_el2  = m->vcpu[0].arch.hcr_el2;  /* mirror vCPU0              */
 
+    /* Publish the register file BEFORE the state: a target that wakes through
+     * any path other than the kick (spurious pending IRQ completing wfi) must
+     * never observe ON_PENDING with the authoring still in flight — the
+     * trailing dsb only orders against the kick. The receiver's acquire load
+     * completes the pair (gate-2 Important 1). */
+    __asm__ volatile("dmb ish" ::: "memory");
     (void)vcpu_state_step(&v->state, VCPU_EV_CPU_ON);
     u32 pcpu = m->config->vcpu_pcpu[idx];
     printk("[hv] PSCI: CPU_ON vCPU%u -> ON_PENDING (pCPU%u)\n",

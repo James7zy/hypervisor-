@@ -118,9 +118,9 @@ void secondary_main(u32 id)
 
     for (;;) {
         /* Wait for authorization (guest CPU_ON / re-ON after CPU_OFF).
-         * Receiver-side ordering: the sender does state -> dsb -> kick, but
-         * that does not order OUR subsequent reads; dmb after each wake
-         * (invisible on QEMU TCG, required on real hardware). */
+         * Receiver-side ordering: the acquire load below pairs with the
+         * sender's regs -> dmb -> state -> dsb -> kick publication so our
+         * subsequent reads see the authored register file. */
         while (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_OFF)
             cpu_arch_idle();
         /* (Re)pick and (re)load. Re-doing vgic_init/vcpu_arch_load on every
@@ -129,8 +129,7 @@ void secondary_main(u32 id)
         if (v->state == VCPU_ON_PENDING)
             (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
         if (v->state == VCPU_RUNNABLE) {
-            vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
-            vcpu_arch_load(v);
+            vcpu_arch_load(v);   /* blanks the vGIC interface (fresh boot) */
             (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
         }
         vcpu_arch_run(v);   /* returns on timer exit / power-down unwind */

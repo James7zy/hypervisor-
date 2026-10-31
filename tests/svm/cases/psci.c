@@ -156,7 +156,13 @@ void SVM_ENTRY _start(void)
     /* Release vCPU1: it CPU_OFFs ITSELF; vCPU0 must survive that. */
     sec_flag = 2;
     check(wait_flag(3, 200000000UL), "SVM: vCPU1 CPU_OFF\n");
-    r = svm_hvc4(PSCI_AFFINITY_INFO_32, 1UL, 0UL, 0UL);
+    /* Bounded poll: vCPU1's OFF store racing our check is not otherwise
+     * guaranteed (print_lock line-hold makes it reliable in practice; the
+     * poll makes the gate airtight — gate-2 Minor 4). */
+    unsigned long spins = 200000000UL;
+    do {
+        r = svm_hvc4(PSCI_AFFINITY_INFO_32, 1UL, 0UL, 0UL);
+    } while (r != PSCI_AFF_LEVEL_OFF && --spins);
     check(r == PSCI_AFF_LEVEL_OFF,
           "SVM: AFFINITY_INFO(vCPU1) == OFF after CPU_OFF\n");
     svm_puts("SVM: vCPU0 alive after sibling CPU_OFF\n");
