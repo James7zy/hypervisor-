@@ -14,4 +14,9 @@ CTXSW: r6
 CTXSW: r7
 CTXSW: x19-x23 stamps intact
 CTXSW: x24-x28 stamps intact
+CTXSW: t0 timer is MY disarmed one
+CTXSW: t0 timer fired
+CTXSW: t1 timer is MY disarmed one
+CTXSW: t1 timer fired
+CTXSW: both timers fired in their owners
 SVM HVC: done (x1=0x0)

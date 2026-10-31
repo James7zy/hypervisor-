@@ -97,7 +97,11 @@ bool vgic_has_pending(struct vcpu *vcpu)
         case 2: lr = SYSREG_READ(ICH_LR2_EL2); break;
         default: lr = SYSREG_READ(ICH_LR3_EL2); break;
         }
-        if ((lr & 1ULL) != 0ULL)   /* bit 0: pending */
+        /* State bits are [63:62]: 01=pending, 10=active, 11=both. Pending
+         * only — an active-without-pending LR must NOT wake a wfi (the
+         * interrupt is mid-service). Bit 0 is the vINTID's LSB: an odd
+         * vINTID (27!) there made the first cut read "pending" forever. */
+        if (((lr >> 62) & 1ULL) != 0ULL)
             return true;
     }
     return false;
