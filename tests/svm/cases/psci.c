@@ -109,6 +109,28 @@ __asm__(
     "   b psci_secondary_main\n"
 );
 
+static volatile int reon_done;
+
+static void reon_main(void) __attribute__((used));
+static void reon_main(void)
+{
+    if (0) { reon_done = 1; }   /* silence unused if optimized away */
+    sec_flag = 9;                     /* SILENT: vCPU0 prints on observing
+                                         the flag (interleave precedent) */
+    for (;;)
+        __asm__ volatile("wfi");
+}
+
+extern char reon_entry[];      /* asm label below */
+__asm__(
+    ".global reon_entry\n"
+    "reon_entry:\n"
+    "   msr daifset, #0xf\n"
+    "   ldr x0, =psci_sec_stack + 0x2000\n"   /* reuse lower half of the stack */
+    "   mov sp, x0\n"
+    "   b reon_main\n"
+);
+
 static int wait_flag(unsigned long v, unsigned long spins)
 {
     while (spins--) {
@@ -208,6 +230,17 @@ void SVM_ENTRY _start(void)
     check(r == PSCI_AFF_LEVEL_OFF,
           "SVM: AFFINITY_INFO(vCPU1) == OFF after CPU_OFF\n");
     svm_puts("SVM: vCPU0 alive after sibling CPU_OFF\n");
+
+    /* Re-ON (M11 B2 T8): the OFF'd vCPU comes back — fresh boot (launched
+     * false → vcpu_arch_load warm reset), exercising the self-repick
+     * fork's !launched arm automatically (previously manual-gate-only). */
+    r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
+                 (unsigned long)reon_entry, 0x5EEDUL);
+    /* Join first, print after (print interleave precedent earlier in this
+     * case): vCPU1 sets 9 then parks silently in wfi. */
+    check(wait_flag(9, 200000000UL), "SVM: vCPU1 re-on\n");
+    check(r == 0, "SVM: CPU_ON(vCPU1) re-ON == SUCCESS\n");
+    /* (vCPU1 parks silently — its re-execution is proven by the flag.) */
 
     svm_done(0);
 }

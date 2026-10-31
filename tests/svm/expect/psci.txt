@@ -20,3 +20,5 @@ SVM: vCPU0 alive after sibling CPU_OFF
 SVM: vCPU1 blocking
 SVM: vCPU1 took the SGI
 SVM: SGI woke blocked vCPU1
+SVM: CPU_ON(vCPU1) re-ON == SUCCESS
+SVM: vCPU1 re-on
