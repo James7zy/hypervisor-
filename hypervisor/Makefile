@@ -7,6 +7,7 @@ hv-objs := \
     common/vm/vm_configs.o \
     common/vm/vcpu_state.o \
     common/sched/sched_q.o \
+    common/sched/sched.o \
     common/percpu.o \
     common/io/mmio.o \
     dm/vuart.o \
