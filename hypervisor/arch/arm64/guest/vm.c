@@ -106,6 +106,45 @@ void vcpu_arch_load(struct vcpu *v)
     vgic_restore(v);
 }
 
+
+/* ---- EL1 bulk save/restore (M11 B2 T4) -------------------------------- */
+static void el1_save(struct vcpu *v)
+{
+    v->arch.el1.sctlr_el1      = SYSREG_READ(SCTLR_EL1);
+    v->arch.el1.ttbr0_el1      = SYSREG_READ(TTBR0_EL1);
+    v->arch.el1.ttbr1_el1      = SYSREG_READ(TTBR1_EL1);
+    v->arch.el1.tcr_el1        = SYSREG_READ(TCR_EL1);
+    v->arch.el1.mair_el1       = SYSREG_READ(MAIR_EL1);
+    v->arch.el1.vbar_el1       = SYSREG_READ(VBAR_EL1);
+    v->arch.el1.cpacr_el1      = SYSREG_READ(CPACR_EL1);
+    v->arch.el1.tpidr_el1      = SYSREG_READ(TPIDR_EL1);
+    v->arch.el1.tpidrro_el0    = SYSREG_READ(TPIDRRO_EL0);
+    v->arch.el1.contextidr_el1 = SYSREG_READ(CONTEXTIDR_EL1);
+    v->arch.el1.esr_el1        = SYSREG_READ(ESR_EL1);
+    v->arch.el1.far_el1        = SYSREG_READ(FAR_EL1);
+}
+
+static void el1_restore(struct vcpu *v)
+{
+    /* Translation registers first, SCTLR last, then isb: the restore runs
+     * under the PREVIOUS resident's live state; this ordering is inert
+     * today (M follows its own saved value) and becomes load-bearing at
+     * slice C's cross-VM switches. */
+    SYSREG_WRITE(TTBR0_EL1, v->arch.el1.ttbr0_el1);
+    SYSREG_WRITE(TTBR1_EL1, v->arch.el1.ttbr1_el1);
+    SYSREG_WRITE(TCR_EL1, v->arch.el1.tcr_el1);
+    SYSREG_WRITE(MAIR_EL1, v->arch.el1.mair_el1);
+    SYSREG_WRITE(VBAR_EL1, v->arch.el1.vbar_el1);
+    SYSREG_WRITE(CPACR_EL1, v->arch.el1.cpacr_el1);
+    SYSREG_WRITE(TPIDR_EL1, v->arch.el1.tpidr_el1);
+    SYSREG_WRITE(TPIDRRO_EL0, v->arch.el1.tpidrro_el0);
+    SYSREG_WRITE(CONTEXTIDR_EL1, v->arch.el1.contextidr_el1);
+    SYSREG_WRITE(ESR_EL1, v->arch.el1.esr_el1);
+    SYSREG_WRITE(FAR_EL1, v->arch.el1.far_el1);
+    SYSREG_WRITE(SCTLR_EL1, v->arch.el1.sctlr_el1);
+    __asm__ volatile("isb");
+}
+
 void vcpu_arch_put(struct vcpu *v)
 {
     /* Switch-away save (M11 B2): vGIC shadow + vtimer, save-then-IMASK
@@ -113,6 +152,7 @@ void vcpu_arch_put(struct vcpu *v)
      * re-raises the level PPI when the unmasked CTL is restored on resume).
      * Same pCPU as the coming resume by construction. EL1 bulk: T4. */
     vgic_save(v);
+    el1_save(v);
     v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
     v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl | (1ULL << 1));  /* IMASK */
@@ -130,6 +170,7 @@ void vcpu_arch_put(struct vcpu *v)
 void vcpu_arch_block(struct vcpu *v)
 {
     vgic_save(v);
+    el1_save(v);
     v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
     v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
     __asm__ volatile("dsb ish" ::: "memory");
@@ -145,6 +186,16 @@ void vcpu_arch_resume(struct vcpu *v)
     SYSREG_WRITE(CNTVOFF_EL2, v->arch.cntvoff);
     SYSREG_WRITE(CNTV_CVAL_EL0, v->arch.cntv_cval);
     SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
+    el1_restore(v);
+    /* Same-VMID switch: both vCPUs share the TLB tag. Conservative full
+     * stage-1 flush — asymmetric stage-1 (divergent TTBR0) must not see
+     * the sibling's walk entries. ASID/VMID-tagged avoidance deferred
+     * (condition: RK3588 cost + spec 8.3). */
+    __asm__ volatile("tlbi vmalle1" ::: "memory");
+    __asm__ volatile("dsb nsh\n\tisb" ::: "memory");
+    /* Reprogram the identity: a resumed vCPU must not read the LAST
+     * fresh-loaded vCPU's Aff0 (TID3 forwards the live register). */
+    SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
     __asm__ volatile("isb");
     vgic_restore(v);
 }

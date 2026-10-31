@@ -47,6 +47,24 @@ struct vcpu_arch {
     u64 cntvoff;
     u64 cntv_ctl;
     u64 cntv_cval;
+    /* EL1 bulk set (M11 B2 T4; Q9-derived, half-list-validated, bao/xvisor
+     * diff in docs/debug/m11-b2-el1-halflist.md). The per-exception asm
+     * frame covers GPRs/SP/ELR/SPSR; these are what two same-VM vCPUs of
+     * one pCPU would otherwise clobber across a switch. */
+    struct el1_state {
+        u64 sctlr_el1;
+        u64 ttbr0_el1;
+        u64 ttbr1_el1;
+        u64 tcr_el1;
+        u64 mair_el1;
+        u64 vbar_el1;
+        u64 cpacr_el1;
+        u64 tpidr_el1;
+        u64 tpidrro_el0;
+        u64 contextidr_el1;
+        u64 esr_el1;
+        u64 far_el1;
+    } el1;
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by
