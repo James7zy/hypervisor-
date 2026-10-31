@@ -33,6 +33,7 @@
 #define RET_INVALID_PARAMETERS  (~1UL)   /* -2 */
 
 static volatile int g_fired;
+static volatile unsigned long sec_flag;   /* 1..6 handshake, see vCPU1 stub */
 
 void svm_irq_handler(void)
 {
@@ -40,6 +41,11 @@ void svm_irq_handler(void)
 
     __asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(iar));
     intid = iar & 0xFFFFFFUL;
+
+    if (intid == 5U) {                 /* B2 T5 wake SGI */
+        svm_puts("SVM: vCPU1 took the SGI\n");
+        sec_flag = 4;
+    }
 
     if (intid == VTIMER_INTID) {
         __asm__ volatile("msr CNTV_CTL_EL0, %0" :: "r"(0UL));
@@ -60,19 +66,32 @@ static void check(int cond, const char *what)
 
 /* ---- vCPU-granularity assertions (M11 slice A) ------------------------- */
 
-static volatile unsigned long sec_flag;   /* 1=alive, 2=release, 3=off-ing */
 /* Referenced only from the asm entry stub below — keep the symbols. */
 static unsigned char psci_sec_stack[0x4000]
     __attribute__((aligned(16), used));
 static void psci_secondary_main(void) __attribute__((used));
+/* Flag protocol (B2 T5): 1 alive; 2 go-block (vCPU0 → vCPU1);
+ * 3 blocking-imminent (vCPU1 → vCPU0, right before the blocking wfi);
+ * 4 SGI taken (handler → vCPU0); 5 go-off (vCPU0 → vCPU1); 6 off done. */
 static void psci_secondary_main(void)
 {
     svm_puts("SVM: vCPU1 alive\n");
     sec_flag = 1;
     while (sec_flag != 2)
         ;
-    svm_puts("SVM: vCPU1 CPU_OFF\n");
+    /* Enable our vGIC interface + unmask IRQs BEFORE blocking: the SGI
+     * wake arrives as a virtual interrupt — a masked PSTATE.I would leave
+     * it pending forever and the handshake stalls (first-cut bug). */
+    svm_gic_el1_init();
+    __asm__ volatile("msr daifclr, #2");
+    svm_puts("SVM: vCPU1 blocking\n");
     sec_flag = 3;
+    __asm__ volatile("wfi");          /* BLOCK: alone on pCPU1, nothing pending */
+    /* Resumed by the SGI wake path; the handler printed and set 4. */
+    while (sec_flag != 5)
+        ;
+    svm_puts("SVM: vCPU1 CPU_OFF\n");
+    sec_flag = 6;
     (void)svm_hvc(PSCI_CPU_OFF, 0);   /* stops this vCPU; no return to us */
     for (;;)
         ;                             /* not reached while vCPU is stopped */
@@ -157,9 +176,28 @@ void SVM_ENTRY _start(void)
     check(r == PSCI_RET_ALREADY_ON,
           "SVM: CPU_ON(vCPU1) again == ALREADY_ON\n");
 
-    /* Release vCPU1: it CPU_OFFs ITSELF; vCPU0 must survive that. */
+    /* SGI-wakes-BLOCKED segment (M11 B2 T5, story 19): release vCPU1 to
+     * BLOCK alone on pCPU1 (queue empty, nothing pending), then publish a
+     * vSGI via ICC_SGI1R (target Aff0=1, INTID 5) — the hypervisor routes
+     * it into the blocked vCPU's LR and kicks; vCPU1 wakes, resumes and
+     * takes the SGI in ITS context. End-to-end: block-site save (R1) +
+     * resume path + publisher routing. */
     sec_flag = 2;
-    check(wait_flag(3, 200000000UL), "SVM: vCPU1 CPU_OFF\n");
+    check(wait_flag(3, 200000000UL), "SVM: vCPU1 blocking\n");
+    {
+        /* let pCPU1 actually reach its blocked idle */
+        for (volatile unsigned long i2 = 0; i2 < 50000000UL; i2++)
+            ;
+        __asm__ volatile(
+            "msr ICC_SGI1R_EL1, %0"
+            :: "r"((5UL << 24) | 0x0002UL));   /* INTID 5, target Aff0 bit 1 */
+        __asm__ volatile("isb");
+    }
+    check(wait_flag(4, 200000000UL), "SVM: SGI woke blocked vCPU1\n");
+
+    /* Release vCPU1: it CPU_OFFs ITSELF; vCPU0 must survive that. */
+    sec_flag = 5;
+    check(wait_flag(6, 200000000UL), "SVM: vCPU1 CPU_OFF\n");
     /* Bounded poll: vCPU1's OFF store racing our check is not otherwise
      * guaranteed (print_lock line-hold makes it reliable in practice; the
      * poll makes the gate airtight — gate-2 Minor 4). */

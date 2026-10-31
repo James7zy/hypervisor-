@@ -181,16 +181,27 @@ void vgic_restore(struct vcpu *vcpu)
     asm volatile("isb");
 }
 
-/* Slice B1: called by vcpu_arch_put on real switch-away, same pCPU, and
- * ONLY in configs with no remote shadow publishers (svm_ctxsw). A live read
- * here CAN overwrite a remotely published shadow in other configs — that
- * protocol redesign (merge on wake, publisher wins) is slice B2 (8.1/D13). */
+/* M11 B2 runtime protocol (spec 8.1/D13): PUBLISHER WINS. Called by
+ * vcpu_arch_put/block on switch-away or block — possibly while a remote
+ * pCPU has just published a fresh vuart SPI into our LR1 shadow
+ * (vgic_inject_spi under spi_lock + spi_shadow_pending). Reading the live
+ * LR1 here would overwrite that publication with the stale pre-publish
+ * hardware value and lose the interrupt. Merge rule: if the publisher's
+ * flag is set, keep the SHADOW (it is newer than the hardware); otherwise
+ * the hardware is the only writer — read it. The whole merge sits under
+ * spi_lock so a publisher cannot slip between flag test and shadow use. */
 void vgic_save(struct vcpu *vcpu)
 {
     vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
     vcpu->arch.ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
     vcpu->arch.ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
-    vcpu->arch.ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
     vcpu->arch.ich_lr[2] = SYSREG_READ(ICH_LR2_EL2);
     vcpu->arch.ich_lr[3] = SYSREG_READ(ICH_LR3_EL2);
+
+    spin_lock(&vcpu->arch.spi_lock);
+    if (!vcpu->arch.spi_shadow_pending)
+        vcpu->arch.ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
+    /* else: keep the shadow — the remote publication wins over the live
+     * register (which still holds the pre-publish value). */
+    spin_unlock(&vcpu->arch.spi_lock);
 }
