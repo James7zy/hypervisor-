@@ -8,6 +8,7 @@
 | [`adr/`](adr/README.md) | **为什么**这么设计,否决了什么(Status / Decision / Consequences) | 不原地改;被推翻时新开编号并标 `Superseded` |
 | [`superpowers/specs/`](superpowers/specs/)、[`plans/`](superpowers/plans/) | 某个里程碑当时**要建什么、怎么拆**(spec = 设计,plan = 执行步骤) | 历史记录,不改 |
 | [`debug/`](#debug-调试实录) | 某次问题**是怎么定位的**,按时间顺序 | 历史记录,不改 |
+| [`devlog/`](devlog/) | 某一天(组)**实现了什么特性**、怎么用、怎么工作 | 历史记录,不改 |
 | [`reference/`](reference/README.md) | 某个子系统**现在怎么工作**、某件事**怎么操作** | 随实现演进持续更新 |
 
 拿不准放哪:写的是"为什么" → `adr/`;是"当时的过程" → `debug/`;是"现在的样子" →
@@ -57,6 +58,7 @@
 | 类别 | 新文件命名 | 理由 |
 | --- | --- | --- |
 | `debug/` | `YYYY-MM-DD-<主题>.md` | 某个时间点的记录 |
+| `devlog/` | `YYYY-MM-DD-<主题>.md` | 某一天(组)的特性开发记录 |
 | `reference/` | `<主题>.md`,**不带日期** | 持续更新,日期会误导 |
 | `adr/` | `NNNN-<主题>.md` | 见 [`adr/README.md`](adr/README.md) |
 | `superpowers/specs/`、`plans/` | `YYYY-MM-DD-<里程碑或主题>[-design].md` | 插件约定 |
