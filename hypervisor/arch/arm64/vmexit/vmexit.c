@@ -79,7 +79,7 @@ static void handle_wfx(struct arch_regs *regs, u64 esr)
         if (vcpu_state_step(&v->state, VCPU_EV_YIELD) == 0)
             sched_yield_cur();
         /* step failure = swept OFF mid-flight: no requeue, just unwind. */
-        hv_restore();
+        hv_restore();                           /* noreturn */
     }
     regs->elr_el2 += 4ULL;                      /* WFE: pass through */
 }

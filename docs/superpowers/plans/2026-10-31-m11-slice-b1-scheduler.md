@@ -2,8 +2,6 @@
 
 > **Status:** Executed（2026-10-31，见合并提交；含两处关卡①形状修正：RUNNING 快路径、CPU_ON 入队序）。
 
-> **Status:** Executed（2026-10-31，见合并提交；含两处关卡①形状修正：RUNNING 快路径、CPU_ON 入队序）。
-
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `common/sched/` 调度器落地（纯逻辑 runqueue + 调度循环）+ WFI 协作让出，使共享亲和（ctxsw profile）下同 VM 两 vCPU 在一个 pCPU 上轮转——GPR/ELR 级正确性，EL1 全量与 vGIC/vtimer 运行期协议留给 B2。

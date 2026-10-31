@@ -50,7 +50,7 @@ struct hv_ctx {
     u64 sp;   /* offset 0x060 */
 };
 
-extern void hv_restore(void);   /* vmexit_asm.S; does not return */
+extern void hv_restore(void) __attribute__((noreturn));   /* vmexit_asm.S */
 #endif /* !__ASSEMBLER__ */
 
 #ifdef __ASSEMBLER__

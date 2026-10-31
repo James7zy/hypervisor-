@@ -18,7 +18,7 @@ M11 需要让多个 vCPU 共享一个 pCPU。业界有两条路：立刻做抢�
    GUEST_DONE 先例与 per-pCPU `g_hv_ctx`）。被让出的 vCPU 与候选者在同一循环里
    汇合，**不存在 hypervisor 侧的协程栈切换**。
 3. **put 只在真实换下时发生**：pick 返回他人且前任仍 RUNNABLE 才 `vcpu_arch_put`；
-   自重拾（独占队列、timer 出口）零 ICH 往返——1:1 配置与旧放行逐指令等价。
+   自重拾（独占队列的 yield 往返）零 ICH 往返——1:1 配置与旧放行逐指令等价。
 4. **B1 的保存集 = vGIC 影子**（同 pCPU、无远端发布者的共享 profile 内）；EL1 全量
    put/load 属 B2（ADR-0019 将随其落地）。
 
@@ -55,5 +55,5 @@ sequenceDiagram
   `VCPU_EV_YIELD` 边——届时本 ADR 增补修订记录，不推翻本决策。
 - 已知边界（随实现记录在 vm_configs.c 与 devlog）：共享 profile 的用例不得用
   vGIC、不得编程 CNTV、保持 DAIF 掩蔽；B2 协议落地前禁止共享跑 Linux。
-- timer 类出口不经过 pick（RUNNING 直入快路径）——这是 gate-① R1 形状的一个实现
+- 不带状态变化的解栈（GUEST_DONE 停车）不经过 pick（RUNNING 直入快路径；timer 出口本就 eret 直回 guest、不经运行循环）——这是 gate-① R1 形状的一个实现
   期修正（RUNNING 的 vCPU 不在队列），已在 B1 plan 修订与日报记录。

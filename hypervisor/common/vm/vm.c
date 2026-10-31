@@ -150,10 +150,12 @@ void vm_run(void)
         struct vcpu *v;
         if (prev != NULL &&
             __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
-            /* Return-without-yield (timer exit, HC_GUEST_DONE park): the
-             * vCPU is RUNNING and therefore OUT of the queue (RR dequeues
-             * at pick; only yield re-enqueues) — re-enter it directly.
-             * Picking here would see an empty queue and idle forever. */
+            /* Unwind without a state change (HC_GUEST_DONE park; a timer
+             * exit erets straight back to the guest and never reaches this
+             * loop): the vCPU is RUNNING and therefore OUT of the queue
+             * (RR dequeues at pick; only yield re-enqueues) — re-enter it
+             * directly. Picking here would see an empty queue and idle
+             * forever. */
             vcpu_arch_run(prev);
             continue;
         }
