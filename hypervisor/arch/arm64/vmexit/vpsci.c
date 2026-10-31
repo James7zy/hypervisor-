@@ -51,6 +51,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
      */
     v->regs.elr_el2  = entry;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
+    v->launched      = false;  /* next entry is a fresh boot, not a resume */
     v->regs.sp_el1   = 0;   /* undefined at secondary entry; Linux sets its own */
     v->regs.x[0]     = ctx_id;
     for (u32 i = 1; i < 31U; i++)

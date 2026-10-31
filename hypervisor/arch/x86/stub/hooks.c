@@ -68,3 +68,13 @@ void vcpu_arch_run(struct vcpu *v)
 {
     (void)v;
 }
+
+void vcpu_arch_put(struct vcpu *v)
+{
+    (void)v;
+}
+
+void vcpu_arch_resume(struct vcpu *v)
+{
+    (void)v;
+}

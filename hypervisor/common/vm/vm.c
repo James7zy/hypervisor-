@@ -134,6 +134,7 @@ void vm_run(void)
 
     struct vcpu *v = &vm[0].vcpu[0];
     vcpu_arch_load(v);   /* RUNNABLE -> RUNNING below; never left this pCPU */
+    v->launched = true;
     (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
 
     for (;;) {
@@ -164,6 +165,7 @@ void vm_run(void)
             (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
         if (v->state == VCPU_RUNNABLE) {
             vcpu_arch_load(v);
+            v->launched = true;
             (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
         }
         vcpu_arch_run(v);

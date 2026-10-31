@@ -130,6 +130,7 @@ void secondary_main(u32 id)
             (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
         if (v->state == VCPU_RUNNABLE) {
             vcpu_arch_load(v);   /* blanks the vGIC interface (fresh boot) */
+            v->launched = true;
             (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
         }
         vcpu_arch_run(v);   /* returns on timer exit / power-down unwind */

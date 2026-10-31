@@ -92,6 +92,26 @@ void vcpu_arch_load(struct vcpu *v)
     vgic_restore(v);
 }
 
+void vcpu_arch_put(struct vcpu *v)
+{
+    /* M11 B1 minimal body: vGIC shadow only (same-VM switch shares Stage-2/
+     * VTTBR/HCR, and EL1 sysregs are untouched until B2's bulk set). Same
+     * pCPU as the coming vcpu_arch_resume by construction (run loops call
+     * put(prev) immediately before loading next on THIS pCPU). */
+    vgic_save(v);
+    __asm__ volatile("dsb ish" ::: "memory");
+}
+
+void vcpu_arch_resume(struct vcpu *v)
+{
+    /* Already-launched vCPU re-entering THIS pCPU: shadow restore only. No
+     * vgic_init blanking, no EL1 neutralize — the live guest's GIC state
+     * and EL1 must survive the round trip (B1 boundary: same VM, same
+     * pCPU, no remote shadow publishers — the svm_ctxsw profile; the
+     * general runtime protocol incl. wake merging is slice B2). */
+    vgic_restore(v);
+}
+
 void vcpu_arch_inject_irq(struct vcpu *v, u32 irq)
 {
     /* The only injection source outside arch/ today is the vuart's SPI. */

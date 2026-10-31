@@ -135,8 +135,10 @@ void vgic_inject_sgi(struct vcpu *vcpu, u32 vintid)
     SYSREG_WRITE(ICH_LR2_EL2, lr);
 }
 
-/* Only initial entry in vm_run/secondary_main, before guest IMSC enable.
- * Static pinning never restores on a runtime re-entry. M11 must re-audit. */
+/* Initial entry (vcpu_arch_load) AND slice-B1 same-pCPU switch re-entry
+ * (vcpu_arch_resume; svm_ctxsw profile — no remote shadow publishers there).
+ * The runtime protocol with concurrent remote publishers (shadow-vs-live-LR
+ * merge on wake) remains slice B2 (spec 8.1/D13). */
 void vgic_restore(struct vcpu *vcpu)
 {
     SYSREG_WRITE(ICH_HCR_EL2,  vcpu->arch.ich_hcr_el2);
@@ -148,9 +150,10 @@ void vgic_restore(struct vcpu *vcpu)
     asm volatile("isb");
 }
 
-/* No callers under static pinning. NOT safe for runtime scheduling: even a
- * lock would not prevent a live read overwriting a remotely published shadow.
- * Future save/restore users must redesign that protocol, not just add a lock. */
+/* Slice B1: called by vcpu_arch_put on real switch-away, same pCPU, and
+ * ONLY in configs with no remote shadow publishers (svm_ctxsw). A live read
+ * here CAN overwrite a remotely published shadow in other configs — that
+ * protocol redesign (merge on wake, publisher wins) is slice B2 (8.1/D13). */
 void vgic_save(struct vcpu *vcpu)
 {
     vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
