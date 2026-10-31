@@ -223,10 +223,12 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 HOST_TEST_CFLAGS := -Wall -Wextra -Werror -O2 -g -fno-builtin -U_FORTIFY_SOURCE \
     -std=c11 -Ihypervisor/include
 HOST_TEST_SRCS := tests/host/runner.c tests/host/string_test.c tests/host/mmio_test.c \
+    tests/host/vcpu_state_test.c \
     hypervisor/lib/string.c hypervisor/common/io/mmio.c
 
 $(BUILD_DIR)/host/host_test: $(HOST_TEST_SRCS) tests/host/host_test.h \
-    hypervisor/include/mmio.h hypervisor/include/types.h
+    hypervisor/include/mmio.h hypervisor/include/types.h \
+    hypervisor/include/vcpu_state.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_TEST_SRCS)
 
