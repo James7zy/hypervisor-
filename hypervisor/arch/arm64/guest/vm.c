@@ -103,6 +103,17 @@ void vcpu_arch_put(struct vcpu *v)
     __asm__ volatile("dsb ish" ::: "memory");
 }
 
+/* Block-site save (M11 B2, gate-1 R1): the vCPU leaves the CPU WITHOUT a
+ * switch happening — same shadow save as put. T3 splits the two: block
+ * keeps the physical timer LIVE (it is the only wake source); put quiesces
+ * it. A later resume (shared-pCPU wakeup) restores exactly what was saved
+ * here. */
+void vcpu_arch_block(struct vcpu *v)
+{
+    vgic_save(v);
+    __asm__ volatile("dsb ish" ::: "memory");
+}
+
 void vcpu_arch_resume(struct vcpu *v)
 {
     /* Already-launched vCPU re-entering THIS pCPU: shadow restore only. No

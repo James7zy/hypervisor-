@@ -46,6 +46,9 @@ void vgic_inject_hw(struct vcpu *vcpu, u32 vintid, u32 pintid, u8 prio);
  * Return means delivery initiated, not guest acknowledgement; notifications
  * may coalesce (no IRQ-per-character guarantee). */
 void vgic_inject_spi(struct vcpu *target, u32 intid);
+/* True if any live ICH_LRx_EL2 on THIS pCPU holds pending state (M11 B2;
+ * live-only by design — see vgic.c). */
+bool vgic_has_pending(struct vcpu *vcpu);
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING
  * pCPU from its own current vCPU's shadow ich_lr[1]. Called unconditionally by

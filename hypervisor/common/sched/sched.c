@@ -128,3 +128,25 @@ void sched_loop(u32 pcpu)
         vcpu_arch_run(v);
     }
 }
+
+/* Wake a BLOCKED vCPU (gate-1 R5 invariants: wake enqueues ONLY from
+ * BLOCKED — RUNNING is never queued, RUNNABLE already is). Any other
+ * state: idempotent no-op. */
+void sched_wake(struct vcpu *v)
+{
+    if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) != VCPU_BLOCKED)
+        return;
+    if (vcpu_state_step(&v->state, VCPU_EV_WAKE) != 0)
+        return;
+    sched_enqueue(v);
+    cpu_arch_kick(v->owner->config->vcpu_pcpu[v->vcpu_idx]);
+}
+
+/* Locked emptiness probe — the WFI three-way's "alone?" leg. */
+bool sched_queue_empty(u32 pcpu)
+{
+    spin_lock(&q_lock[pcpu]);
+    bool e = sched_q_empty(&queues[pcpu]);
+    spin_unlock(&q_lock[pcpu]);
+    return e;
+}

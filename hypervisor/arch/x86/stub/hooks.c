@@ -78,3 +78,8 @@ void vcpu_arch_resume(struct vcpu *v)
 {
     (void)v;
 }
+
+void vcpu_arch_block(struct vcpu *v)
+{
+    (void)v;
+}
