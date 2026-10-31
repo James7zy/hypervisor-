@@ -20,7 +20,8 @@
 #include <board.h>
 #include <printk.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (vcpu_pcpu[]) */
+#include <vm_config.h>
+#include <sched.h>          /* sched_wake (M11 B2) */
 #include <percpu.h>
 #include <spinlock.h>
 #include <arch/sysreg.h>
@@ -96,4 +97,5 @@ void vgic_sgi_drain(u32 cpu)
         if (pend & (1U << intid))
             vgic_inject_sgi(v, intid);
     }
+    sched_wake(v);   /* once: no-op unless BLOCKED (M11 B2) */
 }

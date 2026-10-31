@@ -21,15 +21,15 @@ void cpu_arch_halt(void) __attribute__((noreturn));
  * arch-specific firmware status. */
 s64 cpu_arch_power_on(u32 pcpu);
 
-/* Idle this pCPU until an interrupt becomes pending, then RETURN (the
- * caller loop re-checks why it woke — M11 slice A run loops; not a terminal
- * halt). Callers run with EL2 IRQs MASKED (no current-EL IRQ vector exists):
- * a masked pending IRQ still completes wfi; it is consumed later from the
- * guest via the Lower-EL exit path — which is exactly how a re-ON kick gets
- * drained. Portability: RISC-V = wfi (same masked-pending semantics); an x86
- * hlt with IF masked would only wake on NMI — the x86 stub must not copy
- * this hook's contract blindly. */
+/* One wfi, then return — the caller owns the interrupt window (M11 B2):
+ * the scheduler loop unmasks (cpu_arch_irq_enable), re-checks its queue,
+ * sleeps here, and remasks. Portability: RISC-V wfi; x86 hlt (IF already
+ * enabled by the caller's window). */
 void cpu_arch_idle(void);
+/* EL2 IRQ window controls (M11 B2): the idle path's unmask/mask pair.
+ * Callers must hold NO locks across the enabled window. */
+void cpu_arch_irq_enable(void);
+void cpu_arch_irq_disable(void);
 
 /* Ask pCPU `pcpu` to re-check its runnable work (asynchronous; the target
  * observes it as an interrupt and re-runs its pick loop). Portability:

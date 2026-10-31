@@ -5,9 +5,9 @@
  * Mirrors el1_sync_handler (vmexit_asm.S): saves the guest register frame to
  * the current vCPU's regs (reached via TPIDR_EL2 → percpu[id].cur_vcpu),
  * calls el2_irq_handler(), then restores and erets back to the
- * guest. Differs only in (a) the C callee and (b) the trailing
- * `msr daifclr, #2` that re-unmasks EL2 IRQs before the eret, so a still-pending
- * physical interrupt is taken again rather than lost.
+ * guest. Differs only in the C callee: the eret restores the guest's SPSR
+ * (IRQ state is the guest's own; a still-pending physical interrupt is
+ * taken from the guest via the Lower-EL vector again, not lost).
  */
 
 #include <arch/vm.h>  /* VCPU_* offset macros (active in __ASSEMBLER__) */
@@ -83,12 +83,14 @@ el1_irq_handler_asm:
     ldr     x30,      [x0, #0xF0]
     ldr     x0,       [x0, #0x00]
     /*
-     * Do NOT unmask EL2 IRQs here. EL2 has no current-EL IRQ handler (vectors.S
-     * routes "Current EL SP_ELx / IRQ" to panic_vector). A pending physical IRQ
-     * unmasked in the one-instruction window before `eret` is taken AT EL2 and
-     * panics. The `eret` restores the guest's SPSR; with HCR_EL2.IMO=1 the next
-     * physical IRQ is taken from the guest via the Lower-EL vector (+0x480),
-     * which re-enters this handler. A level-sensitive line (e.g. the vtimer,
-     * left Active per ADR-0001) stays pending and is serviced on that path.
+     * Do NOT unmask EL2 IRQs here. EL2 C code runs masked by convention; the
+     * ONLY unmasked window is the scheduler's idle branch (cpu_arch_irq_enable
+     * → queue re-check → wfi, M11 B2), served by the current-EL IRQ vector
+     * (el2_irq_entry in vectors.S). Unmasking here would take a pending IRQ
+     * at EL2 mid-restore. The `eret` restores the guest's SPSR; with
+     * HCR_EL2.IMO=1 the next physical IRQ is taken from the guest via the
+     * Lower-EL vector (+0x480), which re-enters this handler. A
+     * level-sensitive line (e.g. the vtimer, left Active per ADR-0001) stays
+     * pending and is serviced on that path.
      */
     eret

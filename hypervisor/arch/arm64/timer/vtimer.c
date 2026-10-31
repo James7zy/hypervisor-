@@ -14,9 +14,10 @@
 
 void vtimer_init(void)
 {
-    SYSREG_WRITE(CNTVOFF_EL2, 0ULL);
+    /* CNTVOFF_EL2 is per-vCPU since M11 B2 (vcpu_arch load/resume program
+     * it from the shadow); only the EL1 access trap control is global. */
     SYSREG_WRITE(CNTHCTL_EL2, 0x3ULL);   /* EL1PCTEN | EL1PCEN */
     asm volatile("isb");
 
-    printk("[hv] vtimer: CNTHCTL_EL2=0x%lx, CNTVOFF_EL2=0x0\n", (u64)0x3);
+    printk("[hv] vtimer: CNTHCTL_EL2=0x3 (CNTVOFF per-vCPU, B2)\n");
 }

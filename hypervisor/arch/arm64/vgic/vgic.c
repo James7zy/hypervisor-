@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: TBD */
+#include <sched.h>   /* sched_wake (M11 B2) */
+#include <printk.h>
+#include <cpu.h>
 #include <types.h>
 #include <vm.h>
 #include <vm_config.h>
@@ -9,6 +12,26 @@
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
  * after its sole restore. Early RX cannot publish LR1. Never reset spi_lock. */
+/* ICH_VTR_EL2.ListRegs ([4:0]) = implemented LR count − 1. Probed once at
+ * boot (M11 B2 T6): the struct is sized for 4 — less is unsupported (BUG),
+ * more is capped at 4 (QEMU implements exactly 4; RK3588 may give more,
+ * using only the first 4 loses nothing correctness-wise, revisit there). */
+static u32 vgic_lr_count;
+
+void vgic_probe(void)
+{
+    u64 vtr = SYSREG_READ(ICH_VTR_EL2);
+    vgic_lr_count = (u32)((vtr & 0x1FULL) + 1ULL);
+    if (vgic_lr_count < 4U) {
+        printk("[hv] BUG: GIC implements %u LRs < 4 (struct vcpu pins 4)\n",
+               (unsigned)vgic_lr_count);
+        cpu_arch_halt();
+    }
+    if (vgic_lr_count > 4U)
+        printk("[hv] vGIC: %u LRs, using the first 4 (cap; revisit RK3588)\n",
+               (unsigned)vgic_lr_count);
+}
+
 void vgic_init(struct vcpu *vcpu)
 {
     /* One-off (per PE): enable the EL2 sysreg interface and let EL1 use the
@@ -77,6 +100,35 @@ static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
  * pending clear stay under spi_lock so a later unrelated kick cannot replay
  * the shadow or clear a newer publication. Remote publication uses the same
  * lock, then orders the shadow before notifying the statically pinned PE. */
+/* Live-pending probe for the WFI three-way (M11 B2, gate-1 R3): MUST read
+ * the live ICH_LRx_EL2 state bits, never the shadow arrays — HW=1 LRs
+ * (the vtimer PPI via LR0, ADR-0001) gain pending state in hardware from
+ * the physical line, and the guest's IAR/EOI/DIR advance LR state with no
+ * shadow update; the shadow diverges by design (that is why vgic_save
+ * exists). A stale shadow would read "pending" forever after the guest's
+ * first EOI and every wfi would take the resume branch: rotation starves
+ * and idle never blocks. */
+bool vgic_has_pending(struct vcpu *vcpu)
+{
+    (void)vcpu;   /* the live LRs belong to THIS pCPU == the caller's */
+    for (int i = 0; i < 4; i++) {
+        u64 lr;
+        switch (i) {
+        case 0: lr = SYSREG_READ(ICH_LR0_EL2); break;
+        case 1: lr = SYSREG_READ(ICH_LR1_EL2); break;
+        case 2: lr = SYSREG_READ(ICH_LR2_EL2); break;
+        default: lr = SYSREG_READ(ICH_LR3_EL2); break;
+        }
+        /* State bits are [63:62]: 01=pending, 10=active, 11=both. Pending
+         * only — an active-without-pending LR must NOT wake a wfi (the
+         * interrupt is mid-service). Bit 0 is the vINTID's LSB: an odd
+         * vINTID (27!) there made the first cut read "pending" forever. */
+        if (((lr >> 62) & 1ULL) != 0ULL)
+            return true;
+    }
+    return false;
+}
+
 void vgic_inject_spi(struct vcpu *target, u32 intid)
 {
     bool local = target == current_vcpu();
@@ -94,6 +146,7 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
         asm volatile("dsb ish" ::: "memory");
         gic_kick_pcpu(pcpu);
     }
+    sched_wake(target);   /* no-op unless BLOCKED (M11 B2, gate-1 R6) */
     /* OFF target (post-SYSTEM_OFF console focus, M11 slice A): no kick.
      * The pCPU sits in its run loop's OFF-wait with EL2 IRQs masked; a kick
      * would pend forever and make every wfi return immediately — a permanent
@@ -150,16 +203,27 @@ void vgic_restore(struct vcpu *vcpu)
     asm volatile("isb");
 }
 
-/* Slice B1: called by vcpu_arch_put on real switch-away, same pCPU, and
- * ONLY in configs with no remote shadow publishers (svm_ctxsw). A live read
- * here CAN overwrite a remotely published shadow in other configs — that
- * protocol redesign (merge on wake, publisher wins) is slice B2 (8.1/D13). */
+/* M11 B2 runtime protocol (spec 8.1/D13): PUBLISHER WINS. Called by
+ * vcpu_arch_put/block on switch-away or block — possibly while a remote
+ * pCPU has just published a fresh vuart SPI into our LR1 shadow
+ * (vgic_inject_spi under spi_lock + spi_shadow_pending). Reading the live
+ * LR1 here would overwrite that publication with the stale pre-publish
+ * hardware value and lose the interrupt. Merge rule: if the publisher's
+ * flag is set, keep the SHADOW (it is newer than the hardware); otherwise
+ * the hardware is the only writer — read it. The whole merge sits under
+ * spi_lock so a publisher cannot slip between flag test and shadow use. */
 void vgic_save(struct vcpu *vcpu)
 {
     vcpu->arch.ich_hcr_el2  = SYSREG_READ(ICH_HCR_EL2);
     vcpu->arch.ich_vmcr_el2 = SYSREG_READ(ICH_VMCR_EL2);
     vcpu->arch.ich_lr[0] = SYSREG_READ(ICH_LR0_EL2);
-    vcpu->arch.ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
     vcpu->arch.ich_lr[2] = SYSREG_READ(ICH_LR2_EL2);
     vcpu->arch.ich_lr[3] = SYSREG_READ(ICH_LR3_EL2);
+
+    spin_lock(&vcpu->arch.spi_lock);
+    if (!vcpu->arch.spi_shadow_pending)
+        vcpu->arch.ich_lr[1] = SYSREG_READ(ICH_LR1_EL2);
+    /* else: keep the shadow — the remote publication wins over the live
+     * register (which still holds the pre-publish value). */
+    spin_unlock(&vcpu->arch.spi_lock);
 }

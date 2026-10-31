@@ -40,8 +40,8 @@ sequenceDiagram
 
 - **长跳转式 `switch_to`（xvisor/bao 风格的 C 栈切换）**。否决：B1 的切换点天然
   全部经过运行循环（三类解栈出口已存在），栈切换会引入第二套保存机制与不可重入
-  风险，收益为零；spec §4 的"`switch_to` 唯一入口"措辞由 B2/ADR-0019 再裁（存废
-  待决：wrapper 还是删除）。
+  风险，收益为零；~~spec §4 的"`switch_to` 唯一入口"措辞由 B2/ADR-0019 再裁~~
+  **已裁（2026-10-31，ADR-0019 第 7 条）**：该措辞宣布被 put/load/resume 三元组取代。
 - **立即抢占（EL2 定时器时间片）**。否决（08-10 Q7 维持）：协作式先验证切换正确性
   与 vGIC/vtimer 协议，抢占是 D 片在其上的单变量追加。
 - **WFI 直接放行（M10 行为）**。否决：共享 pCPU 下放行 = 让 WFI 的 vCPU 独占自旋，
@@ -51,8 +51,9 @@ sequenceDiagram
 
 - 切换的承重点收敛在两处：异常入口/出口汇编的完整 GPR 帧（本就存在），与
   `g_hv_ctx` 的 callee-saved 保存（解栈与再入对称）。
-- **待决（B2 再裁）**：B2 的 block/wake（WFI→BLOCKED + 注入唤醒）可能吸收/取代
-  `VCPU_EV_YIELD` 边——届时本 ADR 增补修订记录，不推翻本决策。
+- ~~**待决（B2 再裁）**：B2 的 block/wake（WFI→BLOCKED + 注入唤醒）可能吸收/取代
+  `VCPU_EV_YIELD` 边~~ **已裁（2026-10-31，ADR-0019 第 6 条）**：YIELD 边保留——
+  有竞争让出（YIELD）与独处阻塞（BLOCK）互补并存，未吸收。
 - 已知边界（随实现记录在 vm_configs.c 与 devlog）：共享 profile 的用例不得用
   vGIC、不得编程 CNTV、保持 DAIF 掩蔽；B2 协议落地前禁止共享跑 Linux。
 - 不带状态变化的解栈（GUEST_DONE 停车）不经过 pick（RUNNING 直入快路径；timer 出口本就 eret 直回 guest、不经运行循环）——这是 gate-① R1 形状的一个实现

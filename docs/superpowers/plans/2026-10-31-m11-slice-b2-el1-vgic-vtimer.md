@@ -1,5 +1,7 @@
 # M11 片 B2 — EL1 全量、vGIC/vtimer 运行期协议、block/wake 实施计划
 
+> **Status:** Executed（2026-10-31，Day 5，见合并提交；含 EL2 current-EL IRQ 向量的计划外必要增项与 T4 重置重做）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 切换从 GPR 级升到**EL1 全量**（含 per-vCPU vtimer 与 VMPIDR 身份），vGIC 影子获得运行期协议（publisher-wins 合并），WFI 获得 block/wake 语义（有竞争让出、独处阻塞），`ICH_VTR_EL2` 探测替换 LR 数硬编码假设——共享 pCPU 上可跑会编程 CNTV/用中断的用例。

@@ -146,15 +146,29 @@ static void psci_system_off_vm(const char *what)
  * the live guest's GIC state (gate-1 R3). No physical reload happens in that
  * LOAD: the vCPU never left this pCPU.
  */
-static u64 psci_cpu_suspend(void)
+/*
+ * CPU_SUSPEND (M11 B2 T7): retention via the scheduler's block path — the
+ * in-place EL2 wfi parked the whole pCPU and its queue; now the vCPU
+ * blocks (vcpu_arch_block saves; the vtimer stays live as its own wake
+ * source) and any arriving interrupt's inject path sched_wakes it. Write
+ * the SUCCESS return BEFORE blocking: on wake the loop re-picks and
+ * resumes via eret with this frame — x0 reads SUCCESS, everything else
+ * intact (DEN0022 retention; the caller's ELR already points past the
+ * hvc). Non-empty queue → the wake may also come via a switch: put-style
+ * quiesce is implicit in vcpu_arch_block's live-timer semantics only when
+ * alone; with siblings the physical timer keeps firing on this pCPU — the
+ * retention contract tolerates wake on ANY interrupt, and the timer's
+ * PPI targets cur_vcpu, so a sibling's load redirects it harmlessly (the
+ * recorded shared-timer gap, ADR-0019).
+ */
+static void psci_cpu_suspend(struct arch_regs *regs)
 {
     struct vcpu *v = current_vcpu();
 
-    (void)vcpu_state_step(&v->state, VCPU_EV_BLOCK);
-    __asm__ volatile("wfi");
-    (void)vcpu_state_step(&v->state, VCPU_EV_WAKE);
-    (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
-    return PSCI_RET_SUCCESS;
+    regs->x[0] = PSCI_RET_SUCCESS;
+    if (vcpu_state_step(&v->state, VCPU_EV_BLOCK) == 0)
+        vcpu_arch_block(v);
+    hv_restore();   /* no return: the loop re-picks (us after wake, or next) */
 }
 
 /*
@@ -225,7 +239,7 @@ void psci_handle(struct arch_regs *regs)
         break;
     case PSCI_CPU_SUSPEND_32:
     case PSCI_CPU_SUSPEND_64:
-        regs->x[0] = psci_cpu_suspend();
+        psci_cpu_suspend(regs);   /* no return through this path */
         break;
     case PSCI_AFFINITY_INFO_32:
     case PSCI_AFFINITY_INFO_64:

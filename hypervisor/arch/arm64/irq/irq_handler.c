@@ -15,6 +15,7 @@
 #include <board.h>
 #include <percpu.h>
 #include <cpu.h>
+#include <sched.h>
 #include <vgic.h>
 #include <gic_v3.h>
 #include <console.h>
@@ -55,6 +56,13 @@ void el2_irq_handler(void)
          */
         struct vcpu *cv = current_vcpu();
         if (cv == NULL || cv->state == VCPU_OFF) {
+            if (cpu_arch_this_percpu()->idle_window) {
+                /* Reached via the current-EL vector from the idle window:
+                 * parking here bricks the pCPU against future CPU_ONs and
+                 * strands already-enqueued vCPUs (gate-2 Important-3).
+                 * Return instead — sched_loop re-picks and stays live. */
+                return;
+            }
             printk("[hv] pCPU%u: vCPU off, parking\n",
                    (unsigned)current_vcpu_id());
             cpu_arch_halt();
@@ -91,6 +99,7 @@ void el2_irq_handler(void)
              * cpu0). */
             vgic_dbg("inject HW PPI=%u (timer, ICH_LR0)\n", intid);
             vgic_inject_hw(current_vcpu(), BOARD_VTIMER_IRQ, BOARD_VTIMER_IRQ, 0xA0);
+            sched_wake(current_vcpu());   /* blocked-idle timer wake (R2) */
             gic_priority_drop(intid);   /* EOIR1 only — leave Active (ADR-0001) */
         } else {
             /*
@@ -104,6 +113,7 @@ void el2_irq_handler(void)
              * write to its virtual PPI-27 enable re-enables the physical PPI
              * (vgicr_write_sgi → gic_ppi_set_enable). */
             vgic_inject_sw(current_vcpu(), BOARD_VTIMER_IRQ, 0xA0);
+            sched_wake(current_vcpu());   /* gate-1 R6: 4th entry point */
             gic_priority_drop(intid);
             gic_deactivate(intid);
             gic_ppi_set_enable(current_vcpu_id(), BOARD_VTIMER_IRQ, false);

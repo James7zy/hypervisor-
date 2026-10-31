@@ -33,6 +33,14 @@ void cpu_arch_idle(void)
 {
 }
 
+void cpu_arch_irq_enable(void)
+{
+}
+
+void cpu_arch_irq_disable(void)
+{
+}
+
 void cpu_arch_kick(u32 pcpu)
 {
     (void)pcpu;
@@ -75,6 +83,11 @@ void vcpu_arch_put(struct vcpu *v)
 }
 
 void vcpu_arch_resume(struct vcpu *v)
+{
+    (void)v;
+}
+
+void vcpu_arch_block(struct vcpu *v)
 {
     (void)v;
 }

@@ -46,6 +46,10 @@ flowchart LR
 > + ctxsw GPR 级转绿进聚合（8 场景）+ ADR-0018；**B2** = EL1 全量 + vGIC/vtimer
 > 运行期协议 + block/wake + ADR-0019，B1 合并后另写 plan。
 
+> **B2 完成（2026-10-31，Day 5）**：EL1 12 项批量 + vGIC publisher-wins + per-vCPU
+> vtimer + WFI 三分（block/wake）+ ICH_VTR 探测 + CPU_SUSPEND 经阻塞路径 + ADR-0019 +
+> re-ON 自动化。验证：8 场景 + host 165 + psci SGI 唤醒/re-ON 段 + 手工 Linux gate。
+
 **交付**: `common/sched/`（`sched_q.c` 纯逻辑核 + `sched.c` 粘合 + `switch_to` 唯一公开
 入口）；`secondary_main` 改问调度器；WFI trap → block/yield；`vcpu_arch_put` + EL1 批量
 保存/恢复（先推导→detector→对照 bao/xvisor）；vGIC 运行期保存协议重设计 +

@@ -98,6 +98,9 @@ void vcpu_arch_put(struct vcpu *v);
 /* Re-enter an ALREADY-launched vCPU on this pCPU: vGIC shadow restore only —
  * NO vgic_init blanking, NO EL1 neutralize (that would wipe a live guest). */
 void vcpu_arch_resume(struct vcpu *v);
+/* Block-site save: leaves the CPU without a switch (M11 B2 R1) — same
+ * shadows as put; the physical timer stays armed (block's wake source). */
+void vcpu_arch_block(struct vcpu *v);
 #endif /* !__ASSEMBLER__ */
 
 #ifdef __ASSEMBLER__

@@ -5,6 +5,7 @@
 #include <percpu.h>
 #include <cpu.h>
 #include <sched.h>
+#include <vgic.h>               /* vgic_has_pending (M11 B2) */
 #include <arch/hypercall.h>
 #include "vpsci.h"
 #include "data_abort.h"
@@ -67,18 +68,47 @@ static void handle_hvc(struct arch_regs *regs)
  * same wfi forever. */
 static void handle_wfx(struct arch_regs *regs, u64 esr)
 {
-    /* WFE (bit 0 of the trapped instruction's ISS): keep passing through —
-     * events are self-contained in the guest. WFI: cooperative yield (M11
-     * B1): advance ELR, mark the vCPU RUNNABLE, requeue, and unwind to this
-     * pCPU's scheduler loop via hv_restore (never eret back into the wfi —
-     * the loop re-enters this vCPU or switches). No vcpu_arch_put here:
-     * put happens only on a REAL switch-away in the loop (gate-1 R1). */
+    /* WFE (bit 0 of the ISS): passes through — events are self-contained.
+     * WFI is three-way (M11 B2, gate-1 R2/R3):
+     *  (1) a virtual interrupt already pends (live ICH_LRx probe) — the wfi
+     *      completes immediately: advance ELR and unwind WITHOUT a state
+     *      change; the loop's RUNNING fast path re-enters this vCPU and
+     *      the guest takes the pending interrupt (ELR must advance BEFORE
+     *      the unwind — the fast path never looks at ELR again).
+     *  (2) other vCPUs wait on this queue — cooperative yield (B1 path).
+     *  (3) alone — BLOCK: save (vcpu_arch_block, R1) WITHOUT switching and
+     *      without requeue; wake paths (sched_wake at the four injection
+     *      entry points) requeue on the arriving interrupt.
+     * The vtimer stays LIVE across a block (R2): it is the blocked vCPU's
+     * own wake source — the PPI fires at EL2, inject_hw targets
+     * cur_vcpu == the blocked owner, sched_wake requeues it. */
     if ((esr & 1ULL) == 0ULL) {                 /* WFI */
         struct vcpu *v = current_vcpu();
         regs->elr_el2 += 4ULL;
-        if (vcpu_state_step(&v->state, VCPU_EV_YIELD) == 0)
-            sched_yield_cur();
-        /* step failure = swept OFF mid-flight: no requeue, just unwind. */
+
+        if (vgic_has_pending(v))
+            ;                                   /* (1) resume via fast path */
+        else if (!sched_queue_empty(current_vcpu_id())) {
+            if (vcpu_state_step(&v->state, VCPU_EV_YIELD) == 0)
+                sched_yield_cur();              /* (2) B1 yield */
+        } else if (vcpu_state_step(&v->state, VCPU_EV_BLOCK) == 0) {
+            vcpu_arch_block(v);                 /* (3) save, no switch */
+            /* Gate-2 Important-2: a wake that raced the alone-probe→BLOCK
+             * window was no-op'd (we were still RUNNING at its check) and
+             * burned — the vCPU would sleep with a pending vIRQ and no
+             * queue entry, and unlike the idle residual it does NOT heal on
+             * the next arbitrary interrupt. Re-evaluate: anything queued
+             * behind us, or a remotely published SPI shadow, means the
+             * wake happened — self-WAKE and requeue. (Masked context: the
+             * locked probes are safe here.) */
+            if (!sched_queue_empty(current_vcpu_id()) ||
+                v->arch.spi_shadow_pending) {
+                (void)vcpu_state_step(&v->state, VCPU_EV_WAKE);
+                sched_yield_cur();
+            }
+        }
+        /* Any step failure (swept OFF mid-flight) or the pending case:
+         * unwind without requeue. */
         hv_restore();                           /* noreturn */
     }
     regs->elr_el2 += 4ULL;                      /* WFE: pass through */

@@ -21,6 +21,61 @@
 #define ROUNDS 8
 
 static volatile unsigned long turn;      /* round counter shared by both */
+/* ---- vtimer segment (M11 B2 T3, D4) ---------------------------------- */
+/* R5 CNTV/vGIC bans LIFT for this segment (per the B2 plan): the
+ * publisher-wins merge is pending (T5); interim safety = all publishers
+ * local (single pCPU, no console input) and put's IMASK keeps PPI 27
+ * firing only on the loaded owner. Two vCPUs arm DISTINCT deadlines on
+ * one pCPU; each interrupt must land in its owner's context and each
+ * owner's timer state must survive every switch. */
+static volatile unsigned long fired_count;
+
+void svm_irq_handler(void)
+{
+    unsigned long iar, intid;
+
+    __asm__ volatile("mrs %0, ICC_IAR1_EL1" : "=r"(iar));
+    intid = iar & 0xFFFFFFUL;
+
+    if (intid == 27U) {
+        __asm__ volatile("msr CNTV_CTL_EL0, %0" :: "r"(0UL));  /* disarm MINE */
+        __asm__ volatile("isb");
+        fired_count++;
+    }
+
+    __asm__ volatile("msr ICC_EOIR1_EL1, %0" :: "r"(iar));
+    __asm__ volatile("msr ICC_DIR_EL1, %0"   :: "r"(iar));
+    __asm__ volatile("isb");
+}
+
+static void arm_my_timer(unsigned long divisor)
+{
+    unsigned long freq;
+    __asm__ volatile("mrs %0, CNTFRQ_EL0" : "=r"(freq));
+    __asm__ volatile("msr CNTV_TVAL_EL0, %0" :: "r"(freq / divisor));
+    __asm__ volatile("msr CNTV_CTL_EL0, %0"  :: "r"(1UL));
+    __asm__ volatile("isb");
+    __asm__ volatile("msr daifclr, #2");
+}
+
+/* Rotate (print + wfi-yield) until `cond`; returns 0 on timeout. */
+static int rotate_until(volatile int *cond, int vcpu1)
+{
+    for (int i = 0; i < 4000; i++) {
+        if (*cond)
+            return 1;
+        svm_puts(vcpu1 ? "CTXSW: v1\n" : "CTXSW: r0\n");
+        __asm__ volatile("wfi");
+    }
+    return *cond;
+}
+
+
+static void check(int cond, const char *what)
+{
+    svm_puts(cond ? what : "CTXSW: CHECK FAILED\n");
+}
+
 static volatile unsigned char vcpu1_stack[0x4000] __attribute__((aligned(16), used));
 
 /* Callee-saved bank stamps: these live across the whole switch cycle only
@@ -28,13 +83,50 @@ static volatile unsigned char vcpu1_stack[0x4000] __attribute__((aligned(16), us
  * (saved into vcpu->regs at every exit). Any rot here is a lost frame. */
 #define STAMP(i) ((unsigned long)0xD00D0000UL + (i))
 
+static volatile int t1_done;
+static volatile int v1_final;
+
 static void vcpu1_main(void) __attribute__((used));
 static void vcpu1_main(void)
 {
     for (;;) {
-        if (turn >= ROUNDS)
+        if (turn >= ROUNDS) {
+            /* GPR rounds over: stamp MY (different) EL1 values first — the
+             * switch must return each vCPU its own. */
+            __asm__ volatile(
+                "msr tpidr_el1, %0\n\tmsr tpidrro_el0, %1\n\tmsr contextidr_el1, %2\n\t"
+                "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
+                ::"r"(0xF1A00000UL + 0), "r"(0xF1A00000UL + 1), "r"(0xF1A00000UL + 2),
+                  "r"(0xF1B00000UL), "r"(0xF1C00000UL), "r"(0xF1D00000UL));
+            /* Timer phase: my deadline is the LONG one. */
+            svm_gic_el1_init();
+            arm_my_timer(20UL);            /* vCPU0 armed 1/50 */
+            if (rotate_until(&t1_done, 1)) {
+                unsigned long ctl;
+                __asm__ volatile("mrs %0, CNTV_CTL_EL0" : "=r"(ctl));
+                check(ctl == 0UL, "CTXSW: t1 timer is MY disarmed one\n");
+                svm_puts("CTXSW: t1 timer fired\n");
+            }
+            {
+                unsigned long a, b, c, d, e, f;
+                __asm__ volatile(
+                    "mrs %0, tpidr_el1\n\tmrs %1, tpidrro_el0\n\tmrs %2, contextidr_el1\n\t"
+                    "mrs %3, ttbr0_el1\n\tmrs %4, mair_el1\n\tmrs %5, cpacr_el1"
+                    : "=r"(a), "=r"(b), "=r"(c), "=r"(d), "=r"(e), "=r"(f));
+                check(a == 0xF1A00000UL && b == 0xF1A00001UL && c == 0xF1A00002UL,
+                      "CTXSW: v1 tpidr/ro/contextidr stamps intact\n");
+                check(d == 0xF1B00000UL && e == 0xF1C00000UL && f == 0xF1D00000UL,
+                      "CTXSW: v1 ttbr0/mair/cpacr stamps intact\n");
+            }
+            {
+                unsigned long mid;
+                __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mid));
+                check((mid & 0xFFUL) == 1UL, "CTXSW: v1 MPIDR Aff0 == 1\n");
+            }
+            v1_final = 1;
             for (;;)
-                __asm__ volatile("wfi");   /* park: vCPU0 concludes */
+                __asm__ volatile("wfi");   /* silent park: vCPU0 concludes */
+        }
         svm_puts("CTXSW: v1\n");
         __asm__ volatile("wfi");           /* yield to vCPU0 */
     }
@@ -49,11 +141,6 @@ __asm__(
     "   mov sp, x0\n"
     "   b vcpu1_main\n"
 );
-
-static void check(int cond, const char *what)
-{
-    svm_puts(cond ? what : "CTXSW: CHECK FAILED\n");
-}
 
 void SVM_ENTRY _start(void)
 {
@@ -73,6 +160,16 @@ void SVM_ENTRY _start(void)
     register unsigned long r27 asm("x27") = STAMP(8);
     register unsigned long r28 asm("x28") = STAMP(9);
 
+    /* EL1 stamps (B2 T4): inert data registers get FULL-VALUE canaries;
+     * MMU-off makes TTBR0/MAIR stampable; CPACR is inert without FP use.
+     * VBAR is NOT stamped — MMIO prints are stage-2 faults (EL2 vectors),
+     * but an EL1 exception under a stamped VBAR would vector into garbage
+     * (gate-1 A2). */
+    __asm__ volatile(
+        "msr tpidr_el1, %0\n\tmsr tpidrro_el0, %1\n\tmsr contextidr_el1, %2\n\t"
+        "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
+        ::"r"(0xE1A00000UL + 0), "r"(0xE1A00000UL + 1), "r"(0xE1A00000UL + 2),
+          "r"(0xE1B00000UL), "r"(0xE1C00000UL), "r"(0xE1D00000UL));
     svm_puts("CTXSW: stamps written (x19-x28)\n");
 
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
@@ -98,6 +195,46 @@ void SVM_ENTRY _start(void)
     check(r24 == STAMP(5) && r25 == STAMP(6) && r26 == STAMP(7) &&
           r27 == STAMP(8) && r28 == STAMP(9),
           "CTXSW: x24-x28 stamps intact\n");
+
+    /* Timer phase (D4): I arm the SHORT deadline; vCPU1 arms the LONG one
+     * when it sees the GPR rounds are done. Exactly two PPIs total; each
+     * must land in its OWNER's context (its handler disarms its own view);
+     * each owner's CTL must read its own disarm afterwards. My wait loop
+     * keeps yielding (wfi three-way), so vCPU1 rotates meanwhile. */
+    svm_gic_el1_init();
+    arm_my_timer(50UL);
+    while (fired_count < 1UL)
+        __asm__ volatile("wfi");
+    {
+        unsigned long ctl;
+        __asm__ volatile("mrs %0, CNTV_CTL_EL0" : "=r"(ctl));
+        check(ctl == 0UL, "CTXSW: t0 timer is MY disarmed one\n");
+        svm_puts("CTXSW: t0 timer fired\n");
+    }
+    while (fired_count < 2UL)
+        __asm__ volatile("wfi");            /* vCPU1's long deadline */
+    t1_done = 1;                            /* release vCPU1's waiter */
+    while (!v1_final)
+        __asm__ volatile("wfi");            /* rotate while vCPU1 checks */
+    {
+        unsigned long a, b, c, d, e, f;
+        __asm__ volatile(
+            "mrs %0, tpidr_el1\n\tmrs %1, tpidrro_el0\n\tmrs %2, contextidr_el1\n\t"
+            "mrs %3, ttbr0_el1\n\tmrs %4, mair_el1\n\tmrs %5, cpacr_el1"
+            : "=r"(a), "=r"(b), "=r"(c), "=r"(d), "=r"(e), "=r"(f));
+        check(a == 0xE1A00000UL && b == 0xE1A00001UL && c == 0xE1A00002UL,
+              "CTXSW: v0 tpidr/ro/contextidr stamps intact\n");
+        check(d == 0xE1B00000UL && e == 0xE1C00000UL && f == 0xE1D00000UL,
+              "CTXSW: v0 ttbr0/mair/cpacr stamps intact\n");
+    }
+    {
+        /* Identity (gate-2 Important-4): resume reprograms VMPIDR_EL2 —
+         * each vCPU must read its OWN Aff0 through the trap forward. */
+        unsigned long mid;
+        __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mid));
+        check((mid & 0xFFUL) == 0UL, "CTXSW: v0 MPIDR Aff0 == 0\n");
+    }
+    svm_puts("CTXSW: both timers fired in their owners\n");
 
     svm_done(0);
 }

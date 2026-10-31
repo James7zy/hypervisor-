@@ -7,6 +7,7 @@
 #include <board_info.h>
 #include <gic_v3.h>
 #include <vtimer.h>
+#include <vgic.h>               /* vgic_probe (M11 B2) */
 #include "../mmu/el2_mmu.h"
 
 /* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
@@ -33,6 +34,7 @@ void cpu_arch_init(void)
            SYSREG_READ(CurrentEL));
 
     gic_init();
+    vgic_probe();   /* ICH_VTR: validate the LR-count contract (M11 B2 T6) */
     vtimer_init();
 }
 
@@ -51,9 +53,20 @@ s64 cpu_arch_power_on(u32 pcpu)
 
 void cpu_arch_idle(void)
 {
-    /* Single wfi, then return: the caller's loop re-checks state. The
-     * interrupt itself is handled by the EL2 vector before wfi returns. */
+    /* Bare wfi: the CALLER opened the interrupt window (see sched_loop's
+     * idle branch) and re-checks its wake condition on return. A pending
+     * IRQ completes wfi even if it were masked. */
     __asm__ volatile("wfi");
+}
+
+void cpu_arch_irq_enable(void)
+{
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+}
+
+void cpu_arch_irq_disable(void)
+{
+    __asm__ volatile("msr daifset, #2" ::: "memory");
 }
 
 void cpu_arch_kick(u32 pcpu)
