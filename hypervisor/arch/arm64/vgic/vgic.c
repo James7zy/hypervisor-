@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: TBD */
 #include <sched.h>   /* sched_wake (M11 B2) */
+#include <printk.h>
+#include <cpu.h>
 #include <types.h>
 #include <vm.h>
 #include <vm_config.h>
@@ -10,6 +12,26 @@
 
 /* Pre-entry only: IMSC starts zero and only the target guest can enable it
  * after its sole restore. Early RX cannot publish LR1. Never reset spi_lock. */
+/* ICH_VTR_EL2.ListRegs ([4:0]) = implemented LR count − 1. Probed once at
+ * boot (M11 B2 T6): the struct is sized for 4 — less is unsupported (BUG),
+ * more is capped at 4 (QEMU implements exactly 4; RK3588 may give more,
+ * using only the first 4 loses nothing correctness-wise, revisit there). */
+static u32 vgic_lr_count;
+
+void vgic_probe(void)
+{
+    u64 vtr = SYSREG_READ(ICH_VTR_EL2);
+    vgic_lr_count = (u32)((vtr & 0x1FULL) + 1ULL);
+    if (vgic_lr_count < 4U) {
+        printk("[hv] BUG: GIC implements %u LRs < 4 (struct vcpu pins 4)\n",
+               (unsigned)vgic_lr_count);
+        cpu_arch_halt();
+    }
+    if (vgic_lr_count > 4U)
+        printk("[hv] vGIC: %u LRs, using the first 4 (cap; revisit RK3588)\n",
+               (unsigned)vgic_lr_count);
+}
+
 void vgic_init(struct vcpu *vcpu)
 {
     /* One-off (per PE): enable the EL2 sysreg interface and let EL1 use the

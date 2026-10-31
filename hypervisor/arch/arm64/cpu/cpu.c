@@ -7,6 +7,7 @@
 #include <board_info.h>
 #include <gic_v3.h>
 #include <vtimer.h>
+#include <vgic.h>               /* vgic_probe (M11 B2) */
 #include "../mmu/el2_mmu.h"
 
 /* secondary_entry (head.S): EL2 PA a secondary core is powered on at. */
@@ -33,6 +34,7 @@ void cpu_arch_init(void)
            SYSREG_READ(CurrentEL));
 
     gic_init();
+    vgic_probe();   /* ICH_VTR: validate the LR-count contract (M11 B2 T6) */
     vtimer_init();
 }
 
