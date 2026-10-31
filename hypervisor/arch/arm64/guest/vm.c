@@ -61,9 +61,31 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
 
 void vcpu_arch_load(struct vcpu *v)
 {
+    /* Blank the per-vCPU virtual interface on every load: every slice-A load
+     * is a fresh-boot load (OFF->ON cycles included), so a re-ONed vCPU must
+     * not inherit the dead context's ich_lr[]/VMCR. Lives here (not in the
+     * generic run loops) because vgic_init is an arch symbol (ADR-0015) and
+     * this is the pCPU-local point both loops share (gate-2 Important 2). */
+    vgic_init(v);
     /* Virtual MPIDR: Aff0 = VM-local vCPU index. */
     SYSREG_WRITE(VMPIDR_EL2, (u64)v->vcpu_idx);
     __asm__ volatile("isb");
+
+    /*
+     * Fresh-boot EL1 CPU state. Every caller loads a RUNNABLE vCPU (first
+     * boot or a PSCI CPU_ON re-authorization), and EL1 sysregs are not
+     * saved across CPU_OFF: a parked vCPU leaves its guest's live SCTLR_EL1
+     * (MMU on, the boot idmap long uninstalled) on this pCPU. Eretting to
+     * the CPU_ON physical entry with that state faults on the very first
+     * fetch — level-0 IABT at the entry address (M11 slice-A hotplug
+     * re-online gate crash). Warm-reset equivalent: MMU/caches off, the
+     * dead context's stage-1 TLB entries and I-cache lines dropped
+     * (current VMID only; Stage-2 stays — a sibling vCPU still runs on
+     * it). SCTLR_EL1 has no RES1 bits, so 0 is a legal reset value.
+     */
+    SYSREG_WRITE(SCTLR_EL1, 0ULL);
+    __asm__ volatile("isb\n\ttlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
+                     ::: "memory");
 
     /* Required order: Stage-2 activate BEFORE vGIC restore. */
     stage2_activate(v);

@@ -42,20 +42,20 @@ void el2_irq_handler(void)
         gic_deactivate(intid);
 
         /*
-         * M5 slice 3: VM-scoped PSCI power-down. If this pCPU's VM has been
-         * marked off (psci_power_down, kicked via psci_kick_vm_other_pcpus),
+         * Whole-VM power-down (M11 slice A): the SYSTEM_OFF sweep set every
+         * vCPU of this VM OFF and kicked only the siblings that were running
+         * in their guest (vpsci.c psci_system_off_vm). We are such a sibling:
          * do NOT drain the SGI bitmap or return to the guest loop -- the only
          * re-entry point back to the guest from this handler is the trailing
          * eret in irq_handler_asm.S, so parking HERE, before returning, is
          * the only place that can prevent this vCPU from ever running again.
-         * This is scoped to the CURRENT vCPU's owner only: the shared
-         * sgi_pending[]/spinlock bitmap is keyed by pCPU, not VM, so a kick
-         * meant for THIS pCPU because ITS VM is off never touches another
-         * VM's legitimate SGI/IPI traffic (each pCPU belongs to exactly one
-         * VM under static partitioning).
+         * The cur_vcpu NULL guard is defense in depth for a future path that
+         * reaches EL2 C on a vCPU-less pCPU (today only a Lower-EL exit gets
+         * here, which such a pCPU never takes; gate-1 A1).
          */
-        if (current_vcpu()->owner->off) {
-            printk("[hv] pCPU%u: VM off, parking\n",
+        struct vcpu *cv = current_vcpu();
+        if (cv == NULL || cv->state == VCPU_OFF) {
+            printk("[hv] pCPU%u: vCPU off, parking\n",
                    (unsigned)current_vcpu_id());
             cpu_arch_halt();
         }

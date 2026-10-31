@@ -70,8 +70,9 @@ static inline struct vcpu *current_vcpu(void)
 }
 
 /* Returns this PHYSICAL pCPU's id. This is NOT the VM-local vCPU index --
- * once a VM's pcpu_base is nonzero its vCPU N runs on pCPU pcpu_base + N,
- * not pCPU N. For the VM-local index use current_vcpu()->vcpu_idx instead.
+ * a vCPU's pCPU comes from its VM's vcpu_pcpu[] affinity table (M11 slice
+ * A), not from its index. For the VM-local index use
+ * current_vcpu()->vcpu_idx instead.
  *
  * Cross-reference: arch asm may derive this same fact independently, via
  * (this CPU's percpu pointer - &percpu[0]) / PERCPU_SIZE pointer arithmetic

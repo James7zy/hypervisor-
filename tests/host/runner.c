@@ -8,6 +8,7 @@ int main(void)
 {
     test_string();
     test_mmio();
+    test_vcpu_state();
 
     if (tests_failed == 0) {
         printf("PASS (%d assertions)\n", tests_run);

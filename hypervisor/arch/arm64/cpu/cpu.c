@@ -48,3 +48,15 @@ s64 cpu_arch_power_on(u32 pcpu)
 {
     return psci_cpu_on((u64)pcpu, (u64)(uintptr_t)secondary_entry, (u64)pcpu);
 }
+
+void cpu_arch_idle(void)
+{
+    /* Single wfi, then return: the caller's loop re-checks state. The
+     * interrupt itself is handled by the EL2 vector before wfi returns. */
+    __asm__ volatile("wfi");
+}
+
+void cpu_arch_kick(u32 pcpu)
+{
+    gic_kick_pcpu(pcpu);
+}

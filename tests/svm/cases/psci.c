@@ -17,10 +17,14 @@
 
 /* Keep in sync with arch/psci.h (test guest has no access to hv headers). */
 #define PSCI_CPU_SUSPEND_32     0x84000001UL
+#define PSCI_CPU_OFF            0x84000002UL
 #define PSCI_AFFINITY_INFO_32   0x84000004UL
 #define PSCI_MIGRATE_INFO_TYPE  0x84000006UL
 #define PSCI_FEATURES           0x8400000AUL
+#define PSCI_CPU_ON_64          0xC4000003UL
 #define PSCI_STATE_TYPE_POWERDOWN (1UL << 30)
+#define PSCI_RET_ALREADY_ON     (~3UL)   /* -4 */
+#define PSCI_AFF_LEVEL_OFF      1UL
 
 #define SMCCC_VERSION_FN        0x80000000UL
 #define SMCCC_ARCH_FEATURES_FN  0x80000001UL
@@ -52,6 +56,47 @@ void svm_irq_handler(void)
 static void check(int cond, const char *what)
 {
     svm_puts(cond ? what : "SVM: CHECK FAILED\n");
+}
+
+/* ---- vCPU-granularity assertions (M11 slice A) ------------------------- */
+
+static volatile unsigned long sec_flag;   /* 1=alive, 2=release, 3=off-ing */
+/* Referenced only from the asm entry stub below — keep the symbols. */
+static unsigned char psci_sec_stack[0x4000]
+    __attribute__((aligned(16), used));
+static void psci_secondary_main(void) __attribute__((used));
+static void psci_secondary_main(void)
+{
+    svm_puts("SVM: vCPU1 alive\n");
+    sec_flag = 1;
+    while (sec_flag != 2)
+        ;
+    svm_puts("SVM: vCPU1 CPU_OFF\n");
+    sec_flag = 3;
+    (void)svm_hvc(PSCI_CPU_OFF, 0);   /* stops this vCPU; no return to us */
+    for (;;)
+        ;                             /* not reached while vCPU is stopped */
+}
+
+/* Naked secondary entry per the arm64 boot protocol: the hypervisor authors
+ * elr/x0/spsr only — SP is ours to set (vspi_entry.S precedent). */
+extern char psci_secondary_entry[];   /* asm label below */
+__asm__(
+    ".global psci_secondary_entry\n"
+    "psci_secondary_entry:\n"
+    "   msr daifset, #0xf\n"
+    "   ldr x0, =psci_sec_stack + 0x4000\n"
+    "   mov sp, x0\n"
+    "   b psci_secondary_main\n"
+);
+
+static int wait_flag(unsigned long v, unsigned long spins)
+{
+    while (spins--) {
+        if (sec_flag == v)
+            return 1;
+    }
+    return 0;
 }
 
 void SVM_ENTRY _start(void)
@@ -94,6 +139,33 @@ void SVM_ENTRY _start(void)
     r = svm_hvc4(PSCI_CPU_SUSPEND_32, PSCI_STATE_TYPE_POWERDOWN, 0UL, 0UL);
     check(r == 0 && canary == 0xC0FFEEUL,
           "SVM: CPU_SUSPEND(powerdown) returned, context intact\n");
+
+    /* CPU_ON brings up vCPU1 (affinity Aff0=1) via the slice-A kick path. */
+    r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
+                 (unsigned long)psci_secondary_entry, 0xCAFEUL);
+    check(r == 0, "SVM: CPU_ON(vCPU1) == SUCCESS\n");
+    check(wait_flag(1, 200000000UL), "SVM: vCPU1 alive\n");
+
+    /* vCPU1 is authorized/running: a second CPU_ON must report ALREADY_ON
+     * (percpu[].online is always true now — the check is vCPU state). */
+    r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
+                 (unsigned long)psci_secondary_entry, 0UL);
+    check(r == PSCI_RET_ALREADY_ON,
+          "SVM: CPU_ON(vCPU1) again == ALREADY_ON\n");
+
+    /* Release vCPU1: it CPU_OFFs ITSELF; vCPU0 must survive that. */
+    sec_flag = 2;
+    check(wait_flag(3, 200000000UL), "SVM: vCPU1 CPU_OFF\n");
+    /* Bounded poll: vCPU1's OFF store racing our check is not otherwise
+     * guaranteed (print_lock line-hold makes it reliable in practice; the
+     * poll makes the gate airtight — gate-2 Minor 4). */
+    unsigned long spins = 200000000UL;
+    do {
+        r = svm_hvc4(PSCI_AFFINITY_INFO_32, 1UL, 0UL, 0UL);
+    } while (r != PSCI_AFF_LEVEL_OFF && --spins);
+    check(r == PSCI_AFF_LEVEL_OFF,
+          "SVM: AFFINITY_INFO(vCPU1) == OFF after CPU_OFF\n");
+    svm_puts("SVM: vCPU0 alive after sibling CPU_OFF\n");
 
     svm_done(0);
 }

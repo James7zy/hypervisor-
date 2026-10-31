@@ -10,3 +10,10 @@ SVM: timer woke the suspended CPU
 SVM: CPU_SUSPEND(standby) slept and woke
 SVM: CPU_SUSPEND(powerdown) returned, context intact
 SVM HVC: done (x1=0x0)
+[hv] PSCI: CPU_ON vCPU1 -> ON_PENDING (pCPU1)
+SVM: CPU_ON(vCPU1) == SUCCESS
+SVM: vCPU1 alive
+SVM: CPU_ON(vCPU1) again == ALREADY_ON
+SVM: vCPU1 CPU_OFF
+SVM: AFFINITY_INFO(vCPU1) == OFF after CPU_OFF
+SVM: vCPU0 alive after sibling CPU_OFF

@@ -341,7 +341,7 @@ static int vgicr_mmio_handler(struct mmio_access *acc, void *ctx)
     spin_lock(&vgic_mmio_lock[m->id]);
     if (acc->is_write) {
         if (sgi)
-            vgicr_write_sgi(m->config->pcpu_base + cpu, r, off, (u32)acc->data);
+            vgicr_write_sgi(m->config->vcpu_pcpu[cpu], r, off, (u32)acc->data);
         else
             vgicr_write_rd(r, off, (u32)acc->data);
     } else {

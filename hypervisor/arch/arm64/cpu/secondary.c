@@ -17,6 +17,7 @@
 #include <board.h>
 #include <percpu.h>
 #include <vm.h>
+#include <cpu.h>
 #include <arch/sysreg.h>
 #include <gic_v3.h>
 #include <vgic.h>
@@ -89,36 +90,48 @@ void secondary_main(u32 id)
     asm volatile("isb");
 
     /*
-     * Enter guest (EL1) on this core. This vCPU's register state (elr/x0/spsr)
-     * was authored by the guest-driven PSCI CPU_ON handler (psci_cpu_on_guest)
-     * before this pCPU was powered on. Its Stage-2 vttbr was authored earlier
-     * still and independently of PSCI: stage2_init() (called once per VM from
-     * vm_init(), at hypervisor boot) fills in vttbr_el2 for every vCPU slot of
-     * the VM up front, since all vCPUs of a VM share one Stage-2 table/VMID.
-     * HCR is the one PSCI CPU_ON actually mirrors, copying vcpu[0]'s hcr_el2
-     * into this vCPU's slot. We only set up the per-vCPU virtual GIC interface
-     * here.
+     * M11 slice A run loop. The pCPU's vCPU comes from the affinity table
+     * (vcpu_for_pcpu; NULL = idle pCPU). cur_vcpu is set BEFORE the
+     * authorization wait: defense in depth for any future path that reads
+     * current_vcpu() from EL2 C on this core (the kick branch itself is only
+     * reachable from a Lower-EL exit, which an unauthorized pCPU never takes).
      */
-    struct vm   *m = &vm[id / VCPUS_PER_VM];
-    struct vcpu *v = &m->vcpu[id % VCPUS_PER_VM];
-    vgic_init(v);   /* per-vCPU virtual interface: enabled, blank LRs/VMCR */
-
-    /* This core's current vCPU (asm entry path reads it via TPIDR_EL2). */
+    struct vcpu *v = vcpu_for_pcpu(id);
     percpu[id].cur_vcpu = v;
 
-    /* Publish online AFTER the vCPU is fully prepared: the PSCI handler waits
-     * on this before returning SUCCESS to the guest. */
-    asm volatile("dmb ish" ::: "memory");
+    /* Publish online AFTER this core's EL2 per-CPU init is complete. */
+    __asm__ volatile("dmb ish" ::: "memory");
     percpu[id].cpu_id = id;
     percpu[id].online = 1;
-    asm volatile("dsb ish" ::: "memory");
+    __asm__ volatile("dsb ish" ::: "memory");
+
+    if (!v) {
+        printk("[hv] pCPU%u idle (no affined vCPU)\n", (unsigned)id);
+        for (;;)
+            cpu_arch_idle();
+    }
 
     printk("[hv] pCPU%u online, entering guest\n", (unsigned)id);
+    /* ^ String kept byte-identical: tests/run_vspi_test.sh greps it to poll
+     * boot completion (gate-1 R2). For vcpu[1]-affined pCPUs it now prints
+     * at hypervisor boot rather than at the guest's PSCI CPU_ON. */
 
-    /* VMPIDR + Stage-2 + vGIC, in the required order (guest/vm.c), then run
-     * (vcpu_arch_run loads HCR_EL2 from v->arch.hcr_el2 and erets to EL1). */
-    vcpu_arch_load(v);
-
-    for (;;)
-        vcpu_arch_run(v);
+    for (;;) {
+        /* Wait for authorization (guest CPU_ON / re-ON after CPU_OFF).
+         * Receiver-side ordering: the acquire load below pairs with the
+         * sender's regs -> dmb -> state -> dsb -> kick publication so our
+         * subsequent reads see the authored register file. */
+        while (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_OFF)
+            cpu_arch_idle();
+        /* (Re)pick and (re)load. Re-doing vgic_init/vcpu_arch_load on every
+         * OFF->ON cycle is the PSCI fresh-boot contract: blank LRs/VMCR,
+         * reprogrammed VMPIDR/Stage-2/vGIC state. */
+        if (v->state == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->state == VCPU_RUNNABLE) {
+            vcpu_arch_load(v);   /* blanks the vGIC interface (fresh boot) */
+            (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+        }
+        vcpu_arch_run(v);   /* returns on timer exit / power-down unwind */
+    }
 }

@@ -80,7 +80,7 @@ static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
 void vgic_inject_spi(struct vcpu *target, u32 intid)
 {
     bool local = target == current_vcpu();
-    u32 pcpu = target->owner->config->pcpu_base + target->vcpu_idx;
+    u32 pcpu = target->owner->config->vcpu_pcpu[target->vcpu_idx];
 
     spin_lock(&target->arch.spi_lock);
     vgic_set_spi_shadow_locked(target, intid);
@@ -90,10 +90,16 @@ void vgic_inject_spi(struct vcpu *target, u32 intid)
     }
     spin_unlock(&target->arch.spi_lock);
 
-    if (!local) {
+    if (!local && target->state != VCPU_OFF) {
         asm volatile("dsb ish" ::: "memory");
         gic_kick_pcpu(pcpu);
     }
+    /* OFF target (post-SYSTEM_OFF console focus, M11 slice A): no kick.
+     * The pCPU sits in its run loop's OFF-wait with EL2 IRQs masked; a kick
+     * would pend forever and make every wfi return immediately — a permanent
+     * busy-spin on a dead VM's keystrokes. The shadow publication above is
+     * terminal-state garbage either way: nothing re-ONs a SYSTEM_OFF'd VM,
+     * and a CPU_OFF'd vCPU's re-ON wipes LRs via vgic_init. */
 }
 
 /* Cross-core companion to vgic_inject_spi: reload ICH_LR1_EL2 on the CALLING

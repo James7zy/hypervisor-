@@ -32,6 +32,10 @@ _Static_assert(offsetof(struct vcpu, arch.vttbr_el2)     == VCPU_VTTBR_EL2, "VCP
 _Static_assert(offsetof(struct vcpu, arch.ich_hcr_el2)   == 0x120,          "ich_hcr_el2 offset mismatch");
 _Static_assert(offsetof(struct vcpu, arch.ich_vmcr_el2)  == 0x128,          "ich_vmcr_el2 offset mismatch");
 _Static_assert(offsetof(struct vcpu, arch.ich_lr)        == 0x130,          "ich_lr offset mismatch");
+/* Generic-tail field (M11 slice A): NOT read by exception-entry asm, but
+ * pinned here so a field insertion that pushes it (or a migration of it into
+ * the asm-visible prefix) fails the build instead of silently drifting. */
+_Static_assert(offsetof(struct vcpu, state)              == 0x16C,          "vcpu.state offset mismatch");
 _Static_assert(offsetof(struct hv_ctx, lr)          == HV_LR,          "HV_LR mismatch");
 _Static_assert(offsetof(struct hv_ctx, sp)          == HV_SP,          "HV_SP mismatch");
 _Static_assert(sizeof(struct hv_ctx)                == HV_CTX_SIZE,    "HV_CTX_SIZE mismatch");

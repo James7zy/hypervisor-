@@ -78,10 +78,14 @@ ifeq ($(HV_GUEST),svm)
 CFLAGS += -DCONFIG_GUEST_SVM=1
 else ifeq ($(HV_GUEST),svm_dual)
 CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=2
+else ifeq ($(HV_GUEST),svm_ctxsw)
+# M11 slice A ctxsw detector: shared-affinity data (see vm_configs.c); only
+# make test-qemu-ctxsw builds this profile.
+CFLAGS += -DCONFIG_GUEST_SVM=1 -DCONFIG_NR_VMS=1 -DCONFIG_SVM_SHARED_PCPU=1
 else ifeq ($(HV_GUEST),linux)
 CFLAGS += -DCONFIG_NR_VMS=2
 else
-$(error HV_GUEST must be 'linux', 'svm' or 'svm_dual')
+$(error HV_GUEST must be 'linux', 'svm', 'svm_dual' or 'svm_ctxsw')
 endif
 
 ASFLAGS := -g
@@ -107,7 +111,7 @@ SVM_CFLAGS := -ffreestanding -nostdlib -nostartfiles -fno-pic -fno-pie \
               -Wall -Wextra -Werror -O2 -g
 # Bare-metal SVM test guests: one shared runtime, one binary per case
 # (tests/svm/cases/<case>.c -> $(BUILD_DIR)/svm/svm-<case>.bin).
-SVM_CASES  := basic vtimer vm1 traps psci
+SVM_CASES  := basic vtimer vm1 traps psci ctxsw
 SVM_BINS   := $(SVM_CASES:%=$(BUILD_DIR)/svm/svm-%.bin)
 SVM_COMMON := tests/svm/svm_lib.c tests/svm/svm_vectors.S
 
@@ -116,7 +120,7 @@ HOST_CC    := cc
 .PHONY: all run clean defconfig menuconfig help svm check-offsets host-test check-arch-boundary \
 	test-svm-build test-svm-dual-build test-qemu test-qemu-vtimer \
 	test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell \
-	test-x86-stub test guest
+	test-qemu-ctxsw test-x86-stub test guest
 
 .NOTPARALLEL: test
 
@@ -168,6 +172,17 @@ test-qemu-vspi:
 	HYPERVISOR_ELF=$(VSPI_BUILD_DIR)/hypervisor.elf \
 	SVM_BIN=$(VSPI_BUILD_DIR)/vspi/vspi-vm0.bin \
 	SVM_BIN2=$(VSPI_BUILD_DIR)/vspi/vspi-vm1.bin sh tests/run_vspi_test.sh
+
+# M11 slice A ctxsw detector: EXPECTED RED until slice B's scheduler — the
+# shared-affinity profile runs only the lowest vCPU, so the case asserts the
+# failure itself. Deliberately NOT in the `test` aggregate; turns green
+# (and joins the aggregate) in slice B.
+CTXSW_BUILD_DIR := build/test-ctxsw
+test-qemu-ctxsw:
+	$(MAKE) BUILD_DIR=$(CTXSW_BUILD_DIR) HV_GUEST=svm_ctxsw all svm
+	LINUX_IMAGE= HYPERVISOR_ELF=$(CTXSW_BUILD_DIR)/hypervisor.elf \
+	SVM_BIN=$(CTXSW_BUILD_DIR)/svm/svm-ctxsw.bin \
+	sh tests/run_svm_test.sh tests/svm/expect/ctxsw.txt
 
 DTC        ?= dtc
 GUEST_DTS  := guest/qemu_virt.dts
@@ -223,10 +238,13 @@ check-offsets-target: $(BUILD_DIR)/check_offsets_target.o
 HOST_TEST_CFLAGS := -Wall -Wextra -Werror -O2 -g -fno-builtin -U_FORTIFY_SOURCE \
     -std=c11 -Ihypervisor/include
 HOST_TEST_SRCS := tests/host/runner.c tests/host/string_test.c tests/host/mmio_test.c \
-    hypervisor/lib/string.c hypervisor/common/io/mmio.c
+    tests/host/vcpu_state_test.c \
+    hypervisor/lib/string.c hypervisor/common/io/mmio.c \
+    hypervisor/common/vm/vcpu_state.c
 
 $(BUILD_DIR)/host/host_test: $(HOST_TEST_SRCS) tests/host/host_test.h \
-    hypervisor/include/mmio.h hypervisor/include/types.h
+    hypervisor/include/mmio.h hypervisor/include/types.h \
+    hypervisor/include/vcpu_state.h
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_TEST_CFLAGS) -o $@ $(HOST_TEST_SRCS)
 

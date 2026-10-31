@@ -2,7 +2,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (pcpu_base) */
+#include <vm_config.h>   /* struct vm_config (vcpu_pcpu[]) */
 #include <percpu.h>
 #include <arch/psci.h>
 #include "vpsci.h"
@@ -10,10 +10,15 @@
 #include <cpu.h>
 
 /*
- * Guest-driven CPU_ON (M3.5 Slice 4). The guest's Linux issues PSCI CPU_ON to
- * bring up its vCPU1; that HVC traps here. We map the requested affinity to a
- * vCPU index, author that vCPU's boot state from the guest's args, power on the
- * matching pCPU at secondary_entry, and hand back SUCCESS once it is online.
+ * Guest-driven CPU_ON (M3.5 Slice 4; per-vCPU semantics since M11 slice A).
+ * The guest's Linux issues PSCI CPU_ON to bring up its vCPU1; that HVC traps
+ * here. We map the requested affinity to a vCPU index, author that vCPU's
+ * boot state from the guest's args, publish ON_PENDING, and KICK the target
+ * pCPU — which is already physically online (the hypervisor brought up every
+ * pCPU at boot) and either running this VM's other vCPU or idling in its
+ * authorization wait. Returns SUCCESS immediately (KVM precedent: CPU_ON
+ * promises the target will run, not that it already does; the caller's own
+ * secondary-holding protocol does the synchronizing).
  */
 static u64 psci_cpu_on_guest(struct arch_regs *regs)
 {
@@ -29,102 +34,128 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
         return PSCI_RET_INVALID_PARAMETERS;
 
     u32 idx  = (u32)aff;                    /* VM-local vCPU index */
-    u32 pcpu = m->config->pcpu_base + idx;  /* physical target     */
-    if (percpu[pcpu].online)
-        return PSCI_RET_ALREADY_ON;
+    struct vcpu *v = &m->vcpu[idx];
+    if (v->state != VCPU_OFF)
+        return PSCI_RET_ALREADY_ON;         /* percpu[].online is now the
+                                               physical fact, not this check */
 
     /*
      * Author the secondary's arm64 boot state (Documentation/arm64/booting.rst
      * secondary path): EL1h, DAIF masked, x0 = context_id (NOT the DTB), PC =
-     * entry. Shares vCPU0's Stage-2 / VMID / HCR (Stage-2 vttbr was already
-     * set on every vCPU by stage2_init).
+     * entry. CPU_ON gives the target a warm-reset register file — every other
+     * GPR and sp are zero, nothing may leak from the CPU_OFF that parked it.
+     * The live per-pCPU EL1 CPU state (SCTLR_EL1, TLBs) is reset on the
+     * TARGET pCPU by vcpu_arch_load; from here (the caller's pCPU) we can
+     * only author the saved register file. Shares vCPU0's Stage-2 / VMID /
+     * HCR (Stage-2 vttbr was already set on every vCPU by stage2_init).
      */
-    struct vcpu *v = &m->vcpu[idx];
     v->regs.elr_el2  = entry;
-    v->regs.x[0]     = ctx_id;
-    v->regs.x[1]     = 0;
-    v->regs.x[2]     = 0;
-    v->regs.x[3]     = 0;
     v->regs.spsr_el2 = 0x3C5ULL;                 /* EL1h, DAIF masked         */
+    v->regs.sp_el1   = 0;   /* undefined at secondary entry; Linux sets its own */
+    v->regs.x[0]     = ctx_id;
+    for (u32 i = 1; i < 31U; i++)
+        v->regs.x[i] = 0;
     v->arch.hcr_el2  = m->vcpu[0].arch.hcr_el2;  /* mirror vCPU0              */
 
-    /* Power on the matching pCPU; it enters secondary_main(pcpu). */
-    if (cpu_arch_power_on(pcpu) != 0)
-        return PSCI_RET_INVALID_PARAMETERS;
+    /* Publish the register file BEFORE the state: a target that wakes through
+     * any path other than the kick (spurious pending IRQ completing wfi) must
+     * never observe ON_PENDING with the authoring still in flight — the
+     * trailing dsb only orders against the kick. The receiver's acquire load
+     * completes the pair (gate-2 Important 1). */
+    __asm__ volatile("dmb ish" ::: "memory");
+    (void)vcpu_state_step(&v->state, VCPU_EV_CPU_ON);
+    u32 pcpu = m->config->vcpu_pcpu[idx];
+    printk("[hv] PSCI: CPU_ON vCPU%u -> ON_PENDING (pCPU%u)\n",
+           (unsigned)idx, (unsigned)pcpu);
 
-    /* Wait (bounded) for the secondary to publish online before returning
-     * SUCCESS, so the guest's CPU_ON contract (CPU running on return) holds. */
-    for (u64 i = 0; i < 100000000ULL; i++) {
-        if (percpu[pcpu].online)
-            return PSCI_RET_SUCCESS;
-        asm volatile("dmb ish" ::: "memory");
-    }
-    return PSCI_RET_INTERNAL_FAILURE;
-}
-
-/*
- * Force every ONLINE pCPU of VM `m` other than `caller_pcpu` into EL2 via the
- * physical kick SGI. Carries no virtual interrupt and touches no vGIC state:
- * the kick exists purely so each target re-enters EL2 and observes `m->off`
- * (el2_irq_handler's kick-SGI branch), then parks instead of re-entering its
- * guest. That makes this PSCI policy, not interrupt virtualization, which is
- * why it lives here rather than in the vGIC.
- *
- * Callers must set m->off and order it (dsb ish) BEFORE calling.
- */
-static void psci_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
-{
-    for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
-        u32 pcpu = m->config->pcpu_base + idx;
-        if (pcpu == caller_pcpu)
-            continue;
-        if (percpu[pcpu].online)
-            gic_kick_pcpu(pcpu);
-    }
-}
-
-/*
- * VM-scoped power-down (M5 slice 3). A guest's CPU_OFF/SYSTEM_OFF/
- * SYSTEM_RESET must stop only ITS OWN VM: mark the VM `off`, kick its other
- * pCPU(s) into EL2 so they notice `off` (el2_irq_handler's kick-SGI branch)
- * and park instead of re-entering their guest, then park the calling pCPU
- * itself. Other VMs' pCPUs are untouched and keep running.
- */
-static void psci_power_down(const char *what)
-{
-    struct vm *m = current_vcpu()->owner;
-    u32 caller_pcpu = current_vcpu_id();
-
-    printk("[hv] PSCI: VM%u %s - halting vCPU%u (pCPU%u)\n",
-           (unsigned)m->id, what, (unsigned)current_vcpu()->vcpu_idx,
-           (unsigned)caller_pcpu);
-
-    m->off = 1;
-    asm volatile("dsb ish" ::: "memory");
-    psci_kick_vm_other_pcpus(m, caller_pcpu);
-
-    cpu_arch_halt();
-}
-
-/*
- * CPU_SUSPEND (M11 pre-B). KVM precedent (virt/kvm/arm/psci.c): in a virtual
- * machine power states are illusory -- both standby and power_down sleep at
- * EL2 until a wake interrupt and return SUCCESS with the caller's context
- * intact (retention-shaped). The power_down entry point / context id are
- * accepted but ignored. The M11 power-state rework (per-vCPU granularity)
- * revisits this; until then it is the one honest path without a scheduler.
- */
-static u64 psci_cpu_suspend(void)
-{
-    asm volatile("wfi");
+    /* State first, then barrier, then kick: the target's pick loop must be
+     * able to observe ON_PENDING when the kick interrupt lands (same shape
+     * as the old VM-level off-flag protocol). */
+    __asm__ volatile("dsb ish" ::: "memory");
+    cpu_arch_kick(pcpu);
     return PSCI_RET_SUCCESS;
 }
 
 /*
- * AFFINITY_INFO (M11 pre-B). We track vCPU granularity only: level must be 0,
- * and the target affinity maps exactly like CPU_ON (Aff0 = VM-local vCPU
- * index, higher affinity fields must be zero). ON_PENDING (the brief window
- * inside CPU_ON) is not modelled; M11's state machine adds it.
+ * CPU_OFF (M11 slice A): stops ONLY this vCPU. The pCPU unwinds to its run
+ * loop (hv_restore), which sees OFF and waits — a sibling CPU_ON can bring
+ * this vCPU back (Linux cpu hotplug off/on cycles rely on that).
+ */
+static void psci_cpu_off_self(void)
+{
+    struct vcpu *v = current_vcpu();
+
+    printk("[hv] PSCI: VM%u CPU_OFF - stopping vCPU%u (pCPU%u)\n",
+           (unsigned)v->owner->id, (unsigned)v->vcpu_idx,
+           (unsigned)current_vcpu_id());
+
+    (void)vcpu_state_step(&v->state, VCPU_EV_OFF);
+    __asm__ volatile("dsb ish" ::: "memory");
+    hv_restore();   /* unwind to this pCPU's run loop; never erets back */
+}
+
+/*
+ * SYSTEM_OFF / SYSTEM_RESET(2): the WHOLE VM stops. Every vCPU (ON_PENDING
+ * included) goes OFF; only the siblings that were RUNNING in their guest get
+ * kicked — a kick to a pCPU parked at EL2 (idle/OFF-wait, IRQs masked at EL2
+ * C) pends forever and makes its wfi return immediately: unbounded busy-spin
+ * (gate-1 R5). Parked siblings observe OFF that way only via their own exit
+ * paths, which never come; that is correct: they are already stopped.
+ */
+static void psci_system_off_vm(const char *what)
+{
+    struct vm *m = current_vcpu()->owner;
+    u32 caller_pcpu = current_vcpu_id();
+
+    printk("[hv] PSCI: VM%u %s - stopping all vCPUs\n",
+           (unsigned)m->id, what);
+
+    for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
+        struct vcpu *v = &m->vcpu[idx];
+        bool was_running = (v->state == VCPU_RUNNING);
+
+        if (v->state == VCPU_OFF)
+            continue;
+        (void)vcpu_state_step(&v->state, VCPU_EV_OFF);
+        if (was_running) {
+            u32 pcpu = m->config->vcpu_pcpu[idx];
+            if (pcpu == caller_pcpu)
+                continue;
+            __asm__ volatile("dsb ish" ::: "memory");
+            cpu_arch_kick(pcpu);   /* in-guest sibling: parks in el2_irq_handler */
+        }
+    }
+
+    hv_restore();   /* own pCPU unwinds; run loop sees OFF and idles forever */
+}
+
+/*
+ * CPU_SUSPEND (M11 pre-B shape, slice-A state machine). Retention: sleep at
+ * EL2 until a wake interrupt, then return SUCCESS with the caller's context
+ * intact (power_down entry point / context id accepted, ignored — ruling
+ * 9.3). BLOCK before wfi and WAKE+LOAD after: the wake must land on RUNNING,
+ * because this path resumes the guest via eret WITHOUT passing the run loop
+ * — a RUNNABLE leak here makes the next timer exit re-run vgic_init and wipe
+ * the live guest's GIC state (gate-1 R3). No physical reload happens in that
+ * LOAD: the vCPU never left this pCPU.
+ */
+static u64 psci_cpu_suspend(void)
+{
+    struct vcpu *v = current_vcpu();
+
+    (void)vcpu_state_step(&v->state, VCPU_EV_BLOCK);
+    __asm__ volatile("wfi");
+    (void)vcpu_state_step(&v->state, VCPU_EV_WAKE);
+    (void)vcpu_state_step(&v->state, VCPU_EV_LOAD);
+    return PSCI_RET_SUCCESS;
+}
+
+/*
+ * AFFINITY_INFO (M11 slice A): reads the per-vCPU run state. Level must be
+ * 0; the target affinity maps exactly like CPU_ON (Aff0 = VM-local vCPU
+ * index, higher affinity fields must be zero). ON = pending ∪ runnable ∪
+ * running ∪ blocked (suspend is still on); ON_PENDING is the window between
+ * CPU_ON authorization and the target pCPU's first pick.
  */
 static u64 psci_affinity_info(struct arch_regs *regs)
 {
@@ -139,9 +170,17 @@ static u64 psci_affinity_info(struct arch_regs *regs)
     if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)VCPUS_PER_VM)
         return PSCI_RET_INVALID_PARAMETERS;
 
-    u32 pcpu = m->config->pcpu_base + (u32)aff;
-    return (percpu[pcpu].online && !m->off) ? PSCI_AFF_LEVEL_ON
-                                            : PSCI_AFF_LEVEL_OFF;
+    switch (m->vcpu[(u32)aff].state) {
+    case VCPU_ON_PENDING:
+        return PSCI_AFF_LEVEL_ON_PENDING;
+    case VCPU_RUNNABLE:
+    case VCPU_RUNNING:
+    case VCPU_BLOCKED:
+        return PSCI_AFF_LEVEL_ON;
+    case VCPU_OFF:
+    default:
+        return PSCI_AFF_LEVEL_OFF;
+    }
 }
 
 /* PSCI_FEATURES: SUCCESS for the calls we implement, else NOT_SUPPORTED. */
@@ -190,13 +229,13 @@ void psci_handle(struct arch_regs *regs)
         regs->x[0] = PSCI_TOS_NOT_PRESENT_MP;
         break;
     case PSCI_CPU_OFF:
-        psci_power_down("CPU_OFF");        /* no return */
+        psci_cpu_off_self();                /* no return */
         break;
     case PSCI_SYSTEM_OFF:
-        psci_power_down("SYSTEM_OFF");      /* no return */
+        psci_system_off_vm("SYSTEM_OFF");   /* no return */
         break;
     case PSCI_SYSTEM_RESET:
-        psci_power_down("SYSTEM_RESET");    /* no return */
+        psci_system_off_vm("SYSTEM_RESET"); /* no return */
         break;
     case PSCI_SYSTEM_RESET2_32:
     case PSCI_SYSTEM_RESET2_64:
@@ -206,7 +245,7 @@ void psci_handle(struct arch_regs *regs)
             regs->x[0] = PSCI_RET_INVALID_PARAMETERS;
             break;
         }
-        psci_power_down("SYSTEM_RESET2");   /* no return */
+        psci_system_off_vm("SYSTEM_RESET2"); /* no return */
         break;
     case PSCI_CPU_ON_32:
     case PSCI_CPU_ON_64:
