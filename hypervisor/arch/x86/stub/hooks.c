@@ -29,6 +29,15 @@ s64 cpu_arch_power_on(u32 pcpu)
     return -1;
 }
 
+void cpu_arch_idle(void)
+{
+}
+
+void cpu_arch_kick(u32 pcpu)
+{
+    (void)pcpu;
+}
+
 void vm_arch_init(struct vm *m)
 {
     (void)m;
