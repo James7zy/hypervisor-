@@ -8,7 +8,13 @@
 
 **Tech Stack:** freestanding C11、host gcc 单测（sched_q 纯逻辑 RED→GREEN）、QEMU gate（ctxsw 转绿并进聚合，场景 7→8）。
 
-**Spec:** `docs/superpowers/specs/2026-10-30-m11-vcpu-scheduler-design.md` §5 片 B（本片 = 其拆分预案的 **B1**：sched_q + 调度循环 + WFI 让出，detector 只断言 GPR/ELR 级；**B2** = EL1 全量 + vGIC/vtimer 协议 + block/wake，B1 关卡②后另写 plan。**拆分决定提请关卡①裁定**）
+**Spec:** `docs/superpowers/specs/2026-10-30-m11-vcpu-scheduler-design.md` §5 片 B
+
+> **关卡①:** 2026-10-31 APPROVE_WITH_CHANGES（R1–R6 已并入）。裁定：B1/B2 照切确认；
+> D12 命名终裁 `common/sched/{sched.c,sched_q.c}` + `include/{sched.h,sched_q.h}`，extern
+> 队列窥视移除；vgic_save/restore 允许 B1 复用（仅同 pCPU、无远端发布者的共享 profile；
+> vgic.c 两处过期注释随改）；ADR 分工确认（0018=B1 协作先行，0019=B2 两层划分）；
+> B2 的 block/wake 可能吸收 YIELD 边——B2 plan 时再裁（ADR-0018 记待决）。（本片 = 其拆分预案的 **B1**：sched_q + 调度循环 + WFI 让出，detector 只断言 GPR/ELR 级；**B2** = EL1 全量 + vGIC/vtimer 协议 + block/wake，B1 关卡②后另写 plan。**拆分决定提请关卡①裁定**）
 
 ## Global Constraints
 
@@ -42,19 +48,18 @@
 **Interfaces:**
 - Produces:
 ```c
-#define SCHED_Q_MAX 8                    /* 每 pCPU 队列容量（= VCPUS 上限粒度，够 1:N 数据） */
+#define SCHED_Q_MAX 8                    /* 每 pCPU 队列容量；sched.h 侧 _Static_assert 绑 NR_VMS*VCPUS_PER_VM */
 struct sched_q { struct vcpu *slots[SCHED_Q_MAX]; u8 head, count; };
 void    sched_q_init(struct sched_q *q);
-int     sched_q_enqueue(struct sched_q *q, struct vcpu *v);   /* 0 / -1 满 */
+int     sched_q_enqueue(struct sched_q *q, struct vcpu *v);   /* 0 / -1 满；已在队幂等返 0 */
 struct vcpu *sched_q_dequeue(struct sched_q *q);              /* 头部弹出，空返 NULL */
-struct vcpu *sched_q_peek(const struct sched_q *q);           /* 看头不弹 */
-int     sched_q_remove(struct sched_q *q, struct vcpu *v);    /* 0 / -1 不在 */
 bool    sched_q_empty(const struct sched_q *q);
-u32     sched_q_count(const struct sched_q *q);
 ```
-- 语义：FIFO；enqueue 已在队列的 vCPU 返回 0 幂等（计数不变）——防 yield 路径重复入队。RR = dequeue+enqueue 或 peek+rotate，由 sched.c 组合，sched_q 只做队列原语。
+- 关卡① R6 裁定：API 收到 init/enqueue/dequeue/empty（peek/remove/count 无消费者；remove
+  跨 pCPU 无锁不安全——被扫掉的 vCPU 用 pick 侧 skip 处置，B2 随锁再议）。FIFO；幂等
+  enqueue 防重复入队。RR = dequeue + 再 enqueue，由 sched.c 组合。
 
-- [ ] **Step 1** 写失败测试：init 后 empty/count==0；enqueue 三个伪指针（&(u64[]){1,2,3} 类 opaque）顺序 dequeue 一致；dequeue 空返 NULL；enqueue 重复同指针幂等；remove 中间元素保序；容量上限第 9 个 -1。接线三处。**RED commit**（header+tests+wiring，无 .c 实现，链接失败）。
+- [ ] **Step 1** 写失败测试：init 后 empty；enqueue 三个伪指针（`(struct vcpu *)(uintptr_t)0x10` 类 opaque）顺序 dequeue 一致；dequeue 空返 NULL；enqueue 重复同指针幂等（dequeue 顺序不乱）；容量上限第 9 个 -1。接线三处（含依赖行 sched_q.h）。**RED commit**（header+tests+wiring，无 .c 实现，链接失败）。
 - [ ] **Step 2** 最小实现（环形/线性皆可，count==SCHED_Q_MAX 即满）。**GREEN commit**（含 hv-objs 接入，交叉侧暂无调用者）。
 - [ ] **Step 3** `make test` 全绿回归。
 
@@ -76,23 +81,59 @@ u32     sched_q_count(const struct sched_q *q);
 - Modify: `hypervisor/common/vm/vm.c`（vm_init：每 RUNNABLE vCPU 按 `vcpu_pcpu[]` 入对应队列；两处运行循环的 `v = 固定` 换 `v = sched_pick(pcpu)`；LOAD 分叉 launched）、`hypervisor/arch/arm64/cpu/secondary.c`（同上分叉）、`hypervisor/arch/arm64/vmexit/vpsci.c`（CPU_ON：授权后 `sched_enqueue(target)` 先于状态发布，再 kick）、`hypervisor/Makefile`（hv-objs += sched.o）
 
 **Interfaces:**
-- Produces（sched.h，唯一公开面收窄）:
+- Produces（include/sched.h，唯一公开面；关卡① D12 终裁命名）:
 ```c
-void sched_init(void);                          /* vm_init 末尾建 NR_CPUS 个队列并装填 */
-struct vcpu *sched_pick(u32 pcpu);              /* 空→NULL；非空轮转出下一个（dequeue） */
-void sched_yield_cur(void);                     /* 当前 vCPU 重新入队（RUNNABLE 侧已由调用方置态） */
-void sched_enqueue(struct vcpu *v);             /* CPU_ON/wake 用（幂等） */
-extern struct sched_q sched_q[NR_CPUS];         /* 仅 sched_q 测试窥视用可省——保持私有更佳，改用计数断言 */
+void          sched_init(void);              /* vm_init 末尾建 NR_CPUS 队列并装填 RUNNABLE vCPU */
+struct vcpu  *sched_pick(u32 pcpu);          /* 轮转出下一个（锁内 dequeue）；空→NULL */
+void          sched_yield_cur(void);         /* 当前 vCPU 重新入队（RUNNABLE 已由调用方置态） */
+void          sched_enqueue(struct vcpu *v); /* CPU_ON/wake 用（幂等）；锁内 */
 ```
-- `sched.c` 可 include vm.h/percpu/printk（粘合层不受 host 约束）。
+- `sched.c` 可 include vm.h/percpu/printk/spinlock（粘合不受 host 约束）；**每队列一把
+  spinlock**（关卡① R4：CPU_ON 跨 pCPU enqueue 与对端 dequeue 并发；两调用点中断天然掩蔽
+  满足 spinlock.h 前提）。sched_q.c 保持无锁纯原语（host 可测）。`sched.h` include vm.h 并
+  `_Static_assert(NR_VMS * VCPUS_PER_VM <= SCHED_Q_MAX)`（静默 -1 = 丢 vCPU，编译期拦）。
 
-- [ ] Step 1 sched_init/pick/yield/enqueue 实现 + 两循环改造 + CPU_ON 入队。1:1 下 pick 恒返回该 pCPU 唯一 vCPU（yield 让出自己→重新入队→pick 又是自己→resume 再入）——**行为等价性由此构造保证**。
-- [ ] Step 2 `make test` 全绿（7 场景 = 回归网）+ host 85；commit。
+**两运行循环的新形状（关卡① R1/R2/R3，B1 的承重构造）**：
+
+```c
+struct vcpu *prev = NULL;
+for (;;) {
+    struct vcpu *v = sched_pick(my_pcpu);
+    if (!v) { cpu_arch_idle(); continue; }            /* 动态队列取代 idle-forever 初始化分支 */
+    if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
+        continue;                                     /* 被扫掉的：skip 续 pick，不得 OFF-wait 包住 */
+    if (v != prev) {
+        if (prev != NULL && prev->state == VCPU_RUNNABLE)
+            vcpu_arch_put(prev);                      /* 唯一 put 点：真实换下活体才保存 */
+        percpu[my_pcpu].cur_vcpu = v;                 /* 每次 pick 后必写（异常 asm 取帧入口） */
+        if (v->state == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->launched) vcpu_arch_resume(v);          /* 已启动：仅 vgic_restore */
+        else { vcpu_arch_load(v); v->launched = true; } /* fresh-boot：清白 + EL1 中和 */
+        if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+            continue;                                  /* 扫掠竞态：弃入 */
+    } else {
+        percpu[my_pcpu].cur_vcpu = v;                  /* 自选：不 put 不 resume，直入 */
+    }
+    prev = v;
+    vcpu_arch_run(v);
+    /* 出口三类：timer（回环重 pick，可能同 vCPU 直入）/ CPU_OFF-SYSTEM_OFF（hv_restore
+       解栈回环，此时解栈者 state=OFF，下一轮 pick 对其 skip）/ WFI 让出（同解栈，state
+       已 RUNNABLE 且已 enqueue）*/
+}
+```
+- **1:1 行为等价由构造成立**：独占队列 yield 后 pick 仍返回自己 → 走 else 分支零 ICH 触碰
+  （与今日放行逐指令等价）；put/resume 被关进无远端发布者的共享 profile（vgic 复用裁定）。
+- CPU_ON：`sched_enqueue(target)` 先于状态发布 + dsb + kick（Review Focus #5 序不变）。
+
+- [ ] Step 1 sched.c 四函数（含队列锁与 _Static_assert）+ 两循环按上形状改造 + CPU_ON 入队
+  + 删除 secondary.c 的 idle-forever 初始化分支（cur_vcpu 初值 NULL 保留）。
+- [ ] Step 2 `make test` 全绿（7 场景 = 回归网，1:1 等价的实证）+ host 85；commit。
 
 ### Task 4: WFI 让出路径
 
 **Files:**
-- Modify: `hypervisor/arch/arm64/vmexit/vmexit.c`（`handle_wfx` 拆分：WFE 维持放行；WFI → `elr += 4` 保持 + `sched_yield_cur()`（Task 3 接口）：当前 vCPU 经 `VCPU_EV_YIELD` 置 RUNNABLE + enqueue + `hv_restore()` 解栈）、`hypervisor/include/vcpu_state.h` 与 `common/vm/vcpu_state.c`（**新增事件 `VCPU_EV_YIELD`：RUNNING→RUNNABLE**，协作让出专用边；host 测试矩阵同 commit 更新为 RED→GREEN 补对）
+- Modify: `hypervisor/arch/arm64/vmexit/vmexit.c`（`handle_wfx` 拆分：WFE 维持放行；WFI → `elr += 4` 保持 + `step(VCPU_EV_YIELD)`：成功 → `sched_yield_cur()` + `hv_restore()` 解栈；**失败（在途中被扫 OFF）→ 不 enqueue 直接 hv_restore**（关卡① R3：死 vCPU 不得以 trap 循环永转）。本 handler 不调 put——put 只在循环的真实切换点，关卡① R1）、`hypervisor/include/vcpu_state.h` 与 `common/vm/vcpu_state.c`（**新增事件 `VCPU_EV_YIELD`：RUNNING→RUNNABLE**，协作让出专用边；host 测试矩阵同 commit 更新为 RED→GREEN 补对）
 
 - [ ] Step 1 状态机加 YIELD 边：host 测试先 RED（新断言合法/非法边）→ GREEN（两 commit）。
 - [ ] Step 2 WFI 分支接 yield + 解栈；`make test` 全绿（现 guest 群不共享 pCPU，WFI 让出后 pick 回自己 = 与放行等价，7 场景仍绿）；commit。
@@ -100,8 +141,7 @@ extern struct sched_q sched_q[NR_CPUS];         /* 仅 sched_q 测试窥视用�
 ### Task 5: ctxsw 用例转绿进聚合（场景 7→8）
 
 **Files:**
-- Modify: `tests/svm/cases/ctxsw.c`（重写为 GPR 级轮转断言：vCPU0 设 x19-x28 canary + 自有栈标记 → CPU_ON vCPU1（共享 pCPU0）→ vCPU1 打印并 WFI 让出 → 轮转 N 轮双方计数递增 → 终验 x19-x28 canary 不变；EL1 盖章段注释降级为"B2 扩展"，VBAR/CPACR/TPIDRRO 断言**移除**——B1 切换不换 EL1 sysreg，共享 profile 的两 vCPU 各自重设这些寄存器属预期）、`tests/svm/expect/ctxsw.txt`（轮转行、双方 alive 计数、canary 行）、`Makefile`（`test` 聚合 += `test-qemu-ctxsw`；目标注释更新"已于 B1 转绿"）
-- vCPU1 侧：入口 stub 自设 SP 后进入 C 体，循环 `{ print "CTXSW: vCPU1 round %d"; wfi; }`；vCPU0 同样 `{ print round; wfi; }` N 轮后校验 canary 并 done。
+- Modify: `tests/svm/cases/ctxsw.c`（重写为 GPR 级轮转断言：vCPU0 设 x19-x28 canary → CPU_ON vCPU1（共享 pCPU0）→ 双方各自循环 `{打印本轮定长标记行; wfi}`，**轮数用常量边界**（如各 8 轮后 vCPU0 汇总，弃 CNTVCT 时间边界）→ 终验 x19-x28 canary 不变；EL1 盖章段注释降级为"B2 扩展"，VBAR/CPACR/TPIDRRO 断言**移除**——B1 切换不换 EL1 sysreg，两 vCPU 各自重设属预期）、`tests/svm/expect/ctxsw.txt`（**定长固定串**期望行——run_svm_test.sh 为 grep -qF，"round %d" 不能作期望行；改为每轮一行的固定标记如 `CTXSW: r0`/`CTXSW: r1`…各取首尾轮 + canary 行 + done）、`hypervisor/common/vm/vm_configs.c`（CONFIG_SVM_SHARED_PCPU 注释追加关卡① R5 边界：本 profile 用例不得启用 vGIC、不得编程 CNTV、保持 DAIF 掩蔽；**B2 协议落地前禁止共享跑 Linux**）、`Makefile`（`test` 聚合 += `test-qemu-ctxsw`；目标注释更新"已于 B1 转绿"）
 
 - [ ] Step 1 重写用例与期望 → `make test-qemu-ctxsw` ALL PASS（真实轮转 = B1 的头条声明可执行化）。
 - [ ] Step 2 `make test` 全绿（**8 场景**）+ host；commit。
