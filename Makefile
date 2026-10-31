@@ -173,10 +173,9 @@ test-qemu-vspi:
 	SVM_BIN=$(VSPI_BUILD_DIR)/vspi/vspi-vm0.bin \
 	SVM_BIN2=$(VSPI_BUILD_DIR)/vspi/vspi-vm1.bin sh tests/run_vspi_test.sh
 
-# M11 slice A ctxsw detector: EXPECTED RED until slice B's scheduler — the
-# shared-affinity profile runs only the lowest vCPU, so the case asserts the
-# failure itself. Deliberately NOT in the `test` aggregate; turns green
-# (and joins the aggregate) in slice B.
+# M11 ctxsw detector: cooperative round-robin on the shared-affinity
+# profile. Controlled-red through slice A; GREEN and in the `test`
+# aggregate since slice B1 (GPR-level; EL1-sysreg stamps join in B2).
 CTXSW_BUILD_DIR := build/test-ctxsw
 test-qemu-ctxsw:
 	$(MAKE) BUILD_DIR=$(CTXSW_BUILD_DIR) HV_GUEST=svm_ctxsw all svm
@@ -312,7 +311,7 @@ test-x86-stub:
 	        CONFIG=hypervisor/arch/x86/configs/stub_defconfig \
 	        BUILD_DIR=$(X86_BUILD_DIR) all
 
-test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi
+test: check-arch-boundary test-x86-stub check-offsets check-offsets-target test-qemu test-qemu-vtimer test-qemu-traps test-qemu-psci test-qemu-dual test-qemu-shell test-qemu-vspi test-qemu-ctxsw
 
 run: $(ELF) $(GUEST_DTB) $(GUEST_DTB1)
 	./scripts/run-qemu.sh

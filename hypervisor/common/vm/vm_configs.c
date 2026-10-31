@@ -21,8 +21,12 @@ const struct vm_config vm_configs[NR_VMS] = {
      * lowest (vmi,idx) vCPU only — vCPU1 is CPU_ON-able but never picked,
      * which is exactly the controlled red tests/svm/cases/ctxsw.c asserts.
      * Slice-B note: sgi_pending[] is keyed by pCPU, so vCPU1-aimed vSGIs
-     * would reach vCPU0 under this profile (accepted inside the
-     * sharing-not-executed boundary; gate-1 A7).
+     * would reach vCPU0 under this profile (B2 decision).
+     *
+     * B1 boundary (gate-1 R5): cases on this profile must NOT use the vGIC,
+     * must NOT program CNTV, and keep DAIF masked — the runtime save/restore
+     * protocol (shadow vs live LR, wake merge) lands in B2; until then
+     * sharing must not run Linux or any interrupt-driven guest.
      */
     [0] = { .vmid = 1, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM_MEM_BASE, .mem_size = BOARD_SVM_MEM_SIZE,

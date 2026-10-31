@@ -1,8 +1,10 @@
 [hv] Hello from EL2
 SVM: launching VMID=
 [hv] PSCI: CPU_ON vCPU1 -> ON_PENDING (pCPU0)
-CTXSW: EL1 stamps written (VBAR/CPACR/TPIDR/TPIDRRO)
+CTXSW: stamps written (x19-x28)
 CTXSW: CPU_ON(vCPU1) == SUCCESS
-CTXSW: vCPU1 never ran - no scheduler yet (slice A controlled red)
-CTXSW: EL1 stamps intact (clobber check begins at slice B)
+CTXSW: v1
+CTXSW: r0
+CTXSW: x19-x23 stamps intact
+CTXSW: x24-x28 stamps intact
 SVM HVC: done (x1=0x0)
