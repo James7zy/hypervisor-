@@ -84,13 +84,21 @@ static volatile unsigned char vcpu1_stack[0x4000] __attribute__((aligned(16), us
 #define STAMP(i) ((unsigned long)0xD00D0000UL + (i))
 
 static volatile int t1_done;
+static volatile int v1_final;
 
 static void vcpu1_main(void) __attribute__((used));
 static void vcpu1_main(void)
 {
     for (;;) {
         if (turn >= ROUNDS) {
-            /* GPR rounds over: timer phase. My deadline is the LONG one. */
+            /* GPR rounds over: stamp MY (different) EL1 values first — the
+             * switch must return each vCPU its own. */
+            __asm__ volatile(
+                "msr tpidr_el1, %0\n\tmsr tpidrro_el0, %1\n\tmsr contextidr_el1, %2\n\t"
+                "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
+                ::"r"(0xF1A00000UL + 0), "r"(0xF1A00000UL + 1), "r"(0xF1A00000UL + 2),
+                  "r"(0xF1B00000UL), "r"(0xF1C00000UL), "r"(0xF1D00000UL));
+            /* Timer phase: my deadline is the LONG one. */
             svm_gic_el1_init();
             arm_my_timer(20UL);            /* vCPU0 armed 1/50 */
             if (rotate_until(&t1_done, 1)) {
@@ -99,8 +107,20 @@ static void vcpu1_main(void)
                 check(ctl == 0UL, "CTXSW: t1 timer is MY disarmed one\n");
                 svm_puts("CTXSW: t1 timer fired\n");
             }
+            {
+                unsigned long a, b, c, d, e, f;
+                __asm__ volatile(
+                    "mrs %0, tpidr_el1\n\tmrs %1, tpidrro_el0\n\tmrs %2, contextidr_el1\n\t"
+                    "mrs %3, ttbr0_el1\n\tmrs %4, mair_el1\n\tmrs %5, cpacr_el1"
+                    : "=r"(a), "=r"(b), "=r"(c), "=r"(d), "=r"(e), "=r"(f));
+                check(a == 0xF1A00000UL && b == 0xF1A00001UL && c == 0xF1A00002UL,
+                      "CTXSW: v1 tpidr/ro/contextidr stamps intact\n");
+                check(d == 0xF1B00000UL && e == 0xF1C00000UL && f == 0xF1D00000UL,
+                      "CTXSW: v1 ttbr0/mair/cpacr stamps intact\n");
+            }
+            v1_final = 1;
             for (;;)
-                __asm__ volatile("wfi");   /* park: vCPU0 concludes */
+                __asm__ volatile("wfi");   /* silent park: vCPU0 concludes */
         }
         svm_puts("CTXSW: v1\n");
         __asm__ volatile("wfi");           /* yield to vCPU0 */
@@ -135,6 +155,16 @@ void SVM_ENTRY _start(void)
     register unsigned long r27 asm("x27") = STAMP(8);
     register unsigned long r28 asm("x28") = STAMP(9);
 
+    /* EL1 stamps (B2 T4): inert data registers get FULL-VALUE canaries;
+     * MMU-off makes TTBR0/MAIR stampable; CPACR is inert without FP use.
+     * VBAR is NOT stamped — MMIO prints are stage-2 faults (EL2 vectors),
+     * but an EL1 exception under a stamped VBAR would vector into garbage
+     * (gate-1 A2). */
+    __asm__ volatile(
+        "msr tpidr_el1, %0\n\tmsr tpidrro_el0, %1\n\tmsr contextidr_el1, %2\n\t"
+        "msr ttbr0_el1, %3\n\tmsr mair_el1, %4\n\tmsr cpacr_el1, %5"
+        ::"r"(0xE1A00000UL + 0), "r"(0xE1A00000UL + 1), "r"(0xE1A00000UL + 2),
+          "r"(0xE1B00000UL), "r"(0xE1C00000UL), "r"(0xE1D00000UL));
     svm_puts("CTXSW: stamps written (x19-x28)\n");
 
     unsigned long r = svm_hvc4(PSCI_CPU_ON_64, 1UL,
@@ -179,8 +209,19 @@ void SVM_ENTRY _start(void)
     while (fired_count < 2UL)
         __asm__ volatile("wfi");            /* vCPU1's long deadline */
     t1_done = 1;                            /* release vCPU1's waiter */
-    for (volatile int i = 0; i < 20000000; i++)
-        ;                                   /* let vCPU1 finish its check */
+    while (!v1_final)
+        __asm__ volatile("wfi");            /* rotate while vCPU1 checks */
+    {
+        unsigned long a, b, c, d, e, f;
+        __asm__ volatile(
+            "mrs %0, tpidr_el1\n\tmrs %1, tpidrro_el0\n\tmrs %2, contextidr_el1\n\t"
+            "mrs %3, ttbr0_el1\n\tmrs %4, mair_el1\n\tmrs %5, cpacr_el1"
+            : "=r"(a), "=r"(b), "=r"(c), "=r"(d), "=r"(e), "=r"(f));
+        check(a == 0xE1A00000UL && b == 0xE1A00001UL && c == 0xE1A00002UL,
+              "CTXSW: v0 tpidr/ro/contextidr stamps intact\n");
+        check(d == 0xE1B00000UL && e == 0xE1C00000UL && f == 0xE1D00000UL,
+              "CTXSW: v0 ttbr0/mair/cpacr stamps intact\n");
+    }
     svm_puts("CTXSW: both timers fired in their owners\n");
 
     svm_done(0);

@@ -20,3 +20,7 @@ CTXSW: t1 timer is MY disarmed one
 CTXSW: t1 timer fired
 CTXSW: both timers fired in their owners
 SVM HVC: done (x1=0x0)
+CTXSW: v0 tpidr/ro/contextidr stamps intact
+CTXSW: v0 ttbr0/mair/cpacr stamps intact
+CTXSW: v1 tpidr/ro/contextidr stamps intact
+CTXSW: v1 ttbr0/mair/cpacr stamps intact
