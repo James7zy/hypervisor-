@@ -21,7 +21,7 @@
 #include <printk.h>
 #include <vm.h>
 #include <vm_config.h>
-#include <sched.h>   /* struct vm_config (vcpu_pcpu[]) */
+#include <sched.h>          /* sched_wake (M11 B2) */
 #include <percpu.h>
 #include <spinlock.h>
 #include <arch/sysreg.h>

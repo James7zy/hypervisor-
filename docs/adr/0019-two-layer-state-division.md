@@ -69,5 +69,18 @@ flowchart TB
   vCPU；per-vCPU LR 投递的触发 = 首个 intra-VM 共享 SGI 消费者（片 C 的 2×2-on-2 每
   VM 仍 1:1，不受影响）。
 - tlbi vmalle1 为保守全刷；免失效（ASID/VMID tag）条件 = RK3588 实测成本 + §8.3。
+- **idle 窗口残余竞态（测试专家 N1，2026-10-31 实证分析）**：窗口为"解掩蔽→复查队列→
+  wfi→掩蔽"；已 pending 的唤醒会被复查观察到（闭合主情形），但"复查通过→wfi 执行"之间
+  完成两轮 handler（唤醒+自 kick 皆被消费）的微秒级窗口仍可让非空队列沉睡——下个无关
+  中断自愈。硬化触发条件：首个在低负载下观察到 idle 丢失唤醒的场景（skip-flag 方案
+  在案）。
+- **CPU_OFF 不存 vtimer/vGIC（N2）**：带未掩蔽 armed timer 的 CPU_OFF + 空闲期过期 →
+  PPI 注入已 OFF vCPU 的 LR0 且物理线留 Active，re-ON 时被 vgic_init 清空且 HW 链接断链
+  ——该 pCPU 的 vtimer PPI 可能死亡。触发：首个 hotplug-off 前不掩 timer 的 guest。
+- **CPU_SUSPEND 恒走 block 路径（N5，plan 措辞偏离记录）**：非空队列时未按 put 式
+  quiesce——retention 允许任意中断唤醒 + 共享 timer 缺口条目覆盖误投；首个
+  suspend-with-siblings 消费者出现时复核。
+- **CPU_ON 不刷新 vtimer 影子（N6）**：re-ON 恢复 dying guest 的陈旧 cntv* 值——
+  bounded（re-ON 测试过、Linux 二次编程早），触发：首个 re-ON 后即依赖 timer 语义的用例。
 - 1:1 profile 下 put/resume/EL1 路径**从不执行**（无切换）——ctxsw 是唯一覆盖面，
   手工 Linux gate 在 B2 期间仅为回归网；共享跑 Linux 留待片 C 拓扑翻转后。

@@ -53,14 +53,20 @@ s64 cpu_arch_power_on(u32 pcpu)
 
 void cpu_arch_idle(void)
 {
-    /* Nap with IRQs ON (M11 B2): a pending physical IRQ — the blocked
-     * owner's timer PPI, a kick — must actually be TAKEN so the current-EL
-     * IRQ vector dispatches el2_irq_handler, whose inject path sched_wakes
-     * the blocked vCPU. The pre-B2 masked wfi left the IRQ pending forever
-     * (wfi completes, nothing consumes it, the loop busy-spins). The
-     * unmasked window is exactly this function; the caller runs masked. */
-    __asm__ volatile("msr daifclr, #2\n\twfi\n\tmsr daifset, #2"
-                     ::: "memory");
+    /* Bare wfi: the CALLER opened the interrupt window (see sched_loop's
+     * idle branch) and re-checks its wake condition on return. A pending
+     * IRQ completes wfi even if it were masked. */
+    __asm__ volatile("wfi");
+}
+
+void cpu_arch_irq_enable(void)
+{
+    __asm__ volatile("msr daifclr, #2" ::: "memory");
+}
+
+void cpu_arch_irq_disable(void)
+{
+    __asm__ volatile("msr daifset, #2" ::: "memory");
 }
 
 void cpu_arch_kick(u32 pcpu)

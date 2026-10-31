@@ -21,6 +21,10 @@
     .section .text._start, "ax"
     .globl _start
 _start:
+    msr     spsel, #1              /* SP_EL2: current-EL exceptions (M11 B2's
+                                     * idle IRQ vector) stack on our own SP;
+                                     * an EL2t entry would route them to the
+                                     * SP_EL0 panic slot silently */
     /* Defensive: only the boot core should reach _start. Under QEMU PSCI the
      * secondaries are powered OFF and are later started directly at
      * secondary_entry, not here. Park anything unexpected (Aff0 != 0). */
@@ -93,6 +97,7 @@ boot_core_park:
  */
     .globl secondary_entry
 secondary_entry:
+    msr     spsel, #1              /* see _start */
     mov     x19, x0                 /* x19 = context_id (cpu index), callee-saved */
 
     /* Per-CPU EL2 stack: secondary_stacks + (id+1) * SECONDARY_STACK_SIZE

@@ -94,9 +94,10 @@ void secondary_main(u32 id)
     /*
      * M11 slice A run loop. The pCPU's vCPU comes from the affinity table
      * (vcpu_for_pcpu; NULL = idle pCPU). cur_vcpu is set BEFORE the
-     * authorization wait: defense in depth for any future path that reads
-     * current_vcpu() from EL2 C on this core (the kick branch itself is only
-     * reachable from a Lower-EL exit, which an unauthorized pCPU never takes).
+     * authorization wait: defense in depth for any path that reads
+     * current_vcpu() from EL2 C on this core (the kick branch is reachable
+     * from a Lower-EL exit and, since M11 B2, from the idle window's
+     * current-EL vector — the seeding below is what holds in both).
      */
     struct vcpu *v = vcpu_for_pcpu(id);
     percpu[id].cur_vcpu = v;

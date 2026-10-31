@@ -86,7 +86,18 @@ void sched_loop(u32 pcpu)
         }
         v = sched_pick(pcpu);
         if (v == NULL) {
-            cpu_arch_idle();
+            /* Idle window (M11 B2, tester N1 hardening): unmasks FIRST, then
+             * re-checks the queue — an interrupt that was already pending
+             * lands its handler rounds BETWEEN the unmask and the check, so
+             * the check observes the wake and skips the wfi. (Residual
+             * microsecond window: a wake completing both handler rounds in
+             * the check→wfi gap — recorded in ADR-0019.) No locks held here:
+             * the window is interruptible by design. */
+            cpu_arch_irq_enable();
+            bool again = !sched_queue_empty(pcpu);
+            if (!again)
+                cpu_arch_idle();
+            cpu_arch_irq_disable();
             continue;
         }
         if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)

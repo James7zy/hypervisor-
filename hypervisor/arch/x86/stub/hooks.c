@@ -33,6 +33,14 @@ void cpu_arch_idle(void)
 {
 }
 
+void cpu_arch_irq_enable(void)
+{
+}
+
+void cpu_arch_irq_disable(void)
+{
+}
+
 void cpu_arch_kick(u32 pcpu)
 {
     (void)pcpu;
