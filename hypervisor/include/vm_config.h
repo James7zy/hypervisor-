@@ -13,8 +13,12 @@ struct vm_config {
     size_t    mem_size;
     uintptr_t bootinfo_ipa; /* guest address where the boot info (e.g. a
                                device tree) is visible to the guest      */
-    u8        pcpu_base;   /* first pCPU of the VM's static slot; vCPU i
-                              runs on pCPU pcpu_base + i */
+    /* Per-vCPU pCPU affinity (M11 slice A, D6): vCPU i runs on
+     * vcpu_pcpu[i]. 1:N is legal data (several vCPUs may name one pCPU);
+     * shared EXECUTION arrives with slice B's scheduler — slice A runs the
+     * lowest-(vmi,idx) vCPU of a pCPU and leaves the rest pending. Bounds
+     * are validated at boot in vm_init(). */
+    u8        vcpu_pcpu[VCPUS_PER_VM];
     uintptr_t vuart_base;  /* guest-physical base of the emulated console
                               UART (dm/vuart.c); same in every VM (unified
                               guest address map, ADR-0014) */

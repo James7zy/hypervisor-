@@ -2,7 +2,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (pcpu_base) */
+#include <vm_config.h>   /* struct vm_config (vcpu_pcpu[]) */
 #include <percpu.h>
 #include <arch/psci.h>
 #include "vpsci.h"
@@ -29,7 +29,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
         return PSCI_RET_INVALID_PARAMETERS;
 
     u32 idx  = (u32)aff;                    /* VM-local vCPU index */
-    u32 pcpu = m->config->pcpu_base + idx;  /* physical target     */
+    u32 pcpu = m->config->vcpu_pcpu[idx];   /* physical target     */
     if (percpu[pcpu].online)
         return PSCI_RET_ALREADY_ON;
 
@@ -75,7 +75,7 @@ static u64 psci_cpu_on_guest(struct arch_regs *regs)
 static void psci_kick_vm_other_pcpus(struct vm *m, u32 caller_pcpu)
 {
     for (u32 idx = 0; idx < (u32)VCPUS_PER_VM; idx++) {
-        u32 pcpu = m->config->pcpu_base + idx;
+        u32 pcpu = m->config->vcpu_pcpu[idx];
         if (pcpu == caller_pcpu)
             continue;
         if (percpu[pcpu].online)
@@ -139,7 +139,7 @@ static u64 psci_affinity_info(struct arch_regs *regs)
     if ((target_aff & ~0xFFULL) != 0ULL || aff >= (u64)VCPUS_PER_VM)
         return PSCI_RET_INVALID_PARAMETERS;
 
-    u32 pcpu = m->config->pcpu_base + (u32)aff;
+    u32 pcpu = m->config->vcpu_pcpu[(u32)aff];
     return (percpu[pcpu].online && !m->off) ? PSCI_AFF_LEVEL_ON
                                             : PSCI_AFF_LEVEL_OFF;
 }

@@ -21,31 +21,39 @@ void vm_init(void)
         const struct vm_config *cfg = m->config;
 
         /*
-         * secondary_main derives (VM, vCPU) for a woken pCPU structurally as
-         * (id / VCPUS_PER_VM, id % VCPUS_PER_VM), while vpsci.c/vgic_sgi.c
-         * derive the pCPU for a given (VM, vCPU) as config->pcpu_base + idx.
-         * These two derivations only agree if pcpu_base == vmi * VCPUS_PER_VM
-         * for every configured VM. Nothing else checks that at compile time
-         * (pcpu_base is data, not derived), so verify it here before any
-         * vCPU of this VM can be powered on.
+         * Per-vCPU affinity bounds (M11 slice A, D6): every affinity entry
+         * must name a pCPU that exists, or later code indexes percpu[] / arch
+         * per-pCPU arrays out of bounds. The old compile-time
+         * NR_VMS*VCPUS_PER_VM<=NR_CPUS assert could not express 1:N data.
+         * Duplicates (vCPUs sharing a pCPU) are legal: slice A runs the
+         * lowest-(vmi,idx) one, sharing executes from slice B.
          */
-        if (cfg->pcpu_base != (u8)(vmi * (u32)VCPUS_PER_VM)) {
-            printk("[hv] BUG: vm[%u].config->pcpu_base=%u != %u "
-                   "(vmi*VCPUS_PER_VM); static pCPU mapping violated\n",
-                   (unsigned)vmi, (unsigned)cfg->pcpu_base,
-                   (unsigned)(vmi * (u32)VCPUS_PER_VM));
-            cpu_arch_halt();
+        for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
+            if (cfg->vcpu_pcpu[i] >= (u8)NR_CPUS) {
+                printk("[hv] BUG: vm[%u].config->vcpu_pcpu[%u]=%u >= NR_CPUS=%u\n",
+                       (unsigned)vmi, (unsigned)i,
+                       (unsigned)cfg->vcpu_pcpu[i], (unsigned)NR_CPUS);
+                cpu_arch_halt();
+            }
         }
 
         /* Every vCPU knows its VM and its VM-local index; vcpu[1+]'s regs are
-         * authored later when the guest powers it on (arm64: PSCI CPU_ON). */
+         * authored later when the guest powers it on (arm64: PSCI CPU_ON).
+         * All vCPUs start OFF (zero-init, restated for clarity); vcpu[0] is
+         * then authored straight to RUNNABLE — init-only direct write, not a
+         * vcpu_state_step event: the hypervisor itself is the boot vCPU's
+         * authorizer (the guest is not running yet to issue PSCI for it),
+         * the same way the state machine's [*] --> OFF edge is vm_init's.
+         */
         for (u32 i = 0; i < (u32)VCPUS_PER_VM; i++) {
             m->vcpu[i].owner    = m;
             m->vcpu[i].vcpu_idx = i;
+            m->vcpu[i].state    = VCPU_OFF;
         }
 
         vm_arch_init(m);
         vcpu_arch_reset(&m->vcpu[0], cfg);
+        m->vcpu[0].state = VCPU_RUNNABLE;
 
 #ifdef CONFIG_GUEST_SVM
         printk("SVM: launching VMID=%u entry=0x%lx ram_pa=0x%lx\n",
@@ -105,7 +113,7 @@ void vm_run(void)
      * for debugging/monitoring only.
      */
     for (u32 i = 1; i < (u32)NR_VMS; i++) {
-        u32 p = vm[i].config->pcpu_base;
+        u32 p = vm[i].config->vcpu_pcpu[0];
         s64 r = cpu_arch_power_on(p);
         if (r != 0)
             printk("[hv] VM%u boot pCPU%u CPU_ON failed (%d)\n",

@@ -10,7 +10,7 @@
 #include <types.h>
 #include <printk.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (pcpu_base), for vm_list */
+#include <vm_config.h>   /* struct vm_config (vcpu_pcpu[]), for vm_list */
 #include <vuart.h>
 #include <console.h>   /* console_focus */
 #include <hv_shell.h>
@@ -122,8 +122,9 @@ static void cmd_help(const char *arg)
  * printk has no width specifiers (%4u etc. are unsupported -- see printk.h),
  * so the columns are aligned with literal spaces in the format strings. That
  * is sound only because every value here is a single digit. VM ids and
- * pCPU numbers are both bounded by NR_CPUS (vm.h asserts NR_VMS *
- * VCPUS_PER_VM <= NR_CPUS), a board value, so pinning NR_CPUS covers both.
+ * pCPU numbers are both bounded by NR_CPUS (a board value; affinity entries
+ * are boot-validated < NR_CPUS in vm_init, M11 slice A), so pinning NR_CPUS
+ * covers both.
  */
 _Static_assert(NR_CPUS <= 10, "vm_list aligns columns assuming single-digit pCPU ids");
 
@@ -134,7 +135,17 @@ static void cmd_vm_list(const char *arg)
     printk("  ID  pCPUs  STATE   CONSOLE\n");
     for (u32 i = 0U; i < (u32)NR_VMS; i++) {
         const struct vm *m = &vm[i];
-        u32 first = (u32)m->config->pcpu_base;
+        /* pCPUs column = the affinity table's min..max (the 1:1 tables are
+         * contiguous, so rows render exactly as before M11 slice A; a
+         * shared-affinity table would compress to its own span). */
+        u32 first = (u32)m->config->vcpu_pcpu[0];
+        u32 last  = first;
+        for (u32 j = 1U; j < (u32)VCPUS_PER_VM; j++) {
+            if ((u32)m->config->vcpu_pcpu[j] < first)
+                first = (u32)m->config->vcpu_pcpu[j];
+            if ((u32)m->config->vcpu_pcpu[j] > last)
+                last = (u32)m->config->vcpu_pcpu[j];
+        }
 
         bool focused = (i == console_focus);
         const char *state = (m->off != 0U) ? "halted" : "on";
@@ -146,7 +157,7 @@ static void cmd_vm_list(const char *arg)
         printk("   %u    %u-%u  %s%s\n",
                (unsigned)m->id,
                (unsigned)first,
-               (unsigned)(first + VCPUS_PER_VM - 1U),
+               (unsigned)last,
                state,
                focused ? ((m->off != 0U) ? "  *" : "      *") : "");
     }

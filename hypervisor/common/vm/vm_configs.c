@@ -16,7 +16,7 @@
 const struct vm_config vm_configs[NR_VMS] = {
     [0] = { .vmid = 1, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM_MEM_BASE, .mem_size = BOARD_SVM_MEM_SIZE,
-            .bootinfo_ipa = 0, .pcpu_base = 0,
+            .bootinfo_ipa = 0, .vcpu_pcpu = {0, 1},
             VM_VUART_CONFIG },
 #if CONFIG_NR_VMS > 1
     /*
@@ -30,7 +30,7 @@ const struct vm_config vm_configs[NR_VMS] = {
      */
     [1] = { .vmid = 2, .entry = BOARD_SVM_ENTRY, .mem_base = BOARD_SVM_MEM_BASE,
             .ram_pa = BOARD_SVM2_RAM_PA, .mem_size = BOARD_SVM_MEM_SIZE,
-            .bootinfo_ipa = 0, .pcpu_base = VCPUS_PER_VM,
+            .bootinfo_ipa = 0, .vcpu_pcpu = {2, 3},
             VM_VUART_CONFIG },
 #endif
 };
@@ -40,7 +40,7 @@ const struct vm_config vm_configs[NR_VMS] = {
             .entry = BOARD_LINUX_IMAGE_PA - BOARD_LINUX_RAM_PA + BOARD_LINUX_RAM_IPA,
             .mem_base = BOARD_LINUX_RAM_IPA, .ram_pa = BOARD_LINUX_RAM_PA,
             .mem_size = BOARD_LINUX_RAM_SIZE, .bootinfo_ipa = BOARD_LINUX_DTB_IPA,
-            .pcpu_base = 0,
+            .vcpu_pcpu = {0, 1},
             VM_VUART_CONFIG },
 #if CONFIG_NR_VMS > 1
     /*
@@ -53,7 +53,7 @@ const struct vm_config vm_configs[NR_VMS] = {
             .entry = BOARD_LINUX2_IMAGE_PA - BOARD_LINUX2_RAM_PA + BOARD_LINUX_RAM_IPA,
             .mem_base = BOARD_LINUX_RAM_IPA, .ram_pa = BOARD_LINUX2_RAM_PA,
             .mem_size = BOARD_LINUX_RAM_SIZE, .bootinfo_ipa = BOARD_LINUX_DTB_IPA,
-            .pcpu_base = VCPUS_PER_VM,
+            .vcpu_pcpu = {2, 3},
             VM_VUART_CONFIG },
 #endif
 };

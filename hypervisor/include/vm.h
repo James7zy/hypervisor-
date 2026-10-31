@@ -5,8 +5,8 @@
 #ifndef __ASSEMBLER__
 #include <types.h>
 #include <spinlock.h>
-#include <percpu.h>   /* NR_CPUS, for the NR_VMS/VCPUS_PER_VM static_assert
-                         below (percpu.h forward-declares struct vcpu) */
+#include <vcpu_state.h>
+#include <percpu.h>   /* NR_CPUS (percpu.h forward-declares struct vcpu) */
 #include <arch/vm.h>  /* struct arch_regs, struct vcpu_arch */
 
 /* Compile-time VM count. 1 until M5 slice 3; the Makefile overrides it
@@ -15,27 +15,10 @@
 #define CONFIG_NR_VMS 1
 #endif
 #define NR_VMS       CONFIG_NR_VMS
-#define VCPUS_PER_VM 2   /* static 2-vCPU VMs; must fit NR_CPUS, see below */
-
-/*
- * secondary_main derives a woken pCPU's (VM, vCPU) purely from its pCPU id
- * (id / VCPUS_PER_VM, id % VCPUS_PER_VM); vm_configs[]/pcpu_base must agree
- * with that structural mapping (see vm_init's boot-time check in vm.c). This
- * only makes sense if every VM's static pCPU slot fits within the physical
- * machine, i.e. NR_VMS * VCPUS_PER_VM <= NR_CPUS -- catch a mismatch (e.g. a
- * future CONFIG_NR_VMS bump without a matching NR_CPUS bump) at compile time
- * instead of silently indexing percpu[] or arch per-pCPU arrays out of bounds.
- *
- * NR_CPUS (percpu.h) is the board's physical core count (board.mk; 4 on
- * qemu_virt: -smp 4 in run-qemu.sh, 2 VMs x 2 vCPUs). It is
- * intentionally NOT required to equal NR_VMS * VCPUS_PER_VM: single-VM build
- * profiles (HV_GUEST=svm, NR_VMS=1, the pre-slice-3 SVM regression
- * tests) only ever power on pCPUs 0/1 -- pCPUs 2/3 are simply never woken
- * under those profiles, so under-using the physical core budget is safe; the
- * dangerous direction (a VM's slot overrunning NR_CPUS) is what this guards.
- */
-_Static_assert(NR_VMS * VCPUS_PER_VM <= NR_CPUS,
-               "NR_VMS * VCPUS_PER_VM must fit within NR_CPUS");
+#define VCPUS_PER_VM 2   /* static 2-vCPU VMs; affinity must fit NR_CPUS
+                            (validated per entry at boot in vm_init — the
+                            compile-time NR_VMS*VCPUS_PER_VM assert was
+                            replaced by that check, M11 slice A D6) */
 
 struct vm;
 
@@ -47,6 +30,10 @@ struct vcpu {
     struct vm *owner;        /* back-pointer: trap handlers navigate via
                                 current_vcpu()->owner instead of globals */
     u32        vcpu_idx;     /* VM-local vCPU index (the guest's CPU number) */
+    enum vcpu_state state;   /* per-vCPU run state (M11 slice A); appended
+                                after the asm-visible prefix — existing
+                                VCPU_* offsets unchanged (pinned in
+                                tests/check_offsets_target.c) */
 };
 
 struct vm_config;

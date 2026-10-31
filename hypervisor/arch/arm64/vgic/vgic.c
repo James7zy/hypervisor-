@@ -80,7 +80,7 @@ static void vgic_set_spi_shadow_locked(struct vcpu *vcpu, u32 intid)
 void vgic_inject_spi(struct vcpu *target, u32 intid)
 {
     bool local = target == current_vcpu();
-    u32 pcpu = target->owner->config->pcpu_base + target->vcpu_idx;
+    u32 pcpu = target->owner->config->vcpu_pcpu[target->vcpu_idx];
 
     spin_lock(&target->arch.spi_lock);
     vgic_set_spi_shadow_locked(target, intid);

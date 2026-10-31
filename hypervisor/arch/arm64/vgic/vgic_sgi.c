@@ -20,7 +20,7 @@
 #include <board.h>
 #include <printk.h>
 #include <vm.h>
-#include <vm_config.h>   /* struct vm_config (pcpu_base) */
+#include <vm_config.h>   /* struct vm_config (vcpu_pcpu[]) */
 #include <percpu.h>
 #include <spinlock.h>
 #include <arch/sysreg.h>
@@ -42,8 +42,8 @@ static struct spinlock sgi_lock = SPINLOCK_INIT;
 /*
  * Trap path (sender pCPU): decode the guest's ICC_SGI1R_EL1 value, mark the
  * target vCPUs' pending bitmaps, and kick each target pCPU. Targets are
- * VM-local vCPU indices; the pCPU slot is pcpu_base + idx (static 1:1
- * pinning, no scheduler).
+ * VM-local vCPU indices; the pCPU slot comes from the affinity table
+ * vcpu_pcpu[idx] (1:1 data, no scheduler yet).
  */
 void vgic_sgi_trap(u64 sgi1r)
 {
@@ -62,7 +62,7 @@ void vgic_sgi_trap(u64 sgi1r)
         if (!(targets & (1U << idx)))
             continue;
 
-        u32 pcpu = m->config->pcpu_base + idx;   /* physical slot */
+        u32 pcpu = m->config->vcpu_pcpu[idx];    /* physical slot */
 
         spin_lock(&sgi_lock);
         sgi_pending[pcpu] |= (u16)(1U << vintid);
