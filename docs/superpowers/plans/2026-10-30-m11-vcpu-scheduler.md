@@ -34,7 +34,7 @@ flowchart LR
 **DoD**（2026-10-31 完成，片 A 分支 46d2e14..2561dfe，热修=re-ON 时活 EL1 warm reset）:
 - [x] `psci` 用例扩展断言通过（CPU_OFF 后兄弟 vCPU 存活；ON_PENDING 可见）。
 - [x] 现有 7 场景 + 4 静态检查全绿（启动流重排的回归网）。
-- [x] 手工 Linux gate 含 `echo 0 > …/cpu1/online` 断言（offline+re-online 双向 + VM1 关机隔离，13/13）。
+- [x] 手工 Linux gate 含 `echo 0 > …/cpu1/online` 断言（offline+re-online 双向 + VM1 关机隔离，12 项检查全过）。
 - [x] `ctxsw` 红证据（独立目标 ALL PASS）+ 失败模式记入当日报告（Day 3）。
 
 **合并标准（关卡②）**: 上述全绿 + `check_offsets` 补齐 + 新钩子（idle/kick）x86 stub 就位
