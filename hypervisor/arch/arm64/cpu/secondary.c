@@ -151,7 +151,12 @@ void secondary_main(u32 id)
             if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
                 continue;
         } else {
+            /* Self re-pick after a yield: the vCPU is RUNNABLE (the RUNNING
+             * fast path above already handled the no-yield returns) — finish
+             * the re-entry transition. No put/resume: nothing changed. */
             percpu[id].cur_vcpu = v;
+            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                continue;
         }
         prev = v;
         vcpu_arch_run(v);

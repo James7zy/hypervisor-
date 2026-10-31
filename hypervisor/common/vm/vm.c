@@ -182,7 +182,12 @@ void vm_run(void)
             if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
                 continue;                   /* swept mid-load: drop */
         } else {
-            percpu[0].cur_vcpu = v;         /* self re-pick: no put/resume */
+            /* Self re-pick after a yield: the vCPU is RUNNABLE (the RUNNING
+             * fast path above already handled the no-yield returns) — finish
+             * the re-entry transition. No put/resume: nothing changed. */
+            percpu[0].cur_vcpu = v;
+            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                continue;
         }
         prev = v;
         vcpu_arch_run(v);
