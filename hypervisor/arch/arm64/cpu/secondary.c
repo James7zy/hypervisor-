@@ -113,63 +113,6 @@ void secondary_main(u32 id)
      * dynamic queues the idle case (no affined vCPU ever) is just an empty
      * pick — the loop below parks naturally. */
 
-    struct vcpu *prev = NULL;
-
-    for (;;) {
-        /* Scheduler loop (M11 B1) — same shape as vm_run's CPU0 loop; see
-         * the commentary there (gate-1 R1/R2/R3). */
-        struct vcpu *v;
-        if (prev != NULL &&
-            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
-            /* Return-without-yield: see vm_run's commentary (gate-1 R1
-             * correction — a RUNNING vCPU is out of the queue). */
-            vcpu_arch_run(prev);
-            continue;
-        }
-        v = sched_pick(id);
-        if (v == NULL) {
-            cpu_arch_idle();
-            continue;
-        }
-        if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
-            continue;
-        if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_ON_PENDING)
-            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
-        if (v->state != VCPU_RUNNABLE)
-            continue;
-
-        if (v != prev) {
-            if (prev != NULL && prev->state == VCPU_RUNNABLE)
-                vcpu_arch_put(prev);
-            percpu[id].cur_vcpu = v;
-            if (v->launched) {
-                vcpu_arch_resume(v);
-            } else {
-                vcpu_arch_load(v);
-                v->launched = true;
-            }
-            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
-                continue;
-        } else {
-            /* Self re-pick (prev == v): either a yield (RUNNABLE, launched)
-             * or THIS pCPU's previous vCPU re-ON'd after CPU_OFF — same
-             * pointer, completely different entry: the fresh-boot warm
-             * reset (SCTLR=0 + tlbi) is mandatory or the parked context's
-             * MMU-on state survives into the secondary entry (manual-gate
-             * Day-4 crash). Fork on launched, exactly like the switch-in
-             * branch. */
-            percpu[id].cur_vcpu = v;
-            if (v->launched) {
-                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
-                    continue;
-            } else {
-                vcpu_arch_load(v);
-                v->launched = true;
-                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
-                    continue;
-            }
-        }
-        prev = v;
-        vcpu_arch_run(v);
-    }
+    /* The scheduler loop (M11 B2 hoist) — see common/sched/sched.c. */
+    sched_loop(id);
 }

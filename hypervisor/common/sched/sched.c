@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: TBD */
 #include <sched.h>
+#include <cpu.h>            /* cpu_arch_idle */
 #include <vm_config.h>   /* vcpu_pcpu[] affinity */
 #include <sched_q.h>
 #include <percpu.h>
@@ -57,4 +58,73 @@ void sched_enqueue(struct vcpu *v)
     spin_lock(&q_lock[pcpu]);
     (void)sched_q_enqueue(&queues[pcpu], v);   /* idempotent */
     spin_unlock(&q_lock[pcpu]);
+}
+
+/* The one scheduler loop (M11 B2, gate-2 bill 1 hoist): both pCPUs run this.
+ * Shape per the B1 rulings: RUNNING fast path (no-yield unwinds re-enter
+ * prev directly), pick with idle-continue and swept-skip, put(prev) only
+ * on real switch-away, cur_vcpu re-bound every pick, launched fork
+ * (fresh load vs resume) in BOTH the switch-in and self-repick branches.
+ * Callers seed cur_vcpu and run their own bring-up before dropping in. */
+void sched_loop(u32 pcpu) __attribute__((noreturn));
+void sched_loop(u32 pcpu)
+{
+    struct vcpu *prev = NULL;
+
+    for (;;) {
+        struct vcpu *v;
+        if (prev != NULL &&
+            __atomic_load_n(&prev->state, __ATOMIC_ACQUIRE) == VCPU_RUNNING) {
+            /* Unwind without a state change (HC_GUEST_DONE park; a timer
+             * exit erets straight back to the guest and never reaches this
+             * loop): the vCPU is RUNNING and therefore OUT of the queue
+             * (RR dequeues at pick; only yield re-enqueues) — re-enter it
+             * directly. Picking here would see an empty queue and idle
+             * forever. */
+            vcpu_arch_run(prev);
+            continue;
+        }
+        v = sched_pick(pcpu);
+        if (v == NULL) {
+            cpu_arch_idle();
+            continue;
+        }
+        if (v->state != VCPU_RUNNABLE && v->state != VCPU_ON_PENDING)
+            continue;                       /* swept: drop it, pick again */
+        if (__atomic_load_n(&v->state, __ATOMIC_ACQUIRE) == VCPU_ON_PENDING)
+            (void)vcpu_state_step(&v->state, VCPU_EV_PICK);
+        if (v->state != VCPU_RUNNABLE)
+            continue;                       /* lost the race above */
+
+        if (v != prev) {
+            if (prev != NULL && prev->state == VCPU_RUNNABLE)
+                vcpu_arch_put(prev);        /* real switch-away only */
+            percpu[pcpu].cur_vcpu = v;      /* every pick re-binds */
+            if (v->launched) {
+                vcpu_arch_resume(v);
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+            }
+            if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                continue;                   /* swept mid-load: drop */
+        } else {
+            /* Self re-pick (prev == v): yield (RUNNABLE, launched) or this
+             * pCPU's previous vCPU re-ON'd after CPU_OFF — fork on
+             * launched, exactly like the switch-in branch (manual-gate
+             * Day-4 crash). */
+            percpu[pcpu].cur_vcpu = v;
+            if (v->launched) {
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            } else {
+                vcpu_arch_load(v);
+                v->launched = true;
+                if (vcpu_state_step(&v->state, VCPU_EV_LOAD) != 0)
+                    continue;
+            }
+        }
+        prev = v;
+        vcpu_arch_run(v);
+    }
 }
