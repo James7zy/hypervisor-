@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: TBD */
-#include <printk.h>   /* TEMP dbg */
 #include <sched.h>
 #include <cpu.h>            /* cpu_arch_idle */
 #include <vm_config.h>   /* vcpu_pcpu[] affinity */
@@ -98,11 +97,8 @@ void sched_loop(u32 pcpu)
             continue;                       /* lost the race above */
 
         if (v != prev) {
-            if (prev != NULL && prev->state == VCPU_RUNNABLE) {
-                printk(">put%u", (unsigned)prev->vcpu_idx);  /* TEMP dbg */
+            if (prev != NULL && prev->state == VCPU_RUNNABLE)
                 vcpu_arch_put(prev);        /* real switch-away only */
-                printk("<put%u", (unsigned)prev->vcpu_idx);  /* TEMP dbg */
-            }
             percpu[pcpu].cur_vcpu = v;      /* every pick re-binds */
             if (v->launched) {
                 vcpu_arch_resume(v);
