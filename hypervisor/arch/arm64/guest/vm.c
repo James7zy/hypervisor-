@@ -31,6 +31,11 @@ void vcpu_arch_reset(struct vcpu *v, const struct vm_config *cfg)
      *   PC = kernel entry; CPU in EL1h, DAIF masked, MMU/caches off.
      */
     v->regs.x[0] = (u64)cfg->bootinfo_ipa;
+    /* vtimer shadow reset (M11 B2): host timebase offset, timer disarmed
+     * and masked; load programs the live registers from these. */
+    v->arch.cntvoff = 0;
+    v->arch.cntv_ctl = (1ULL << 1);   /* IMASK */
+    v->arch.cntv_cval = 0;
     v->regs.x[1] = 0;
     v->regs.x[2] = 0;
     v->regs.x[3] = 0;
@@ -88,6 +93,14 @@ void vcpu_arch_load(struct vcpu *v)
     __asm__ volatile("isb\n\ttlbi vmalle1\n\tic iallu\n\tdsb nsh\n\tisb"
                      ::: "memory");
 
+    /* Per-vCPU virtual timer (M11 B2): offset from the shadow (fresh boot
+     * has cntvoff=0/ctl=IMASK from reset); program BEFORE vGIC restore so
+     * an armed deadline's PPI paths see the right owner. */
+    SYSREG_WRITE(CNTVOFF_EL2, v->arch.cntvoff);
+    SYSREG_WRITE(CNTV_CVAL_EL0, v->arch.cntv_cval);
+    SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
+    __asm__ volatile("isb");
+
     /* Required order: Stage-2 activate BEFORE vGIC restore. */
     stage2_activate(v);
     vgic_restore(v);
@@ -95,22 +108,30 @@ void vcpu_arch_load(struct vcpu *v)
 
 void vcpu_arch_put(struct vcpu *v)
 {
-    /* M11 B1 minimal body: vGIC shadow only (same-VM switch shares Stage-2/
-     * VTTBR/HCR, and EL1 sysregs are untouched until B2's bulk set). Same
-     * pCPU as the coming vcpu_arch_resume by construction (run loops call
-     * put(prev) immediately before loading next on THIS pCPU). */
+    /* Switch-away save (M11 B2): vGIC shadow + vtimer, save-then-IMASK
+     * (xvisor cpu_vcpu_switch.S precedent: a deadline that passed off-CPU
+     * re-raises the level PPI when the unmasked CTL is restored on resume).
+     * Same pCPU as the coming resume by construction. EL1 bulk: T4. */
     vgic_save(v);
+    v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
+    v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
+    SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl | (1ULL << 1));  /* IMASK */
     __asm__ volatile("dsb ish" ::: "memory");
 }
 
-/* Block-site save (M11 B2, gate-1 R1): the vCPU leaves the CPU WITHOUT a
- * switch happening — same shadow save as put. T3 splits the two: block
- * keeps the physical timer LIVE (it is the only wake source); put quiesces
- * it. A later resume (shared-pCPU wakeup) restores exactly what was saved
- * here. */
+/* Block-site save (M11 B2, gate-1 R1/R2): same shadows as put, but the
+ * physical timer stays LIVE (armed/unmasked as the guest left it) — it is
+ * the blocked vCPU's own wake source: the PPI fires at EL2, inject_hw
+ * targets cur_vcpu == this blocked owner, sched_wake requeues. Known gap
+ * (ponytail:): if this pCPU later runs ANOTHER vCPU, the pending PPI
+ * injects into cur_vcpu = the wrong vCPU — trigger for the EL2 background
+ * timer redesign is the first shared-pCPU scenario relying on its own
+ * timer. */
 void vcpu_arch_block(struct vcpu *v)
 {
     vgic_save(v);
+    v->arch.cntv_cval = SYSREG_READ(CNTV_CVAL_EL0);
+    v->arch.cntv_ctl  = SYSREG_READ(CNTV_CTL_EL0);
     __asm__ volatile("dsb ish" ::: "memory");
 }
 
@@ -118,9 +139,13 @@ void vcpu_arch_resume(struct vcpu *v)
 {
     /* Already-launched vCPU re-entering THIS pCPU: shadow restore only. No
      * vgic_init blanking, no EL1 neutralize — the live guest's GIC state
-     * and EL1 must survive the round trip (B1 boundary: same VM, same
-     * pCPU, no remote shadow publishers — the svm_ctxsw profile; the
-     * general runtime protocol incl. wake merging is slice B2). */
+     * and EL1 must survive the round trip. Runtime protocol (publisher
+     * merge) per T5. The vtimer shadow restores the guest's armed state
+     * (put saved it IMASKed: an expired deadline re-raises on the unmask). */
+    SYSREG_WRITE(CNTVOFF_EL2, v->arch.cntvoff);
+    SYSREG_WRITE(CNTV_CVAL_EL0, v->arch.cntv_cval);
+    SYSREG_WRITE(CNTV_CTL_EL0, v->arch.cntv_ctl);
+    __asm__ volatile("isb");
     vgic_restore(v);
 }
 

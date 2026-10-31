@@ -86,7 +86,8 @@ void secondary_main(u32 id)
 
     /* 5. Virtual timer: same host timebase as CPU0 (CNTVOFF_EL2 = 0), let the
      *    guest read CNTPCT / use the physical timer regs without trapping. */
-    SYSREG_WRITE(CNTVOFF_EL2, 0ULL);
+    /* CNTVOFF_EL2: per-vCPU since M11 B2 — the scheduler loop's
+     * load/resume programs it; nothing global to do here. */
     SYSREG_WRITE(CNTHCTL_EL2, 0x3ULL);
     asm volatile("isb");
 

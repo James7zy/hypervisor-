@@ -40,6 +40,13 @@ struct vcpu_arch {
     bool spi_shadow_pending;
     /* Serializes LR1 payload/pending/live completion; never reset at runtime. */
     struct spinlock spi_lock;
+    /* Per-vCPU virtual-timer shadow (M11 B2, D4; appended tail — keeps the
+     * generic struct vcpu tail's pinned offsets stable). CNTVOFF: per-vCPU
+     * offset written at load/resume. cntv_ctl/cntv_cval: saved at put
+     * (IMASKed) / block (saved, timer left LIVE — gate-1 R2). */
+    u64 cntvoff;
+    u64 cntv_ctl;
+    u64 cntv_cval;
 };
 
 /* Hypervisor callee-saved context, saved by vcpu_arch_run and restored by
