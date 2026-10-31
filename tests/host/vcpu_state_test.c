@@ -20,6 +20,8 @@ void test_vcpu_state(void)
     check_edge(VCPU_RUNNING, VCPU_EV_BLOCK, VCPU_BLOCKED);
     check_edge(VCPU_BLOCKED, VCPU_EV_WAKE, VCPU_RUNNABLE);
     check_edge(VCPU_RUNNING, VCPU_EV_OFF, VCPU_OFF);
+    /* M11 B1: cooperative WFI yield */
+    check_edge(VCPU_RUNNING, VCPU_EV_YIELD, VCPU_RUNNABLE);
     check_edge(VCPU_RUNNABLE, VCPU_EV_OFF, VCPU_OFF);
     check_edge(VCPU_BLOCKED, VCPU_EV_OFF, VCPU_OFF);
     check_edge(VCPU_ON_PENDING, VCPU_EV_OFF, VCPU_OFF); /* SYSTEM_OFF sweep */
@@ -31,18 +33,18 @@ void test_vcpu_state(void)
     };
     static const enum vcpu_event events[] = {
         VCPU_EV_CPU_ON, VCPU_EV_PICK, VCPU_EV_LOAD,
-        VCPU_EV_BLOCK, VCPU_EV_WAKE, VCPU_EV_OFF,
+        VCPU_EV_BLOCK, VCPU_EV_WAKE, VCPU_EV_OFF, VCPU_EV_YIELD,
     };
-    static const int legal[5][6] = {
-        /*            CPU_ON PICK LOAD BLOCK WAKE OFF */
-        /* OFF       */ { 1, 0, 0, 0, 0, 0 },
-        /* ON_PENDING*/ { 0, 1, 0, 0, 0, 1 },
-        /* RUNNABLE  */ { 0, 0, 1, 0, 0, 1 },
-        /* RUNNING   */ { 0, 0, 0, 1, 0, 1 },
-        /* BLOCKED   */ { 0, 0, 0, 0, 1, 1 },
+    static const int legal[5][7] = {
+        /*            CPU_ON PICK LOAD BLOCK WAKE OFF YIELD */
+        /* OFF       */ { 1, 0, 0, 0, 0, 0, 0 },
+        /* ON_PENDING*/ { 0, 1, 0, 0, 0, 1, 0 },
+        /* RUNNABLE  */ { 0, 0, 1, 0, 0, 1, 0 },
+        /* RUNNING   */ { 0, 0, 0, 1, 0, 1, 1 },
+        /* BLOCKED   */ { 0, 0, 0, 0, 1, 1, 0 },
     };
     for (int i = 0; i < 5; i++) {
-        for (int j = 0; j < 6; j++) {
+        for (int j = 0; j < 7; j++) {
             if (legal[i][j])
                 continue;
             enum vcpu_state s = states[i];
