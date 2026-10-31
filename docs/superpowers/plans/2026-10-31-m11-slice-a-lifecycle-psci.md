@@ -1,5 +1,7 @@
 # M11 片 A — vCPU 生命周期与 PSCI 语义 实施计划
 
+> **Status:** Executed（2026-10-31，见合并提交；含热修 2561dfe：re-ON warm-reset）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 每 vCPU 运行状态机落地、`vm_config` per-vCPU 亲和取代结构性 1:1、`vm.off` 删除、PSCI 五函数按 vCPU 语义重写（接口面不变）、全 pCPU 启动 + idle——行为仍等价于 1:1 绑定，为片 B 调度器铺轨。

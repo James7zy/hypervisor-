@@ -31,11 +31,11 @@ flowchart LR
 删除；PSCI 五函数按 vCPU 语义重写（接口面不变）；全 pCPU 启动 + `cpu_arch_idle`；
 `ctxsw` detector 用例以受控红状态落库（独立目标，不进聚合）。
 
-**DoD**:
-- [ ] `psci` 用例扩展断言通过（CPU_OFF 后兄弟 vCPU 存活；ON_PENDING 可见）。
-- [ ] 现有 7 场景 + 4 静态检查全绿（启动流重排的回归网）。
-- [ ] 手工 Linux gate 含 `echo 0 > …/cpu1/online` 断言。
-- [ ] `ctxsw` 红证据（工作树验收操作）+ 失败模式记入当日报告。
+**DoD**（2026-10-31 完成，片 A 分支 46d2e14..2561dfe，热修=re-ON 时活 EL1 warm reset）:
+- [x] `psci` 用例扩展断言通过（CPU_OFF 后兄弟 vCPU 存活；ON_PENDING 可见）。
+- [x] 现有 7 场景 + 4 静态检查全绿（启动流重排的回归网）。
+- [x] 手工 Linux gate 含 `echo 0 > …/cpu1/online` 断言（offline+re-online 双向 + VM1 关机隔离，13/13）。
+- [x] `ctxsw` 红证据（独立目标 ALL PASS）+ 失败模式记入当日报告（Day 3）。
 
 **合并标准（关卡②）**: 上述全绿 + `check_offsets` 补齐 + 新钩子（idle/kick）x86 stub 就位
 + 无对 `vm.off` 的残留引用（grep 零命中，`vm_list` 改从运行状态推导）。
